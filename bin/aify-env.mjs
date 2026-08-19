@@ -45,7 +45,14 @@ const reaper = new Reaper({ registry: { list: () => runner.list(), remove: () =>
 /** What the last sweep could not answer for. Surfaced through /health so it is never a silent leak. */
 let unknown = [];
 
+/**
+ * This environment's own io. The only traffic it can honestly report: it has no visibility into what a
+ * service does elsewhere, and a number here that meant anything wider would be invented.
+ */
+const traffic = { requests: 0, bytesOut: 0 };
+
 const server = createServer(async (request, response) => {
+  traffic.requests += 1;
   let body = null;
   if (request.method === "POST" || request.method === "PUT") {
     const chunks = [];
@@ -61,7 +68,14 @@ const server = createServer(async (request, response) => {
   try {
     result = await handleRequest(
       { method: request.method, path: new URL(request.url, "http://localhost").pathname, body },
-      { runner, readFile: (path) => readFileSync(path, "utf8"), version: VERSION, unknown },
+      {
+        runner,
+        readFile: (path) => readFileSync(path, "utf8"),
+        version: VERSION,
+        unknown,
+        terminals: terminalSupport(),
+        traffic,
+      },
     );
   } catch (failure) {
     // An unexpected throw must not leave a caller hanging, and must not leak a stack to it either.
@@ -75,6 +89,7 @@ const server = createServer(async (request, response) => {
     return;
   }
   const payload = JSON.stringify(result.body);
+  traffic.bytesOut += Buffer.byteLength(payload);
   response.writeHead(result.status, { "content-type": "application/json" });
   response.end(payload);
 });

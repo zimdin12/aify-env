@@ -16,9 +16,18 @@ Default port `8801`. `--port 0` takes an ephemeral one, which is how the tests a
   "status": "healthy",
   "version": "0.6.0",
   "processes": [{ "id": "p1", "pid": 4242, "service": "aify-comms", "terminal": true }],
-  "unknown":   [{ "id": "p7", "pid": 991 }]
+  "unknown":   [{ "id": "p7", "pid": 991 }],
+  "terminals": { "available": false, "reason": "node-pty did not load" },
+  "traffic":   { "requests": 12, "bytesOut": 34567 }
 }
 ```
+
+`terminals` is stated rather than inferred. A consumer that has to work out whether it got a terminal
+from output that looks slightly wrong is a consumer that will get it wrong.
+
+`traffic` is this environment's OWN io. It is the only traffic aify-env can honestly report -- it has
+no visibility into what a service does elsewhere, and a number meaning anything wider would be
+invented.
 
 `unknown` is what the last sweep could not judge. The reaper keeps rather than reaps those, because
 dropping a live process out of the only place that knows about it is worse than the leak — but the
@@ -50,6 +59,17 @@ exactly like any other: a host that runs whatever a known caller asks for is one
 away from running anything, and "it came from aify-comms" says nothing about the file being started.
 
 **A launcher that cannot be read is refused.** "I could not open it" must never become "go ahead".
+
+## How a launcher is actually started
+
+The interpreter is **derived from the file that was just judged**, not from its name. The launchers are
+bash scripts with a shebang; on unix the kernel reads it and the path alone is enough, but on Windows
+nothing does, so a launcher spawned by path simply does not start and the failure arrives as "the agent
+did not start" with no reason attached.
+
+`#!/usr/bin/env bash` resolves to `bash`, since env is the lookup and not the program. The script path
+goes after the interpreter's own arguments and before the launcher's: `bash --managed script` is a
+different command from `bash script --managed`, and one of them is not the agent anybody asked for.
 
 ## `GET /processes`
 

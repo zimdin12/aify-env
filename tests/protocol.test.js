@@ -40,6 +40,8 @@ const deps = (overrides = {}) => ({
   readFile: () => ALLOWED,
   version: "0.6.0",
   unknown: [],
+  terminals: { available: false, reason: "node-pty did not load" },
+  traffic: { requests: 7, bytesOut: 1234 },
   ...overrides,
 });
 
@@ -152,4 +154,20 @@ test("the error body always carries a human reason", async () => {
     const res = await handleRequest(request, deps());
     assert.ok(res.body.error && res.body.error.length > 0, JSON.stringify(request));
   }
+});
+
+test("GET /health reports terminal support, so a consumer need not guess", async () => {
+  // The TUI and the doctor both need it, and inferring it from output that looks slightly wrong is
+  // exactly the guessing this field removes.
+  const res = await handleRequest({ method: "GET", path: "/health" }, deps());
+  assert.equal(res.body.terminals.available, false);
+  assert.match(res.body.terminals.reason, /node-pty/);
+});
+
+test("GET /health reports this environment's OWN traffic", async () => {
+  // The operator asked for a view that shows data moving. This is the only traffic aify-env can
+  // honestly report: its own. It has no visibility into what a service does elsewhere.
+  const res = await handleRequest({ method: "GET", path: "/health" }, deps());
+  assert.equal(res.body.traffic.requests, 7);
+  assert.equal(res.body.traffic.bytesOut, 1234);
 });

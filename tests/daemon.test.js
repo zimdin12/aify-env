@@ -8,6 +8,8 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -112,6 +114,56 @@ test("it SAYS whether terminals are available, at startup", async () => {
   try {
     assert.match(output(), /terminals: (available|UNAVAILABLE)/);
   } finally {
+    await stop(child);
+  }
+});
+
+test("END TO END: a real launcher starts, is owned, and is forgotten when it exits", async () => {
+  // The phase gate in one test. Everything else here checks a rule; this checks that the rules add up
+  // to a process actually running on this machine, started the way a service would start it.
+  const { child, base } = await startDaemon();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-launcher-"));
+  const launcher = path.join(dir, "fake-aify");
+  fs.writeFileSync(launcher, [
+    "#!/bin/bash",
+    'HARNESS_WRAPPER_VERSION="0.6.0"',
+    'echo "launcher-ran"',
+    "sleep 1",
+    "exit 0",
+    "",
+  ].join(String.fromCharCode(10)));
+  fs.chmodSync(launcher, 0o755);
+
+  try {
+    const started = await fetch(`${base}/processes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ service: "aify-comms", launcher: launcher.split(String.fromCharCode(92)).join("/") }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    // Read the body ONCE: a failed assertion that consumes it leaves nothing to parse afterwards.
+    const startedText = await started.text();
+    assert.equal(started.status, 201, startedText);
+    const handle = JSON.parse(startedText);
+    assert.ok(handle.pid > 0, "no pid came back");
+    assert.equal(handle.service, "aify-comms");
+    assert.equal(typeof handle.terminal, "boolean", "the answer must say which path it got");
+
+    // Owned while it runs.
+    const during = await (await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })).json();
+    assert.equal(during.processes.length, 1, "a running process was not owned");
+    assert.equal(during.processes[0].service, "aify-comms");
+
+    // Forgotten when it exits, without anyone calling stop().
+    const deadline = Date.now() + 15_000;
+    let after = during;
+    while (after.processes.length > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      after = await (await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })).json();
+    }
+    assert.equal(after.processes.length, 0, "an exited process is still owned");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
     await stop(child);
   }
 });
