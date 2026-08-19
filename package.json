@@ -1,0 +1,20 @@
+{
+  "name": "aify-env",
+  "version": "0.6.0",
+  "description": "The environment tier: owns processes and PTYs on one host, so more than one service can start agents without two spawners fighting over the same terminals.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "aify-env": "./bin/aify-env.mjs",
+    "aify-doctor": "./bin/aify-doctor.mjs"
+  },
+  "files": [
+    "lib/",
+    "bin/",
+    "VERSION",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}
