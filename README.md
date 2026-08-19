@@ -37,6 +37,30 @@ contract", not "this is safe". Anything that can write to your launcher director
 locally that is already game over, and on a shared host the installed set needs recording at install
 time as well.
 
+## Terminals, and a leak worth knowing about
+
+A real terminal is what lets a console render a TUI, so `aify-env` prefers one and falls back to piped
+stdio. It always says which it got -- on the handle, in `/health`, and at startup -- because a consumer
+left to infer it from output that looks slightly wrong will infer it wrong.
+
+`node-pty` is an OPTIONAL dependency. A host where the native module will not build still gets an
+environment; it gets one without terminals, and the doctor reports that as a real capability loss
+rather than as a shrug.
+
+**Measured, on Windows:** a node-pty child leaves a `PipeWrap` handle alive after it exits. The runner
+calls `destroy()`, which frees the MessagePort and does **not** free that PipeWrap. Two consequences,
+both real:
+
+- any process that spawns a terminal never exits by itself, which is why the real-terminal test runs
+  out of process and why every other runner test names the path it wants instead of taking whatever
+  the machine happens to have installed;
+- a long-running environment accumulates one of these per terminal-backed process. Worth watching if
+  this ever spawns thousands.
+
+`resolveExecutable` exists for the same family of reasons: `child_process` searches PATH and node-pty
+does not, so an unresolved `bash` comes back as `File not found:` and, through the daemon, as a 500
+carrying no clue at all.
+
 ## Status
 
 Early. `lib/allowlist.mjs` is the first piece. The plan it is being built against lives in the

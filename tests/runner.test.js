@@ -6,10 +6,14 @@
 // stdio gives the output and none of the terminal. The runner prefers a PTY and falls back, and it
 // says which it got rather than leaving a caller to infer it from output that looks slightly wrong.
 //
-// UNVERIFIED HERE, DELIBERATELY NOT PAPERED OVER: node-pty is a native module and is not installed in
-// this repo yet, so the REAL terminal path is exercised only through an injected fake below. The fake
-// proves the branch is taken and the wiring is right; it does not prove node-pty works. That belongs
-// in the phase gate as an open item, not in a test that reports green for something nobody ran.
+// EVERY TEST HERE NAMES THE PATH IT WANTS. `openTerminal: null` means pipes, an injected fake means the
+// terminal branch. Leaving it to whether node-pty happens to be installed would make this suite a
+// report about the machine it runs on — and it did: these tests were green before node-pty existed
+// here, and adding it made the file hang.
+//
+// The REAL terminal is verified in pty-real.test.js, out of process. It has to be out of process
+// because a node-pty child on Windows leaves a PipeWrap behind after it exits, so anything that spawns
+// one never exits by itself. That is a real leak, not a test artifact; see README.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -21,7 +25,8 @@ const ALLOWED = 'HARNESS_WRAPPER_VERSION="0.6.0"';
 
 /**
  * A stand-in for what node-pty returns. It proves the runner takes the terminal BRANCH and wires the
- * right callbacks; it proves nothing about node-pty, which is not installed here.
+ * right callbacks, and it exits cleanly, which a real one does not. node-pty itself is verified in
+ * pty-real.test.js.
  */
 function fakeTerminal() {
   const onData = [];
@@ -58,7 +63,7 @@ test("terminalSupport gives a DEFINITE answer, never a shrug", () => {
 });
 
 test("a started process appears in the registry with a pid, and leaves when it exits", async () => {
-  const runner = new Runner();
+  const runner = new Runner({ openTerminal: null });
   const handle = await runner.start(echoSpec("hello"));
   assert.ok(handle.pid > 0, "no pid");
   assert.deepEqual(runner.list().map((p) => p.id), [handle.id]);
@@ -68,7 +73,7 @@ test("a started process appears in the registry with a pid, and leaves when it e
 });
 
 test("output is streamed to a consumer", async () => {
-  const runner = new Runner();
+  const runner = new Runner({ openTerminal: null });
   const chunks = [];
   const handle = await runner.start(echoSpec("streamed-output"));
   handle.onOutput((chunk) => chunks.push(chunk));
@@ -90,7 +95,8 @@ test("a file the allowlist refuses NEVER reaches spawn", async () => {
 });
 
 test("the terminal path is taken when a terminal factory is available", async () => {
-  // Injected, because node-pty is not installed here. This proves the BRANCH, not node-pty.
+  // Injected rather than real: this proves the BRANCH and the callback wiring, deterministically and
+  // without leaving a handle behind. node-pty itself is verified out of process.
   let usedTerminal = false;
   const runner = new Runner({
     openTerminal: () => {
@@ -112,7 +118,7 @@ test("without a terminal the runner still starts, and SAYS it fell back", async 
 });
 
 test("stop() is idempotent and leaves the registry empty", async () => {
-  const runner = new Runner();
+  const runner = new Runner({ openTerminal: null });
   const handle = await runner.start({
     service: "test-service",
     fileText: ALLOWED,
@@ -126,7 +132,7 @@ test("stop() is idempotent and leaves the registry empty", async () => {
 });
 
 test("two services' processes are both owned, and each knows whose it is", async () => {
-  const runner = new Runner();
+  const runner = new Runner({ openTerminal: null });
   const a = await runner.start({ ...echoSpec("a"), service: "aify-comms" });
   const b = await runner.start({ ...echoSpec("b"), service: "aify-graph" });
   const owners = runner.list().map((p) => p.service).sort();
