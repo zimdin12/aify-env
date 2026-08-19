@@ -75,6 +75,37 @@ different command from `bash script --managed`, and one of them is not the agent
 
 `{ "processes": [...] }` — the same rows as `/health`.
 
+## `GET /processes/:id/output`
+
+Server-sent events, one event per chunk:
+
+```
+data: "FIRST-LINE
+"
+
+data: "SECOND-LINE
+"
+```
+
+**A subscriber gets a replay first, then the live feed.** Attaching late is the normal case for a
+console, not the exceptional one: an agent that prints its prompt during startup and gets a viewer a
+second later must not show an empty pane, because that reads as a hung agent and somebody restarts a
+perfectly healthy one.
+
+The replay is **bounded** (64 KB by default, most-recent-first). A process that runs for a week must
+not be holding a week of scrollback in the environment's memory, and truncating from the other end
+would give a console the start of a session and none of what is happening now.
+
+Each chunk is JSON-encoded inside the event, because a newline in the output would otherwise end the
+event early -- a newline is this protocol's frame delimiter.
+
+`404` when there is no such process. That is deliberately distinct from an open stream that is simply
+quiet: one means look elsewhere, the other means wait, and conflating them makes a console look broken
+for a reason nobody can see.
+
+Closing the connection releases the subscription. SSE rather than a socket because a console only ever
+reads: no framing to get wrong, no upgrade handshake, and it reconnects by itself.
+
 ## `DELETE /processes/:id`
 
 `204`, always. Stopping is idempotent: a caller retrying, or a reaper racing one, must not get an error

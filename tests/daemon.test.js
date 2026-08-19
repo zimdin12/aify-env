@@ -167,3 +167,70 @@ test("END TO END: a real launcher starts, is owned, and is forgotten when it exi
     await stop(child);
   }
 });
+
+test("STREAM: a service can watch a process's output over the wire", async () => {
+  // The piece Phase 8 was blocked on. Start, stop and list are request/response; a console is not, and
+  // a delegated spawn without this would carry the process and lose the terminal.
+  const { child, base } = await startDaemon();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-stream-"));
+  const launcher = path.join(dir, "chatty-aify");
+  fs.writeFileSync(launcher, [
+    "#!/bin/bash",
+    'HARNESS_WRAPPER_VERSION="0.6.0"',
+    'echo "FIRST-LINE"',
+    "sleep 1",
+    'echo "SECOND-LINE"',
+    "exit 0",
+    "",
+  ].join(String.fromCharCode(10)));
+  fs.chmodSync(launcher, 0o755);
+
+  try {
+    const started = await fetch(`${base}/processes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ service: "aify-comms", launcher: launcher.split(String.fromCharCode(92)).join("/") }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const startedText = await started.text();
+    assert.equal(started.status, 201, startedText);
+    const handle = JSON.parse(startedText);
+
+    // Attach LATE on purpose: the first line has probably already been printed, and a console that
+    // only shows what happened after somebody looked is a console that shows an empty pane.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const controller = new AbortController();
+    const stream = await fetch(`${base}/processes/${handle.id}/output`, { signal: controller.signal });
+    assert.equal(stream.status, 200);
+    assert.match(stream.headers.get("content-type"), /text\/event-stream/);
+
+    let seen = "";
+    const reader = stream.body.getReader();
+    const decoder = new TextDecoder();
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline && !seen.includes("SECOND-LINE")) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      seen += decoder.decode(value, { stream: true });
+    }
+    controller.abort();
+
+    assert.match(seen, /FIRST-LINE/, "the replay did not carry what was printed before attaching");
+    assert.match(seen, /SECOND-LINE/, "live output did not arrive");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    await stop(child);
+  }
+});
+
+test("STREAM: watching a process that does not exist is a 404", async () => {
+  // Distinct from an open-but-quiet stream. One means look elsewhere; the other means wait.
+  const { child, base } = await startDaemon();
+  try {
+    const res = await fetch(`${base}/processes/never-existed/output`, { signal: AbortSignal.timeout(5000) });
+    assert.equal(res.status, 404);
+  } finally {
+    await stop(child);
+  }
+});

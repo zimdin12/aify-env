@@ -83,6 +83,30 @@ const server = createServer(async (request, response) => {
     result = { status: 500, body: { error: "internal error" } };
   }
 
+  // A stream, not an answer. Server-sent events because a console only ever reads: no framing to get
+  // wrong, no upgrade handshake, and it reconnects by itself when a viewer's tab wakes up.
+  if (result.stream) {
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    });
+    const unsubscribe = runner.subscribe(result.stream, (chunk) => {
+      // One SSE event per chunk, JSON-encoded so a newline in the output cannot end the event early —
+      // which it would, because a newline is the frame delimiter in this protocol.
+      response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      traffic.bytesOut += Buffer.byteLength(chunk);
+    });
+    if (!unsubscribe) {
+      // Raced: the process went between the route check and here.
+      response.end();
+      return;
+    }
+    // A viewer closing its tab must release the subscription, or every visit leaks one.
+    request.on("close", () => unsubscribe());
+    return;
+  }
+
   if (result.body === null) {
     response.writeHead(result.status);
     response.end();
