@@ -106,6 +106,31 @@ for a reason nobody can see.
 Closing the connection releases the subscription. SSE rather than a socket because a console only ever
 reads: no framing to get wrong, no upgrade handshake, and it reconnects by itself.
 
+## `POST /processes/:id/input`
+
+```json
+{ "data": "yes" }
+```
+
+`204` on delivery. **`404` when the process is gone** — refused rather than silently dropped, because a
+console typing into a void leaves the operator concluding the agent is ignoring them. `400` when
+`data` is not a string.
+
+## `POST /processes/:id/resize`
+
+```json
+{ "cols": 120, "rows": 40 }
+```
+
+`204` when applied. **`409` when the process has no terminal to resize**, which is deliberately not a
+404: the process exists and the request does not apply to it, and a console has to tell that apart
+from "gone" before deciding whether a retry is worth anything. Accepting it silently would let a
+console believe it had set a width while the agent kept wrapping at the default, with nothing anywhere
+explaining the difference.
+
+`409` too for a nonsense size. A zero or negative winsize has thrown out of node-pty's ioctl before,
+and a console sending one should be told rather than taking the environment down with it.
+
 ## `DELETE /processes/:id`
 
 `204`, always. Stopping is idempotent: a caller retrying, or a reaper racing one, must not get an error

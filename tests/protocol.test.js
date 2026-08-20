@@ -32,6 +32,20 @@ function fakeRunner() {
       stopped.push(id);
     },
     list: () => [{ id: "p1", pid: 111, service: "aify-comms", terminal: false }],
+    written: [],
+    resized: [],
+    write(id, data) {
+      if (id !== "p1") return { ok: false, error: `no such process: ${id}` };
+      this.written.push(data);
+      return { ok: true };
+    },
+    resize(id, cols, rows) {
+      if (id !== "p1") return { ok: false, error: `no such process: ${id}` };
+      if (cols === 0) return { ok: false, error: "cols must be a positive integer, got 0" };
+      if (id === "p1" && cols === 999) return { ok: false, error: "process p1 has no terminal to resize" };
+      this.resized.push({ cols, rows });
+      return { ok: true };
+    },
   };
 }
 
@@ -170,4 +184,61 @@ test("GET /health reports this environment's OWN traffic", async () => {
   const res = await handleRequest({ method: "GET", path: "/health" }, deps());
   assert.equal(res.body.traffic.requests, 7);
   assert.equal(res.body.traffic.bytesOut, 1234);
+});
+
+// ── input and resize ─────────────────────────────────────────────────────────────
+// The last two things a console needs. Without them a delegated agent can be watched but not typed at,
+// which is a viewer rather than a console.
+
+test("POST /processes/:id/input delivers the data", async () => {
+  const d = deps();
+  const res = await handleRequest({ method: "POST", path: "/processes/p1/input", body: { data: JSON.parse(String.fromCharCode(34,104,105,92,110,34)) } }, d);
+  assert.equal(res.status, 204);
+  assert.deepEqual(d.runner.written, [JSON.parse(String.fromCharCode(34,104,105,92,110,34))]);
+});
+
+test("input to a process that is gone is a 404, not a silent success", async () => {
+  // A console typing into a void concludes the agent is ignoring it.
+  const res = await handleRequest({ method: "POST", path: "/processes/gone/input", body: { data: "hi" } }, deps());
+  assert.equal(res.status, 404);
+});
+
+test("input without string data is refused rather than coerced", async () => {
+  const d = deps();
+  for (const body of [{}, { data: 42 }, { data: null }, null]) {
+    const res = await handleRequest({ method: "POST", path: "/processes/p1/input", body }, d);
+    assert.equal(res.status, 400, JSON.stringify(body));
+  }
+  assert.deepEqual(d.runner.written, []);
+});
+
+test("POST /processes/:id/resize applies the dimensions", async () => {
+  const d = deps();
+  const res = await handleRequest({ method: "POST", path: "/processes/p1/resize", body: { cols: 120, rows: 40 } }, d);
+  assert.equal(res.status, 204);
+  assert.deepEqual(d.runner.resized, [{ cols: 120, rows: 40 }]);
+});
+
+test("resizing a process with NO TERMINAL is 409, not 404", async () => {
+  // The process exists and the request does not apply to it. A console has to tell that apart from
+  // "gone" before it decides whether retrying is worth anything.
+  const res = await handleRequest({ method: "POST", path: "/processes/p1/resize", body: { cols: 999, rows: 40 } }, deps());
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /no terminal/i);
+});
+
+test("resizing a process that does not exist is 404", async () => {
+  const res = await handleRequest({ method: "POST", path: "/processes/gone/resize", body: { cols: 80, rows: 24 } }, deps());
+  assert.equal(res.status, 404);
+});
+
+test("a nonsense dimension is refused with a reason", async () => {
+  const res = await handleRequest({ method: "POST", path: "/processes/p1/resize", body: { cols: 0, rows: 24 } }, deps());
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /positive integer/);
+});
+
+test("GET on the input route is 405, not a silent read", async () => {
+  const res = await handleRequest({ method: "GET", path: "/processes/p1/input" }, deps());
+  assert.equal(res.status, 405);
 });
