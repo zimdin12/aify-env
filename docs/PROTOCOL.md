@@ -25,6 +25,17 @@ Default port `8802`. `--port 0` takes an ephemeral one, which is how the tests a
 `terminals` is stated rather than inferred. A consumer that has to work out whether it got a terminal
 from output that looks slightly wrong is a consumer that will get it wrong.
 
+**A registered service's self-report carries `status`, and may carry `version`, `build` and `detail`.**
+Those four are the whole defined set, and aify-env reads nothing else -- a service volunteering agent
+counts must not turn the environment tier into a second place that answers questions about agents.
+
+`build` is there because a release version cannot distinguish two BUILDS of one release, which is the
+case this stack actually hits: the fleet runs a checkout that has moved on since the tag. aify-comms'
+own doctor exists because a healthy `/health` says nothing about which code is serving, and a relayed
+self-report carrying only a release number inherits that weakness one layer out. Each field is rendered
+only when the service sends a string, so a service sending a number or an object leaves no trace rather
+than making this a parser of somebody else's mistakes.
+
 **`processes` and `terminals` together IDENTIFY an aify-env, and that is now load-bearing.** A responder
 that answers `/health` without both is not one, and `aify-env-doctor` says so rather than counting it. This
 is not decoration: on the host where the check was written, an unrelated FastAPI service occupied the

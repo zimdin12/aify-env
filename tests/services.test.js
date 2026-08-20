@@ -159,3 +159,41 @@ test("the supported version is the one both writers declare", () => {
   // about the file they share, and the reader is the half that fails quietly.
   assert.equal(SUPPORTED_REGISTRY_VERSION, 1);
 });
+
+// A release version alone cannot distinguish two BUILDS of the same release, and that is the case
+// this stack actually hits: the fleet runs a checkout that has moved on since the tag. aify-comms
+// stamps a short sha beside its version for exactly that reason -- its own doctor exists because a
+// healthy /health says nothing about which code is serving -- and a relayed self-report carrying only
+// the release number inherits the same weakness one layer out.
+//
+// Still a relay. aify-env renders what it was told and forms no opinion; `build` joins status,
+// version and detail as a field a health report is DEFINED to carry, and nothing else is read.
+test("a build identifier is relayed beside the version when a service supplies one", () => {
+  const service = { name: "aify-comms", endpoint: "http://127.0.0.2:1" };
+  const withBuild = probeService(service, {
+    ok: true,
+    body: { status: "healthy", version: "0.5.7", build: "abc1234" },
+  });
+  assert.equal(withBuild.state, "passed");
+  assert.match(withBuild.detail, /0\.5\.7/, "the version must still be shown");
+  assert.match(withBuild.detail, /abc1234/, "and the build that answered");
+});
+
+test("a service that supplies no build is reported exactly as before", () => {
+  const service = { name: "aify-comms", endpoint: "http://127.0.0.2:1" };
+  const without = probeService(service, { ok: true, body: { status: "healthy", version: "0.5.7" } });
+  assert.equal(without.state, "passed");
+  assert.match(without.detail, /0\.5\.7/);
+  assert.doesNotMatch(without.detail, /undefined|null/, "an absent build must leave no trace");
+});
+
+test("a non-string build is ignored rather than rendered", () => {
+  // A service is another program; it can send anything. Reading only the shape we declared is what
+  // keeps a relay from becoming a parser of somebody else's mistakes.
+  const service = { name: "aify-comms", endpoint: "http://127.0.0.2:1" };
+  for (const bad of [42, null, {}, ["abc"]]) {
+    const r = probeService(service, { ok: true, body: { status: "healthy", build: bad } });
+    assert.equal(r.state, "passed");
+    assert.doesNotMatch(r.detail, /42|object|abc/, `a ${typeof bad} build must not be rendered`);
+  }
+});
