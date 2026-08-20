@@ -71,10 +71,22 @@ carrying no clue at all.
 ## What it does today
 
 ```
-aify-env            run the environment on 127.0.0.1:8801
-aify-env-tui        a live view: services, owned processes, its own traffic
-aify-doctor         passed / failed / unanswered, with its own exit statuses
+aify-env                 run the environment on 127.0.0.1:8801
+aify-env --port 0        pick an ephemeral port (what the tests use)
+aify-env --version
+
+aify-env-tui             a live view: services, owned processes, its own traffic
+aify-env-tui --once      render one frame and exit -- what a script wants
+
+aify-doctor              passed / failed / unanswered, human-readable
+aify-doctor --json       {summary, counts, exitCode, checks:[{id, state, detail, fix}]}
+aify-doctor --strict     exit non-zero when anything failed OR went UNANSWERED
 ```
+
+**`--strict` is the one to reach for in a script**, and the word "unanswered" in its description is
+load-bearing. Without it the exit is always 0, because a report you run to look at should not fail the
+shell that merely wanted to look. With it, a check that could not gather evidence fails the run — which
+is the whole reason this tool has a third state instead of two.
 
 Over the wire (`docs/PROTOCOL.md`): start, stop, list, health, **output** as server-sent events with a
 bounded replay for consumers that attach late, **input**, and **resize** — which refuses when there is
