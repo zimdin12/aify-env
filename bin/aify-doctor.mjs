@@ -18,8 +18,14 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { EXIT, failed, passed, summarise, unanswered } from "../lib/health.mjs";
-import { ownedProcessesCheck, registryCheck, terminalCheck } from "../lib/environment-checks.mjs";
+import { EXIT, summarise, unanswered } from "../lib/health.mjs";
+import {
+  environmentCheck,
+  looksLikeEnvironment,
+  ownedProcessesCheck,
+  registryCheck,
+  terminalCheck,
+} from "../lib/environment-checks.mjs";
 import {
   probeService,
   readServices,
@@ -68,22 +74,20 @@ checks.push(terminalCheck(terminalSupport()));
 const source = readRegistry();
 checks.push(registryCheck(source));
 
-// Is an environment running? We can tell, so a silent listener is a FAILURE rather than an unanswered:
-// nothing is listening is a fact, and the remedy is to start one.
+// Is an environment running? We can tell, so both a silent port and a WRONG occupant are failures
+// rather than unanswered: nothing listening is a fact, and something-else listening is a fact.
 const envAnswer = await knock(`${ENV_ENDPOINT}/health`);
-if (envAnswer.ok) {
-  checks.push(passed("environment", `an environment is running at ${ENV_ENDPOINT}`));
+checks.push(environmentCheck(ENV_ENDPOINT, envAnswer));
+
+if (looksLikeEnvironment(envAnswer)) {
   const owned = Array.isArray(envAnswer.body?.processes) ? envAnswer.body.processes : [];
   const unknown = Array.isArray(envAnswer.body?.unknown) ? envAnswer.body.unknown : [];
   checks.push(ownedProcessesCheck({ owned, unknown }));
 } else {
-  checks.push(failed(
-    "environment",
-    `no environment is running at ${ENV_ENDPOINT}: ${envAnswer.error}`,
-    "Start one with: aify-env",
-  ));
-  // Not a guess of zero. Nobody asked the thing that owns processes, so nobody knows.
-  checks.push(unanswered("processes", "no environment answered, so what it owns is unknown"));
+  // Not a guess of zero, and the distinction is load-bearing: "0 processes owned" is what a healthy
+  // idle environment looks like, so reporting it when no environment answered turns an absent
+  // environment into a calm one.
+  checks.push(unanswered("processes", "no aify-env answered, so what it owns is unknown"));
 }
 
 // Only when the registry announces a format we understand. Probing entries pulled out of one we do

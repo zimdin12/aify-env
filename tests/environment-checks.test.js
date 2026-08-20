@@ -8,7 +8,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { terminalCheck, registryCheck, ownedProcessesCheck } from "../lib/environment-checks.mjs";
+import {
+  terminalCheck,
+  registryCheck,
+  ownedProcessesCheck,
+  environmentCheck,
+  looksLikeEnvironment,
+} from "../lib/environment-checks.mjs";
 import { STATE } from "../lib/health.mjs";
 
 test("a host with a terminal passes", () => {
@@ -120,5 +126,94 @@ test("a genuinely CORRUPT registry does not advise deleting the shared file eith
     `${check.fix ?? ""}`,
     /\bremove\b|\bdelete\b/i,
     "the remedy still tells an operator to delete a file holding other services' entries",
+  );
+});
+
+// "Something answered" is not "an environment is running", and the difference was invisible.
+//
+// FOUND BY RUNNING THE TOOL, not by reading it. On this host aify-doctor reported
+//   ok  environment   an environment is running at http://127.0.0.1:8801
+// and the TUI, one command later, said terminals were UNAVAILABLE and no processes were owned. The
+// thing on 8801 is a FastAPI service belonging to something else entirely: it answers /health with a
+// bare {"status":"healthy"} and 404s everything else.
+//
+// The doctor believed it because `knock` reports ok for ANY response -- a 404 and a 500 included -- and
+// the check asked nothing beyond that. The row after it then read "0 process(es) owned by this
+// environment", which is what a healthy idle environment looks like. Two green rows, no environment.
+//
+// This is the exact false-green this repo has paid for twice before, and health.mjs states the rule it
+// breaks: a verifier whose green means "some of this was unverifiable" stops being worth running.
+//
+// An aify-env identifies itself by SHAPE: /health carries a processes array and a terminals object, not
+// just a status string. Anything else answering there is a port collision, and the operator needs to
+// know that rather than be told their environment is fine.
+
+const envAnswer = (body, status = 200) => ({ ok: true, status, body });
+
+const REAL = {
+  status: "healthy",
+  version: "0.6.0",
+  processes: [],
+  unknown: [],
+  terminals: { available: true },
+  traffic: { requests: 0, bytesOut: 0 },
+};
+
+test("a real aify-env answer passes", () => {
+  const check = environmentCheck("http://127.0.0.2:1", envAnswer(REAL));
+  assert.equal(check.state, STATE.PASSED);
+  assert.equal(looksLikeEnvironment(envAnswer(REAL)), true);
+});
+
+test("a FOREIGN service answering /health does not pass as an environment", () => {
+  // The live case. A bare status string is what the impostor on this host returns.
+  const answer = envAnswer({ status: "healthy" });
+  assert.equal(looksLikeEnvironment(answer), false);
+
+  const check = environmentCheck("http://127.0.0.2:1", answer);
+  assert.equal(check.state, STATE.FAILED, "a foreign service was reported as a running environment");
+  assert.match(check.detail, /not an aify-env|is not/i);
+  assert.ok(check.fix, "a failure must carry a remedy");
+});
+
+test("a NON-2xx answer is not an environment either", () => {
+  // `knock` reports ok for any response it could parse, so without this a 404 or a 500 reads as
+  // "an environment is running".
+  for (const status of [404, 500, 301]) {
+    assert.equal(looksLikeEnvironment(envAnswer(REAL, status)), false, `${status} passed as healthy`);
+  }
+});
+
+test("nothing listening is still a failure that says to start one", () => {
+  const check = environmentCheck("http://127.0.0.2:1", { ok: false, error: "ECONNREFUSED" });
+  assert.equal(check.state, STATE.FAILED);
+  assert.match(check.fix, /aify-env/);
+});
+
+test("a body that is not an object at all is refused rather than probed", () => {
+  for (const body of [null, "healthy", 42, []]) {
+    assert.equal(looksLikeEnvironment(envAnswer(body)), false, `${JSON.stringify(body)} passed`);
+  }
+});
+
+// The terminal row must say WHOSE terminal it is talking about.
+//
+// Seen side by side on this host: the doctor said "a real terminal is available for processes that
+// need one" while the TUI, reading the environment's own /health, said terminals were UNAVAILABLE.
+// Both were right about different subjects. The doctor loads node-pty in ITS OWN process; the
+// environment that will actually spawn agents answers for itself, and it need not be the same install,
+// the same node, or the same machine state.
+//
+// "for processes that need one" reads as a promise about the agents. It is a fact about the doctor.
+// Naming the subject costs a few words and removes a contradiction an operator would otherwise have to
+// resolve by reading two codebases.
+
+test("the terminal row says where it was measured, not just what it found", () => {
+  const check = terminalCheck({ available: true });
+  assert.equal(check.state, STATE.PASSED);
+  assert.match(
+    check.detail,
+    /this process|this host/i,
+    "the detail promises something about spawned processes that it did not measure",
   );
 });
