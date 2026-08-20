@@ -14,7 +14,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { readServices, probeService } from "../lib/services.mjs";
+import {
+  readServices,
+  probeService,
+  registryVersion,
+  SUPPORTED_REGISTRY_VERSION,
+} from "../lib/services.mjs";
 import { STATE } from "../lib/health.mjs";
 
 const REGISTRY = JSON.stringify({
@@ -124,4 +129,33 @@ test("COMPATIBILITY: a registry as aify-comms writes it is readable here", async
   const services = readServices(text);
   assert.deepEqual(services.map((s) => s.name), ["aify-comms"]);
   assert.equal(services[0].endpoint, "http://127.0.0.2:1");
+});
+
+// Reading the registry's declared version, so a format we do not know is not read as one we do.
+
+test("the declared version is read back as a number", () => {
+  assert.equal(registryVersion(JSON.stringify({ version: 1, services: {} })), 1);
+  assert.equal(registryVersion(JSON.stringify({ version: 7, services: {} })), 7);
+});
+
+test("a registry that declares no version says so, rather than claiming the current one", () => {
+  // "Did not say" and "said 1" are different facts. Defaulting the absent case to the supported value
+  // would make a hand-written file indistinguishable from one this build has actually verified.
+  assert.equal(registryVersion(JSON.stringify({ services: {} })), null);
+  assert.equal(registryVersion(JSON.stringify({ version: "1", services: {} })), null);
+});
+
+test("unparseable text has no version, so corruption is not reported as a version mismatch", () => {
+  // These are different failures with different remedies -- repair the file, versus upgrade the tool --
+  // and collapsing them would send the operator at the wrong one.
+  assert.equal(registryVersion("{ not json"), null);
+  assert.equal(registryVersion(""), null);
+  assert.equal(registryVersion(null), null);
+});
+
+test("the supported version is the one both writers declare", () => {
+  // aify-comms and aify-wrapper each hold their own REGISTRY_VERSION = 1 and refuse anything else.
+  // Three independent copies of one number: if this ever disagrees, a reader and a writer disagree
+  // about the file they share, and the reader is the half that fails quietly.
+  assert.equal(SUPPORTED_REGISTRY_VERSION, 1);
 });

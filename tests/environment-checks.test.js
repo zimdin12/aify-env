@@ -70,3 +70,55 @@ test("processes the reaper could not judge make this UNANSWERED", () => {
   assert.equal(check.state, STATE.UNANSWERED);
   assert.match(check.detail, /p1|5/);
 });
+
+// A registry NEWER than this aify-env is not a broken registry.
+//
+// `readServices` never looked at `version`, so a v2 file was read with v1 assumptions. Both writers --
+// aify-comms and aify-wrapper -- refuse a registry whose version they do not recognise, and the field
+// exists precisely so a format change can be noticed. The only consumer that would have to notice one
+// was the one not looking.
+//
+// What made this worth fixing is the ADVICE. A registry that fails to yield services is reported as
+// "present but unreadable" with "Repair or remove ~/.aify/services.json". That file is SHARED: it holds
+// every service's entry, and aify-comms' own writer refuses to rewrite it when unreadable for exactly
+// that reason -- replacing it uninstalls other services silently. Telling the operator to delete it,
+// when the file may simply be newer than we are, is the destructive half of a guess.
+
+test("a registry declaring a NEWER version is unanswered, not read with today's assumptions", () => {
+  const text = JSON.stringify({
+    version: 2,
+    services: { "aify-comms": { endpoint: "http://127.0.0.2:1" } },
+  });
+  const check = registryCheck({ text });
+
+  assert.equal(check.state, "unanswered", `a v2 registry was reported as ${check.state}`);
+  assert.match(
+    `${check.detail ?? ""} ${check.reason ?? ""}`,
+    /version/i,
+    "the answer does not mention the version, so nobody can tell why it could not be read",
+  );
+});
+
+test("a newer registry is never answered with advice to delete the shared file", () => {
+  const text = JSON.stringify({ version: 2, services: {} });
+  const check = registryCheck({ text });
+
+  assert.doesNotMatch(
+    `${check.fix ?? ""}`,
+    /remove|delete|rm /i,
+    "the remedy tells an operator to delete a registry that holds every other service's entry",
+  );
+});
+
+test("a genuinely CORRUPT registry does not advise deleting the shared file either", () => {
+  // The same harm, reached the other way. Repairing it is fine advice; removing it is not, because the
+  // file is shared and the services whose entries vanish are not the one being diagnosed.
+  const check = registryCheck({ text: "{ this is not json" });
+
+  assert.equal(check.state, "failed", "a corrupt registry should still be a failure");
+  assert.doesNotMatch(
+    `${check.fix ?? ""}`,
+    /\bremove\b|\bdelete\b/i,
+    "the remedy still tells an operator to delete a file holding other services' entries",
+  );
+});

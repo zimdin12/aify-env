@@ -20,7 +20,12 @@ import { join } from "node:path";
 
 import { EXIT, failed, passed, summarise, unanswered } from "../lib/health.mjs";
 import { ownedProcessesCheck, registryCheck, terminalCheck } from "../lib/environment-checks.mjs";
-import { probeService, readServices } from "../lib/services.mjs";
+import {
+  probeService,
+  readServices,
+  registryVersion,
+  SUPPORTED_REGISTRY_VERSION,
+} from "../lib/services.mjs";
 import { terminalSupport } from "../lib/runner.mjs";
 
 const args = process.argv.slice(2);
@@ -81,8 +86,14 @@ if (envAnswer.ok) {
   checks.push(unanswered("processes", "no environment answered, so what it owns is unknown"));
 }
 
-for (const service of readServices(source.text ?? "")) {
-  checks.push(probeService(service, await knock(`${service.endpoint}/health`)));
+// Only when the registry announces a format we understand. Probing entries pulled out of one we do
+// not is acting on a guess the registry check has just announced it would not make -- the report would
+// carry a row saying the file cannot be read and further rows naming services read out of it.
+const declaredVersion = registryVersion(source.text ?? "");
+if (declaredVersion === null || declaredVersion === SUPPORTED_REGISTRY_VERSION) {
+  for (const service of readServices(source.text ?? "")) {
+    checks.push(probeService(service, await knock(`${service.endpoint}/health`)));
+  }
 }
 
 const result = summarise(checks);
