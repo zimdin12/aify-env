@@ -31,8 +31,14 @@ Then run it:
 node bin/aify-env.mjs
 ```
 
-It listens on `127.0.0.1:8801`, LOOPBACK ONLY and deliberately: this runs programs on behalf of
-whatever asks, so it is not something to expose. `--port 0` takes an ephemeral port when 8801 is taken.
+It listens on `127.0.0.1:8802`, LOOPBACK ONLY and deliberately: this runs programs on behalf of
+whatever asks, so it is not something to expose. `--port 0` takes an ephemeral port when 8802 is taken.
+
+The default was 8801 until 2026-08-20, which aify-comms publishes for its Dashboard Next. Two tiers on
+one host is the topology this project exists for, so that was a collision by construction rather than
+bad luck -- and on the machine where it was found, `curl 127.0.0.1:8801/health` returned
+`{"status":"healthy"}` from the dashboard. `aify-env-doctor` refuses that impostor, because a real
+environment reports the processes and terminals it owns; a defence is not a reason to keep a collision.
 
 ### On PATH, and updating
 
@@ -129,7 +135,7 @@ carrying no clue at all.
 ## What it does today
 
 ```
-aify-env                 run the environment on 127.0.0.1:8801
+aify-env                 run the environment on 127.0.0.1:8802
 aify-env --port 0        pick an ephemeral port (what the tests use)
 aify-env --version
 

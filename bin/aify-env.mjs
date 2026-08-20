@@ -9,7 +9,7 @@
 // on request; reachable from another machine it is a remote shell with a JSON interface. The host is
 // fixed rather than configurable for the same reason a guard that can be turned off is decoration.
 //
-//   aify-env                 run in the foreground on 127.0.0.1:8801
+//   aify-env                 run in the foreground on 127.0.0.1:8802
 //   aify-env --port 0        pick an ephemeral port (used by tests)
 //   aify-env --version
 //
@@ -34,7 +34,7 @@ const VERSION = readFileSync(join(ROOT, "VERSION"), "utf8").trim();
 
 /** Never configurable. See above. */
 const HOST = "127.0.0.1";
-const DEFAULT_PORT = 8801;
+const DEFAULT_PORT = 8802;
 
 const args = process.argv.slice(2);
 if (args.includes("--version")) {

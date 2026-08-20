@@ -39,7 +39,7 @@ const asJson = args.includes("--json");
 const strict = args.includes("--strict");
 
 const REGISTRY_PATH = process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json");
-const ENV_ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8801";
+const ENV_ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
 /** Short: a probe that hangs is a probe that turned a verifier into a wait. */
 const PROBE_TIMEOUT_MS = Number(process.env.AIFY_PROBE_TIMEOUT_MS || 2000);
 

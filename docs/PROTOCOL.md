@@ -7,7 +7,7 @@ this, so it is documented before it has a second caller rather than after.
 request; reachable from another machine it is a remote shell with a JSON interface. There is
 deliberately no `--host` flag — a guard that can be turned off is decoration.
 
-Default port `8801`. `--port 0` takes an ephemeral one, which is how the tests avoid collisions.
+Default port `8802`. `--port 0` takes an ephemeral one, which is how the tests avoid collisions.
 
 ## `GET /health`
 

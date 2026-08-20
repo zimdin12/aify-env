@@ -22,7 +22,7 @@ const args = process.argv.slice(2);
 const once = args.includes("--once");
 
 const REGISTRY_PATH = process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json");
-const ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8801";
+const ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
 const REFRESH_MS = Number(process.env.AIFY_TUI_REFRESH_MS || 2000);
 const PROBE_TIMEOUT_MS = Number(process.env.AIFY_PROBE_TIMEOUT_MS || 1500);
 
