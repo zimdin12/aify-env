@@ -1,0 +1,60 @@
+#!/bin/bash
+set -euo pipefail
+
+# ── The harness wrapper contract ────────────────────────────────────────────
+#
+# Six inputs a HOST supplies, named once here and used below. Spec:
+# docs/superpowers/specs/2026-08-19-harness-wrapper-contract.md.
+#
+# HARNESS_MCP_COMMAND is the pivot of the whole thing: it is this launcher saying "point me at an
+# environment" without knowing which one. Everything else the wrapper does — resolve the CLI, export
+# an identity, forward argv — is already host-agnostic in shape; what tied it to one service was
+# knowing where that service's bridge lives.
+#
+# EVERY input falls back to the legacy AIFY_* name, and that is not politeness. A live fleet launches
+# through this wrapper and uses those names for every agent; a contract that required them all to
+# change would be a rewrite wearing a refactor's clothes. With no HARNESS_* set, this block resolves
+# to exactly the values the wrapper used before it existed.
+#
+# Precedence, deliberate and tested: an explicit flag > HARNESS_* > legacy AIFY_* > the value baked in
+# at install time. The contract name beats the legacy one because it is the canonical one; an argument
+# beats both because that is what an operator means by typing it.
+HARNESS_WRAPPER_RUNTIME="claude-code"
+HARNESS_WRAPPER_VERSION="0.5.7"
+HARNESS_REGISTRY_FINGERPRINT="bcee5b55e534ae7e"
+HARNESS_ENDPOINT="${HARNESS_ENDPOINT-${AIFY_COMMS_URL:-http://127.0.0.2:1}}"
+HARNESS_IDENTITY="${HARNESS_IDENTITY:-${AIFY_AGENT_ID:-}}"
+HARNESS_ROLE="${HARNESS_ROLE:-${AIFY_AGENT_ROLE:-}}"
+HARNESS_CWD="${HARNESS_CWD:-${AIFY_AGENT_CWD:-}}"
+HARNESS_MCP_COMMAND="${HARNESS_MCP_COMMAND:-}"
+HARNESS_EXTRA_ENV="${HARNESS_EXTRA_ENV:-}"
+HARNESS_CHECK=false
+
+# `${HARNESS_ENDPOINT-...}` above uses `-`, NOT `:-`, and the difference is the whole point of the
+# check below: `:-` would treat an explicitly EMPTY endpoint as "unset" and silently substitute the
+# baked-in URL. A host that cleared it would get an agent talking to a service it never named. Empty
+# is a configuration error, and the contract gives it exit 78.
+HARNESS_EXIT_CONFIG=78
+HARNESS_EXIT_NO_RUNTIME=127
+
+# Host-supplied environment, exported verbatim before launch. Malformed lines are skipped rather than
+# fatal: a config file with a trailing newline must not stop an agent starting.
+if [ -n "$HARNESS_EXTRA_ENV" ]; then
+  while IFS= read -r _pair; do
+    case "$_pair" in
+      ""|"#"*) continue ;;
+      *=*) export "${_pair%%=*}=${_pair#*=}" ;;
+    esac
+  done <<HARNESS_ENV_EOF
+$HARNESS_EXTRA_ENV
+HARNESS_ENV_EOF
+fi
+
+CLAUDE_RESUME_ID="${CLAUDE_SESSION_ID:-}"
+# Bypass permissions by DEFAULT for every *-aify wrapper (2026-06-02 decision):
+# aify agents run unattended, so they must not stall on approval prompts. Each
+# wrapper uses its harness-native bypass flag (claude --dangerously-skip-
+# permissions, codex --dangerously-bypass-approvals-and-sandbox, hermes --yolo,
+# omp --auto-approve). Opt out per-launch with --safe / --no-auto.
+CLAUDE_AUTO=true
+CLAUDE_AIFY_AGENT_ID="$HARNESS_IDENTITY"

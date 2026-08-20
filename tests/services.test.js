@@ -113,28 +113,15 @@ test("aify-env never reports agent status, whatever a service sends", () => {
   assert.doesNotMatch(check.detail, /\b12\b/);
 });
 
-test("COMPATIBILITY: a registry written by aify-comms is readable here", async () => {
-  // The cross-repo contract, exercised rather than assumed. If aify-comms' writer and this reader ever
-  // disagree, every other test in this file still passes while aify-env sees no services at all.
+test("COMPATIBILITY: a registry as aify-comms writes it is readable here", async () => {
+  // The cross-repo contract, exercised against a recorded artifact rather than a live call to a writer
+  // at a hardcoded absolute path -- which is what this was, and which made the suite depend on one
+  // machine's directory layout. If the writer and this reader ever disagree, every other test in this
+  // file still passes while aify-env sees no services at all.
   const fs = await import("node:fs");
-  const os = await import("node:os");
-  const pathMod = await import("node:path");
-  const { spawnSync } = await import("node:child_process");
+  const text = fs.readFileSync(new URL("./fixtures/services-written-by-aify-comms.json", import.meta.url), "utf8");
 
-  const writer = pathMod.join("C:", "Docker", "aify-comms", "mcp", "stdio", "register-service-cli.mjs");
-  if (!fs.existsSync(writer)) {
-    assert.fail("aify-comms is not checked out here, so the cross-repo contract cannot be exercised");
-  }
-  const dir = fs.mkdtempSync(pathMod.join(os.tmpdir(), "aify-env-xrepo-"));
-  const file = pathMod.join(dir, "services.json");
-  const wrote = spawnSync(process.execPath, [writer, file, "http://127.0.0.2:1", "/b/mcp/stdio"], {
-    encoding: "utf8",
-    timeout: 60_000,
-  });
-  assert.equal(wrote.status, 0, wrote.stdout + wrote.stderr);
-
-  const services = readServices(fs.readFileSync(file, "utf8"));
+  const services = readServices(text);
   assert.deepEqual(services.map((s) => s.name), ["aify-comms"]);
   assert.equal(services[0].endpoint, "http://127.0.0.2:1");
-  fs.rmSync(dir, { recursive: true, force: true });
 });

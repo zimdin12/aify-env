@@ -120,28 +120,28 @@ test("an UNSUBSTITUTED placeholder is not a version, so the file is refused", ()
   assert.match(result.reason, /placeholder/i);
 });
 
-test("POSITIVE CONTROL: a REAL rendered launcher from the wrapper package is accepted", async () => {
-  // Every case above is hand-written text. If the real marker line ever stopped matching, all of them
-  // would still pass while aify-env refused every launcher on the machine. A predicate that cannot
-  // accept the genuine article is worth nothing.
+test("POSITIVE CONTROL: a REAL rendered launcher is accepted", async () => {
+  // Every other case here is hand-written text. If the real marker line ever stopped matching, all of
+  // them would still pass while aify-env refused every launcher on the machine.
+  //
+  // A RECORDED ARTIFACT rather than a live render from a sibling checkout. The first version shelled
+  // out to install.sh at ~/projects/aify-wrapper, which made this suite depend on one machine's layout
+  // -- and a repo whose tests only pass on the author's laptop is broken, not covered. The fixture is
+  // the head of a launcher that installer really produced, rendered with generic paths so it carries
+  // nothing from the machine that made it.
   const fs = await import("node:fs");
-  const os = await import("node:os");
-  const pathMod = await import("node:path");
-  const { spawnSync } = await import("node:child_process");
+  const launcher = fs.readFileSync(new URL("./fixtures/rendered-claude-aify.head", import.meta.url), "utf8");
 
-  const pkg = pathMod.join(os.homedir(), "projects", "aify-wrapper", "install.sh");
-  if (!fs.existsSync(pkg)) {
-    assert.fail("the aify-wrapper package is not checked out beside this repo; the control cannot run");
-  }
-  const dir = fs.mkdtempSync(pathMod.join(os.tmpdir(), "aify-env-control-"));
-  const rendered = spawnSync("bash", [
-    pkg, "--client", "claude", "--endpoint", "http://127.0.0.2:1", "--render-only", dir,
-  ], { encoding: "utf8", timeout: 120_000 });
-  assert.equal(rendered.status, 0, rendered.stdout + rendered.stderr);
-
-  const launcher = fs.readFileSync(pathMod.join(dir, "claude-aify"), "utf8");
   const verdict = mayExecute(launcher);
-  assert.equal(verdict.ok, true, "a real launcher was refused: " + verdict.reason);
+  assert.equal(verdict.ok, true, `a real launcher was refused: ${verdict.reason}`);
   assert.ok(verdict.version && verdict.version.length > 0);
-  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("the launcher fixture carries nothing from the machine that rendered it", async () => {
+  // It is a recorded artifact. A baked path from this laptop would be both a leak and a lie about what
+  // the installer emits for anybody else.
+  const fs = await import("node:fs");
+  const text = fs.readFileSync(new URL("./fixtures/rendered-claude-aify.head", import.meta.url), "utf8");
+  const BACKSLASH = String.fromCharCode(92);
+  assert.doesNotMatch(text, new RegExp(`Administrator|Program Files|[A-Z]:${BACKSLASH}${BACKSLASH}`, "i"));
 });
