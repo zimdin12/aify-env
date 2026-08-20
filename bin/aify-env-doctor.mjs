@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// aify-doctor: what this environment can say about itself, and what each registered service said.
+// aify-env-doctor: what this environment can say about itself, and what each registered service said.
 //
 // A COLLECTOR AND A DISPLAY, not an inspector. It answers its own questions — can this host open a
 // terminal, can it read the registry, is an environment running — and for everything else it knocks
 // and relays. A component that inspects another component's internals has taken on that component's
 // concern, and across four repos that is how one of them ends up unable to ship without the others.
 //
-//   aify-doctor            human-readable
-//   aify-doctor --json     {summary, counts, exitCode, checks:[{id, state, detail, fix}]}
-//   aify-doctor --strict   exit non-zero when anything failed OR went unanswered
+//   aify-env-doctor            human-readable
+//   aify-env-doctor --json     {summary, counts, exitCode, checks:[{id, state, detail, fix}]}
+//   aify-env-doctor --strict   exit non-zero when anything failed OR went unanswered
 //
 // Exit statuses are the contract: 0 all passed, 1 something failed, 2 something could not be answered.
 // The third one exists because a check that gathered no evidence has not passed, and a verifier whose

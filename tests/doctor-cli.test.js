@@ -17,7 +17,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const DOCTOR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-doctor.mjs");
+const DOCTOR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env-doctor.mjs");
 const NOWHERE = "http://127.0.0.2:1";
 
 function runDoctor({ registry, args = [] }) {

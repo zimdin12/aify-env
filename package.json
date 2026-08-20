@@ -6,7 +6,7 @@
   "type": "module",
   "bin": {
     "aify-env": "./bin/aify-env.mjs",
-    "aify-doctor": "./bin/aify-doctor.mjs",
+    "aify-env-doctor": "./bin/aify-env-doctor.mjs",
     "aify-env-tui": "./bin/aify-env-tui.mjs"
   },
   "files": [

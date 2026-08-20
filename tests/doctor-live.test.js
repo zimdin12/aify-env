@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON = path.join(HERE, "..", "bin", "aify-env.mjs");
-const DOCTOR = path.join(HERE, "..", "bin", "aify-doctor.mjs");
+const DOCTOR = path.join(HERE, "..", "bin", "aify-env-doctor.mjs");
 
 function startDaemon() {
   return new Promise((resolve, reject) => {

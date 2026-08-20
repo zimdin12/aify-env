@@ -131,7 +131,7 @@ test("a genuinely CORRUPT registry does not advise deleting the shared file eith
 
 // "Something answered" is not "an environment is running", and the difference was invisible.
 //
-// FOUND BY RUNNING THE TOOL, not by reading it. On this host aify-doctor reported
+// FOUND BY RUNNING THE TOOL, not by reading it. On this host aify-env-doctor reported
 //   ok  environment   an environment is running at http://127.0.0.1:8801
 // and the TUI, one command later, said terminals were UNAVAILABLE and no processes were owned. The
 // thing on 8801 is a FastAPI service belonging to something else entirely: it answers /health with a
