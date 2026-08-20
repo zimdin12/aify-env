@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { classifyProcesses, Reaper } from "../lib/reaper.mjs";
+import { classifyProcesses, defaultIsAlive, Reaper } from "../lib/reaper.mjs";
 import { ProcessRegistry } from "../lib/process-registry.mjs";
 
 const entry = (id, pid) => ({ id, pid, service: "s", terminal: false });
@@ -122,4 +122,41 @@ test("NEGATIVE CONTROL: the default probe says an impossible pid is not alive", 
   const gone = registry.add({ service: "s", pid: 0x7ffffffe });
   const reaper = new Reaper({ registry });
   assert.deepEqual(reaper.sweep().reaped, [gone.id], "the default probe cannot detect a dead pid");
+});
+
+// ── the probe itself ─────────────────────────────────────────────────────────────
+// Named directly rather than only reached through Reaper, because it is the one piece of this module
+// that talks to the operating system and it decides whether anything gets reaped at all.
+
+test("defaultIsAlive says YES for this very process", () => {
+  assert.equal(defaultIsAlive(process.pid), true);
+});
+
+test("defaultIsAlive says NO for a pid that cannot exist", () => {
+  // A probe that cannot return ABSENT cannot be trusted when it returns PRESENT.
+  assert.equal(defaultIsAlive(0x7ffffffe), false);
+});
+
+test("defaultIsAlive treats EPERM as ALIVE, because it is", () => {
+  // The process exists and is not ours. Reading that as dead would forget something very much running,
+  // which is the direction that loses a live agent rather than leaking a dead row.
+  const original = process.kill;
+  try {
+    process.kill = () => { throw Object.assign(new Error("nope"), { code: "EPERM" }); };
+    assert.equal(defaultIsAlive(1234), true);
+  } finally {
+    process.kill = original;
+  }
+});
+
+test("defaultIsAlive rethrows anything it cannot interpret", () => {
+  // Only ESRCH means death and only EPERM means life. A third code is not an answer, and swallowing it
+  // as `false` would reap on a misunderstanding — classifyProcesses turns the throw into UNKNOWN.
+  const original = process.kill;
+  try {
+    process.kill = () => { throw Object.assign(new Error("weird"), { code: "ENOSYS" }); };
+    assert.throws(() => defaultIsAlive(1234), /weird/);
+  } finally {
+    process.kill = original;
+  }
 });
