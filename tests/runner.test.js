@@ -21,7 +21,9 @@ import { test } from "node:test";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { ProcessRegistry } from "../lib/process-registry.mjs";
 
-const ALLOWED = 'HARNESS_WRAPPER_VERSION="0.6.0"';
+// A launcher, not just a marker: aify-env requires a shebang too, because a file that merely QUOTES
+// the contract is documentation. These fixtures said "marker" when they meant "launcher".
+const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
 
 /**
  * A stand-in for what node-pty returns. It proves the runner takes the terminal BRANCH and wires the

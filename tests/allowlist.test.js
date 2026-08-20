@@ -145,3 +145,51 @@ test("the launcher fixture carries nothing from the machine that rendered it", a
   const BACKSLASH = String.fromCharCode(92);
   assert.doesNotMatch(text, new RegExp(`Administrator|Program Files|[A-Z]:${BACKSLASH}${BACKSLASH}`, "i"));
 });
+
+// ── a marker is not enough on its own ────────────────────────────────────────────
+// Found by review: this module's OWN README passed. It documents the contract, so it carries the
+// marker line at column zero inside a code fence — and the check could not tell that from a launcher.
+//
+// The consequence is not "bash would error on a .md". It is that the property claimed here — "this file
+// speaks the harness contract" — was not the property being checked. aify-env executes a path a CALLER
+// supplies, so any file on the host that quotes the contract (a README, a captured log, a pasted
+// snippet) was enrolled by quoting it.
+//
+// A launcher declares its interpreter. Requiring that costs nothing real — every wrapper this project
+// ships begins with a shebang, and `interpreterFor` already reads it to decide how to start one.
+
+test("a file with the marker but NO shebang is refused", () => {
+  const documentation = [
+    "# Some documentation",
+    "",
+    "Set this in your launcher:",
+    "",
+    'HARNESS_WRAPPER_VERSION="0.6.0"',
+    "",
+  ].join(String.fromCharCode(10));
+  const result = mayExecute(documentation);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /shebang|interpreter/i);
+});
+
+test("REGRESSION: this repo's own README is refused", async () => {
+  // The exact file that exposed the gap. Named explicitly so the case cannot be lost to a rewrite of
+  // the generic test above.
+  const fs = await import("node:fs");
+  const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.equal(mayExecute(readme).ok, false, "the README is still executable by this environment");
+});
+
+test("a real launcher, which has both, is still accepted", async () => {
+  // The other half. Tightening a guard until it refuses everything is not an improvement.
+  const fs = await import("node:fs");
+  const launcher = fs.readFileSync(new URL("./fixtures/rendered-claude-aify.head", import.meta.url), "utf8");
+  assert.equal(mayExecute(launcher).ok, true);
+});
+
+test("the shebang must be the FIRST line, not merely present somewhere", () => {
+  // A file that mentions #!/bin/bash in prose has not declared an interpreter, and the operating system
+  // would not treat it as one either.
+  const late = ["# notes", "#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
+  assert.equal(mayExecute(late).ok, false);
+});

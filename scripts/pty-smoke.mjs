@@ -24,7 +24,7 @@ const chunks = [];
 
 const handle = await runner.start({
   service: "pty-smoke",
-  fileText: 'HARNESS_WRAPPER_VERSION="0.6.0"',
+  fileText: ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10)),
   command: process.execPath,
   args: ["-e", "process.stdout.write('REAL-PTY-OUTPUT')"],
 });

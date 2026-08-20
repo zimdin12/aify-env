@@ -15,7 +15,9 @@ import { test } from "node:test";
 
 import { handleRequest } from "../lib/protocol.mjs";
 
-const ALLOWED = 'HARNESS_WRAPPER_VERSION="0.6.0"';
+// A launcher, not just a marker: aify-env requires a shebang too, because a file that merely QUOTES
+// the contract is documentation. These fixtures said "marker" when they meant "launcher".
+const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
 
 /** A stand-in runner: records what it was asked to do without doing any of it. */
 function fakeRunner() {

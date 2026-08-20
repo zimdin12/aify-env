@@ -18,11 +18,18 @@ So the capability moves out. Services ask; this owns.
 
 ## What it will run, and how that is decided
 
-**A file may be executed if it carries the harness contract marker** every launcher already has:
+**A file may be executed if it declares an interpreter and carries the harness contract marker** that
+every launcher already has:
 
 ```
+#!/bin/bash
 HARNESS_WRAPPER_VERSION="0.6.0"
 ```
+
+Both, not either. The marker alone is what a file that *documents* the contract carries — this README
+did, and passed, until a review caught it. aify-env executes a path a caller supplies, so any file on
+the host quoting the contract was enrolled by quoting it. A launcher declares how it is run; a
+description of one does not.
 
 Derived, not listed. Installing a launcher enrols it, nobody maintains a policy file, and a new harness
 works without anyone remembering to add it. A list you must remember to update is a defect with a delay
