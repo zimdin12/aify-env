@@ -8,6 +8,12 @@ which processes it started and whether they are alive. **Alive is not working** 
 whatever service owns agent semantics, and deriving it in two places is how two answers start
 disagreeing.
 
+**One of three repos.** [aify-comms](https://github.com/zimdin12/aify-comms) owns messaging, dispatch
+and sessions; [aify-wrapper](https://github.com/zimdin12/aify-wrapper) owns the launchers this will
+run. Nothing here depends on either: aify-env serves whichever services register on the host, and
+runs whatever launcher carries the harness marker. That independence is the point — a second service
+should not have to build its own spawner.
+
 ## Install
 
 ```bash
