@@ -8,6 +8,49 @@ which processes it started and whether they are alive. **Alive is not working** 
 whatever service owns agent semantics, and deriving it in two places is how two answers start
 disagreeing.
 
+## Install
+
+```bash
+git clone https://github.com/zimdin12/aify-env
+cd aify-env
+npm install
+```
+
+`node-pty` is the only dependency that matters, and it is the one that can fail: it is a native module,
+so a host without build tools gets a working install with NO TERMINALS. That is not a broken state and
+aify-env does not pretend otherwise — processes run with piped stdio, a console cannot render a TUI for
+them, and `aify-doctor` says so in as many words. Check before you trust it:
+
+```bash
+node bin/aify-doctor.mjs
+```
+
+Then run it:
+
+```bash
+node bin/aify-env.mjs
+```
+
+It listens on `127.0.0.1:8801`, LOOPBACK ONLY and deliberately: this runs programs on behalf of
+whatever asks, so it is not something to expose. `--port 0` takes an ephemeral port when 8801 is taken.
+
+### Which services it knows about
+
+aify-env reads `~/.aify/services.json` — the shared registry each service writes its own entry into
+when you install it. Nothing here registers anything; if the file is missing, that is simply no services
+yet, and the doctor reports it as such rather than as a fault. Point `AIFY_SERVICE_REGISTRY` elsewhere
+to use a different one.
+
+### What it leaves behind, and what it does not
+
+Every process it starts is recorded in `~/.aify/env-processes.json` (`AIFY_ENV_PROCESS_RECORD` to move
+it). A graceful stop takes its processes with it; a hard kill runs no handler, so the NEXT instance
+reads that record and reaps whatever is still alive before it starts listening. Kills reach the whole
+tree, because a launcher is a script and the agent is its child.
+
+One case it cannot fix and does not hide: if a launcher dies before the agent it started, the agent is
+orphaned with no parent, and no pid-tree walk can find it from the record.
+
 ## Why it exists
 
 Spawning used to live inside a coordinating service. That is fine with one service and impossible with
