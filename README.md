@@ -61,11 +61,24 @@ both real:
 does not, so an unresolved `bash` comes back as `File not found:` and, through the daemon, as a 500
 carrying no clue at all.
 
-## Status
+## What it does today
 
-Early. `lib/allowlist.mjs` is the first piece. The plan it is being built against lives in the
-aify-comms repo at `docs/superpowers/plans/2026-08-20-aify-env.md`, with the architecture and its
-evidence in `docs/AIFY_ENV_BOUNDARY.md`.
+```
+aify-env            run the environment on 127.0.0.1:8801
+aify-env-tui        a live view: services, owned processes, its own traffic
+aify-doctor         passed / failed / unanswered, with its own exit statuses
+```
+
+Over the wire (`docs/PROTOCOL.md`): start, stop, list, health, **output** as server-sent events with a
+bounded replay for consumers that attach late, **input**, and **resize** — which refuses when there is
+no terminal rather than silently doing nothing.
+
+Not built, and not by accident: nothing here answers questions about AGENTS. It knows which processes
+it started and whether they are alive. Alive is not working.
+
+The plan it is built against lives in the aify-comms repo at
+`docs/superpowers/plans/2026-08-20-aify-env.md`, with the architecture and its evidence in
+`docs/AIFY_ENV_BOUNDARY.md`.
 
 ## Tests
 
@@ -73,6 +86,14 @@ evidence in `docs/AIFY_ENV_BOUNDARY.md`.
 npm test
 ```
 
-One of them renders a real launcher from the `aify-wrapper` package next door and requires the
-allowlist to accept it. A predicate that cannot accept the genuine article is worth nothing, and every
-other case in that file is hand-written text that would keep passing if the real marker line changed.
+Several of them exist because a component observed only in its empty or failing state has not been
+observed:
+
+- the allowlist is fed a REAL launcher rendered by the `aify-wrapper` package next door, because every
+  other case in that file is hand-written text that would keep passing if the real marker line changed;
+- `aify-doctor` is run against a live environment AND a stopped one in the same run, because a checker
+  seen only saying no cannot be trusted when it says no;
+- the view is rendered with a real process in it, because a perfect empty frame proves the renderer and
+  nothing about the snapshot ever being filled in;
+- the real terminal path runs out of process, because node-pty leaves a handle behind and anything that
+  spawns one never exits by itself.
