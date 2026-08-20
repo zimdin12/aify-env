@@ -83,8 +83,18 @@ The plan it is built against lives in the aify-comms repo at
 ## Tests
 
 ```bash
+npm install    # node-pty is an OPTIONAL dependency; without it one test fails, on purpose
 npm test
 ```
+
+**`npm install` first, and the reason is the design rather than an oversight.** `pty-real.test.js`
+FAILS rather than skips on a host with no terminal support, because "the terminal path works" must not
+report green when nobody could check it. So a clone that skips the install gets one red test — which
+is honest, and confusing if you were not told. Now you were.
+
+On a host where the native build genuinely cannot succeed, that same red is the truth: this environment
+runs processes with piped stdio and a console cannot render a TUI for them. `aify-doctor` says the same
+thing in its own words.
 
 Several of them exist because a component observed only in its empty or failing state has not been
 observed:
