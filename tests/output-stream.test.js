@@ -118,3 +118,63 @@ test("buffers do not outlive the processes they belong to", async () => {
   await r.stop(handle.id);
   assert.equal(r.subscribe(handle.id, () => {}), null, "a stopped process still holds a buffer");
 });
+
+// A subscriber has to learn that the process EXITED, and with what code.
+//
+// Found while wiring aify-comms' delegated terminals: the manager drives `_handleExit` from a pty's
+// exit, and that is what ends a turn, releases the row, and decides whether the heal path runs. Over
+// this protocol there was no way to learn it. The SSE stream ended only when the CLIENT disconnected,
+// so a delegated agent could die and its consumer would sit on an open, silent stream forever --
+// indistinguishable from an agent that is simply thinking.
+//
+// Exit is delivered on the SAME subscription as output, deliberately. A second mechanism would be a
+// second thing to get wrong, and a consumer that already has the stream open is exactly the consumer
+// that needs to know.
+
+test("a subscriber is told when the process exits, and with what code", async () => {
+  const r = runner();
+  const handle = await r.start(spec("process.exit(3)"));
+
+  const exits = [];
+  const stop = r.subscribe(handle.id, () => {}, (code) => exits.push(code));
+  assert.notEqual(stop, null);
+
+  await handle.exited;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(exits, [3], "the exit code did not reach the subscriber");
+});
+
+test("a subscriber attached AFTER the exit is told immediately, not left waiting", async () => {
+  // The late-attach case, which is the normal one for a console. Without this the replay arrives and
+  // then nothing ever does, which reads as a live process.
+  const r = runner();
+  const handle = await r.start(spec("process.exit(0)"));
+  await handle.exited;
+
+  const exits = [];
+  r.subscribe(handle.id, () => {}, (code) => exits.push(code));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(exits, [0]);
+});
+
+test("an exit listener that throws does not disturb the others", async () => {
+  const r = runner();
+  const handle = await r.start(spec("process.exit(0)"));
+  const seen = [];
+  r.subscribe(handle.id, () => {}, () => { throw new Error("a broken console"); });
+  r.subscribe(handle.id, () => {}, (code) => seen.push(code));
+  await handle.exited;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(seen, [0]);
+});
+
+test("subscribing without an exit listener is still allowed", async () => {
+  // Every existing caller passes one argument. Requiring two would break them all for a field most
+  // do not need.
+  const r = runner();
+  const handle = await r.start(spec("process.stdout.write('x')"));
+  assert.notEqual(r.subscribe(handle.id, () => {}), null);
+  await handle.exited;
+});

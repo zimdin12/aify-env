@@ -116,6 +116,25 @@ for a reason nobody can see.
 Closing the connection releases the subscription. SSE rather than a socket because a console only ever
 reads: no framing to get wrong, no upgrade handshake, and it reconnects by itself.
 
+
+### The stream ends with an `exit` event
+
+```
+event: exit
+data: {"code":7}
+```
+
+Then the server closes it. **A NAMED event**, so a consumer reading `data:` frames as output cannot
+mistake an exit for a line the process printed.
+
+Until this existed the stream ended only when the CLIENT disconnected, and a delegated process that
+died was indistinguishable from one that was thinking: an open, silent stream either way. That is fine
+for a human watching a console and fatal for a consumer driving an agent's lifecycle — aify-comms ends
+a turn, releases the terminal row and decides whether to heal a session off exactly this signal.
+
+The code is REMEMBERED, so a subscriber attaching after the process is gone is told at once rather than
+left waiting. Late attachment is the normal case for a console, not the exceptional one.
+
 ## `POST /processes/:id/input`
 
 ```json

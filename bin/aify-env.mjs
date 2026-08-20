@@ -54,6 +54,10 @@ let unknown = [];
  */
 const traffic = { requests: 0, bytesOut: 0 };
 
+const chr10 = String.fromCharCode(10);
+/** SSE frames end with a BLANK line: two newlines. Named so nothing has to escape them. */
+const FRAME_END = chr10 + chr10;
+
 const server = createServer(async (request, response) => {
   traffic.requests += 1;
   let body = null;
@@ -94,12 +98,23 @@ const server = createServer(async (request, response) => {
       "cache-control": "no-cache",
       connection: "keep-alive",
     });
-    const unsubscribe = runner.subscribe(result.stream, (chunk) => {
-      // One SSE event per chunk, JSON-encoded so a newline in the output cannot end the event early —
-      // which it would, because a newline is the frame delimiter in this protocol.
-      response.write(`data: ${JSON.stringify(chunk)}\n\n`);
-      traffic.bytesOut += Buffer.byteLength(chunk);
-    });
+    const unsubscribe = runner.subscribe(
+      result.stream,
+      (chunk) => {
+        // One SSE event per chunk, JSON-encoded so a newline in the output cannot end the event
+        // early - which it would, because a newline is the frame delimiter in this protocol.
+        response.write("data: " + JSON.stringify(chunk) + FRAME_END);
+        traffic.bytesOut += Buffer.byteLength(chunk);
+      },
+      (code) => {
+        // A NAMED event, so a consumer reading data: frames as output cannot mistake an exit for a
+        // line the process printed. Then the stream ends: a console told the process is gone has
+        // nothing left to wait for, and leaving it open makes a dead agent look like a thinking one
+        // -- which is the failure this event exists to prevent.
+        response.write("event: exit" + chr10 + "data: " + JSON.stringify({ code }) + FRAME_END);
+        response.end();
+      },
+    );
     if (!unsubscribe) {
       // Raced: the process went between the route check and here.
       response.end();
