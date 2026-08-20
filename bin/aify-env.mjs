@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { handleRequest } from "../lib/protocol.mjs";
-import { Reaper } from "../lib/reaper.mjs";
+import { createReaper } from "../lib/reaper.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,7 +40,10 @@ const portFlag = args.indexOf("--port");
 const port = portFlag === -1 ? DEFAULT_PORT : Number(args[portFlag + 1]);
 
 const runner = new Runner();
-const reaper = new Reaper({ registry: { list: () => runner.list(), remove: () => {} } });
+// createReaper rather than an object literal here. This line WAS a literal, wired with
+// `remove: () => {}`, so the sweep ran every thirty seconds, classified correctly, and reaped nothing.
+// A unit test of the sweep could not see it, because the sweep was never wrong. See lib/reaper.mjs.
+const reaper = createReaper(runner);
 
 /** What the last sweep could not answer for. Surfaced through /health so it is never a silent leak. */
 let unknown = [];
@@ -132,9 +135,10 @@ server.listen(port, HOST, () => {
   );
 });
 
+const SWEEP_MS = Number(process.env.AIFY_SWEEP_MS || 30_000);
 const sweepTimer = setInterval(() => {
   unknown = reaper.sweep().unknown;
-}, 30_000);
+}, SWEEP_MS);
 sweepTimer.unref();
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

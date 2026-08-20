@@ -17,9 +17,12 @@ import { fileURLToPath } from "node:url";
 const DAEMON = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs");
 
 /** Start on an ephemeral port and resolve once it says where it landed. */
-function startDaemon() {
+function startDaemon(env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [DAEMON, "--port", "0"], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...env },
+    });
     let output = "";
     const timer = setTimeout(() => reject(new Error(`daemon did not start:\n${output}`)), 20_000);
     child.stdout.on("data", (chunk) => {
@@ -230,6 +233,31 @@ test("STREAM: watching a process that does not exist is a 404", async () => {
   try {
     const res = await fetch(`${base}/processes/never-existed/output`, { signal: AbortSignal.timeout(5000) });
     assert.equal(res.status, 404);
+  } finally {
+    await stop(child);
+  }
+});
+
+test("the daemon's SWEEP actually runs, and does not disturb a healthy environment", async () => {
+  // Until now the sweep had never executed in the daemon at all: the interval is thirty seconds and
+  // every test kills the daemon long before that. So the one place it is wired was the one place it
+  // was never exercised -- which is exactly where it was wired to a no-op.
+  //
+  // The reaper is a BACKSTOP: its trigger, a process that died without its exit being observed, cannot
+  // be produced through the API, because the close handler always fires first. So what is proven here
+  // is that the sweep runs repeatedly in the daemon without error and leaves a healthy environment
+  // alone. That it removes the right things is proven in reaper-wiring.test.js, against the same
+  // wiring this daemon now uses.
+  const { child, base, output } = await startDaemon({ AIFY_SWEEP_MS: "120" });
+  try {
+    // Long enough for several sweeps.
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const health = await (await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })).json();
+    assert.equal(health.status, "healthy", "the environment did not survive its own sweeps");
+    assert.deepEqual(health.unknown, [], "an idle environment reported unanswerable processes");
+    assert.doesNotMatch(output(), /unhandled/i, `the sweep raised something:
+${output()}`);
   } finally {
     await stop(child);
   }
