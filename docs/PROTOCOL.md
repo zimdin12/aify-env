@@ -174,3 +174,33 @@ descriptor that was read, which node does not offer.
 On a host where an attacker can rewrite files in the launcher directory they can equally write a
 contract marker, so this is not the weakest link. It is written down because the next person should
 know it is there rather than find it.
+
+## What this environment owns, and what dies with it
+
+aify-env writes every process it starts to a record — `~/.aify/env-processes.json`, or wherever
+`AIFY_ENV_PROCESS_RECORD` points. The in-memory registry answers "what do I own" only while the process
+that holds it is alive, and the question that matters is the one asked by the instance REPLACING one
+that died.
+
+**Two halves, because one is not enough.** Shutdown handlers stop the managed processes on a graceful
+exit. A hard kill runs no handler at all, so the next instance reads the record and reaps whatever is
+still alive before it starts listening. Cleanup that must hold on every path keys on state, not events.
+
+**Kills reach the CHILDREN.** A launcher is a script and the agent is a child of it, so ending only the
+recorded pid stops the wrapper and leaves the agent. Windows uses `taskkill /T`, POSIX signals the
+process group and then the process.
+
+**The killing decision fails closed.** A recorded pid is only ended if the OS still reports it running
+the launcher we recorded. Pid reuse is real, and ending a stranger's process is a far worse failure
+than the leak being fixed — anything unconfirmed is left running and reported on stderr, where an
+operator can act on it.
+
+**One case is genuinely unrecoverable, and is not papered over.** If a launcher dies BEFORE the agent it
+started, the agent is orphaned with no parent, and no pid-tree walk can find it from the record.
+Reaping a tree requires the tree to still exist. On Windows this is what happens when the environment
+is killed and the pty tears the shell down with it. Closing it properly needs an OS job object rather
+than bookkeeping.
+
+**On Windows there is no graceful path from another process.** `SIGTERM` there is `TerminateProcess`:
+the target dies immediately and no handler runs. So every external stop is the ungraceful one, and the
+record is not a backstop — it is the whole mechanism.

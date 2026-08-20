@@ -22,7 +22,13 @@ const TUI = path.join(HERE, "..", "bin", "aify-env-tui.mjs");
 
 function startDaemon() {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [DAEMON, "--port", "0"], { stdio: ["ignore", "pipe", "pipe"] });
+    // SEALED, like daemon.test.js: the daemon records what it owns and REAPS from that record at
+    // startup. Pointed at the real ~/.aify path, a test could kill a process it never started.
+    const record = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aify-env-rec-")), "owned.json");
+    const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, AIFY_ENV_PROCESS_RECORD: record },
+    });
     let output = "";
     const timer = setTimeout(() => reject(new Error(`daemon did not start:\n${output}`)), 20_000);
     child.stdout.on("data", (chunk) => {

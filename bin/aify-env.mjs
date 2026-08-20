@@ -23,6 +23,11 @@ import { fileURLToPath } from "node:url";
 import { handleRequest } from "../lib/protocol.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
+import { clearOwned, readOwned } from "../lib/owned-processes.mjs";
+import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
+import { killTree } from "../lib/kill-tree.mjs";
+import { defaultIsAlive } from "../lib/reaper.mjs";
+import { homedir } from "node:os";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = readFileSync(join(ROOT, "VERSION"), "utf8").trim();
@@ -39,7 +44,63 @@ if (args.includes("--version")) {
 const portFlag = args.indexOf("--port");
 const port = portFlag === -1 ? DEFAULT_PORT : Number(args[portFlag + 1]);
 
-const runner = new Runner();
+const chr10 = String.fromCharCode(10);
+/** SSE frames end with a BLANK line: two newlines. Named so nothing has to escape them. */
+const FRAME_END = chr10 + chr10;
+
+// WHAT THIS ENVIRONMENT OWNS, on disk.
+//
+// The in-memory registry cannot answer for an instance that has already died, and every agent such an
+// instance started is still running with nothing able to name them. The record is the authority, and
+// the next instance cleans up from it.
+const OWNED_FILE = process.env.AIFY_ENV_PROCESS_RECORD || join(homedir(), ".aify", "env-processes.json");
+
+// REAP BEFORE LISTENING. Anything in the record is by definition from an instance that is no longer
+// running -- this one has not started a process yet -- so a live pid there is an orphan.
+//
+// The killing decision fails CLOSED: a pid that cannot be confirmed as ours is left alone and
+// reported. Pid reuse is real, and ending a stranger's process is a worse failure than the leak.
+const leftovers = planOrphanReap(readOwned(OWNED_FILE), { isAlive: defaultIsAlive, verify: defaultVerify });
+for (const entry of leftovers.reap) {
+  // The TREE, not the pid: the recorded process is a launcher, and the agent it started is a child of
+  // it. Reaping only the launcher leaves exactly the process an operator cared about.
+  const killed = killTree(entry.pid);
+  process.stderr.write(killed
+    ? `[aify-env] reaped orphan pid ${entry.pid} (${entry.service}) and its children, from a previous instance${chr10}`
+    : `[aify-env] could not reap pid ${entry.pid} (${entry.service})${chr10}`);
+}
+for (const { entry, reason } of leftovers.skipped) {
+  // Said out loud rather than swallowed. "Left running because we could not prove it was ours" is
+  // something an operator must be able to act on.
+  if (reason !== "already gone") {
+    process.stderr.write(`[aify-env] left pid ${entry.pid} (${entry.service}) alone: ${reason}${chr10}`);
+  }
+}
+clearOwned(OWNED_FILE);
+
+const runner = new Runner({ ownedFile: OWNED_FILE });
+
+// AND DIE TOGETHER. The handlers cover the graceful exits; the record above covers the hard kill that
+// runs no handler at all. Both halves are needed: without the handlers a clean Ctrl-C would leak until
+// the next start, and without the record nothing survives a SIGKILL.
+let shuttingDown = false;
+const shutdown = (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  process.stderr.write(`[aify-env] ${signal}: stopping ${runner.list().length} managed process(es)${chr10}`);
+  Promise.allSettled(runner.list().map((p) => runner.stop(p.id)))
+    .then(() => {
+      clearOwned(OWNED_FILE);
+      process.exit(0);
+    });
+};
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) {
+  try {
+    process.on(signal, () => shutdown(signal));
+  } catch {
+    // Not every signal exists on every platform; the ones that do are enough.
+  }
+}
 // createReaper rather than an object literal here. This line WAS a literal, wired with
 // `remove: () => {}`, so the sweep ran every thirty seconds, classified correctly, and reaped nothing.
 // A unit test of the sweep could not see it, because the sweep was never wrong. See lib/reaper.mjs.
@@ -53,10 +114,6 @@ let unknown = [];
  * service does elsewhere, and a number here that meant anything wider would be invented.
  */
 const traffic = { requests: 0, bytesOut: 0 };
-
-const chr10 = String.fromCharCode(10);
-/** SSE frames end with a BLANK line: two newlines. Named so nothing has to escape them. */
-const FRAME_END = chr10 + chr10;
 
 const server = createServer(async (request, response) => {
   traffic.requests += 1;

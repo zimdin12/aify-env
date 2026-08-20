@@ -19,9 +19,15 @@ const DAEMON = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bi
 /** Start on an ephemeral port and resolve once it says where it landed. */
 function startDaemon(env = {}) {
   return new Promise((resolve, reject) => {
+    // SEALED: the daemon records what it owns, and reaps from that record at startup. Pointed at the
+    // real ~/.aify path a test would read the operator's live state and could KILL a process it never
+    // started. A temp file per daemon keeps the test's blast radius inside the test.
+    const record = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aify-env-rec-")), "owned.json");
     const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...env },
+      // Order matters: the seal must beat an ambient AIFY_ENV_PROCESS_RECORD, while a test that
+      // deliberately sets one still wins.
+      env: { ...process.env, AIFY_ENV_PROCESS_RECORD: record, ...env },
     });
     let output = "";
     const timer = setTimeout(() => reject(new Error(`daemon did not start:\n${output}`)), 20_000);
