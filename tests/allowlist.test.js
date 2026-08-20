@@ -129,6 +129,12 @@ test("POSITIVE CONTROL: a REAL rendered launcher is accepted", async () => {
   // -- and a repo whose tests only pass on the author's laptop is broken, not covered. The fixture is
   // the head of a launcher that installer really produced, rendered with generic paths so it carries
   // nothing from the machine that made it.
+  //
+  // THE OTHER HALF NOW EXISTS, and it had to live over there. A recording cannot notice when the thing
+  // it recorded changes, so aify-wrapper asserts these same two properties on its OWN freshly rendered
+  // launchers -- rendered-launchers-are-executable-by-aify-env.test.js. It can render for real because
+  // it owns the installer; we cannot, without depending on one machine's layout. Between the two, a
+  // template change that would make us refuse every launcher reddens where the change is made.
   const fs = await import("node:fs");
   const launcher = fs.readFileSync(new URL("./fixtures/rendered-claude-aify.head", import.meta.url), "utf8");
 
