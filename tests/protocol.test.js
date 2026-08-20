@@ -244,3 +244,50 @@ test("GET on the input route is 405, not a silent read", async () => {
   const res = await handleRequest({ method: "GET", path: "/processes/p1/input" }, deps());
   assert.equal(res.status, 405);
 });
+
+// The LAUNCHER is never looked up on PATH. The interpreter is; those are different decisions.
+//
+// `resolveExecutable` searches PATH for the interpreter, and has to: node-pty performs no lookup, so
+// `pty.spawn("bash")` fails outright. That is a lookup of a name WE chose from the file's own shebang.
+//
+// The launcher is a name the CALLER chose, and searching PATH for it would hand the choice of what
+// executes to whatever PATH happened to say. A caller must name the file exactly. Nothing pinned that,
+// and the two behaviours sit one module apart, so the asymmetry is easy to "fix" in the wrong direction.
+//
+// Uses the REAL readFileSync rather than the fake, because a stub would only prove what the stub does.
+// The launcher is a genuine, allowlist-passing file that IS on PATH and is NOT in the working directory:
+// a PATH lookup would find it, and requiring a path will not.
+
+test("a bare launcher NAME is refused, even when it is on PATH", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-env-pathprobe-"));
+  const name = "probe-aify";
+  fs.writeFileSync(path.join(dir, name), ALLOWED);
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${dir}${path.delimiter}${savedPath}`;
+
+  try {
+    const real = { readFile: (p) => fs.readFileSync(p, "utf8") };
+
+    const byName = await handleRequest(
+      { method: "POST", path: "/processes", body: { service: "aify-comms", launcher: name } },
+      deps(real),
+    );
+    assert.equal(byName.status, 403, "a bare name was accepted; the launcher is being resolved on PATH");
+    assert.match(byName.body.error, /cannot read/i);
+
+    // THE CONTROL. Without it a 403 could just mean the file was unacceptable, and the test would pass
+    // for a reason having nothing to do with PATH.
+    const byPath = await handleRequest(
+      { method: "POST", path: "/processes", body: { service: "aify-comms", launcher: path.join(dir, name) } },
+      deps(real),
+    );
+    assert.equal(byPath.status, 201, `the same file was refused by absolute path: ${byPath.body?.error}`);
+  } finally {
+    process.env.PATH = savedPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
