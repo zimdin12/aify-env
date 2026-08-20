@@ -25,6 +25,16 @@ Default port `8801`. `--port 0` takes an ephemeral one, which is how the tests a
 `terminals` is stated rather than inferred. A consumer that has to work out whether it got a terminal
 from output that looks slightly wrong is a consumer that will get it wrong.
 
+**`processes` and `terminals` together IDENTIFY an aify-env, and that is now load-bearing.** A responder
+that answers `/health` without both is not one, and `aify-doctor` says so rather than counting it. This
+is not decoration: on the host where the check was written, an unrelated FastAPI service occupied the
+environment's port and answered `{"status": "healthy"}`, and the doctor called it a running environment
+while the TUI, one command later, reported no terminals and no processes. `status: "healthy"` is the
+most common health body in existence and identifies nobody. Reporting what you OWN does.
+
+The consequence for this protocol: those two fields may gain members, but neither may become optional
+without breaking every consumer's ability to tell an environment from a stranger on the same port.
+
 `traffic` is this environment's OWN io. It is the only traffic aify-env can honestly report -- it has
 no visibility into what a service does elsewhere, and a number meaning anything wider would be
 invented.
