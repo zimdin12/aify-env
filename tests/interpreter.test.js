@@ -198,3 +198,54 @@ test("System32 is only special for POSIX shells, not for every executable", () =
   assert.equal(got, `C:${B}Windows${B}system32${B}where.EXE`,
     "ordinary Windows executables in System32 are exactly where they should be found");
 });
+
+// ── The launcher path a POSIX shell can actually open ─────────────────────────────────
+//
+// MEASURED 2026-08-25 by delegating a real spawn through a real aify-env. The plan was correct --
+// bash.EXE with the launcher as an argv element -- and bash reported:
+//
+//   /bin/bash: C:UsersAdministrator.localbinclaude-aify: No such file or directory
+//
+// Every separator gone, exit 127. Windows builds a command LINE out of argv, and by the time a POSIX
+// shell parses it back a backslash is an escape character. What an operator sees is "the agent did not
+// start", with a path in the message that looks almost right, which is the worst kind of wrong.
+//
+// After the fix the same spawn exits 0 and streams the launcher's own output back.
+
+test("a Windows launcher path reaches bash with no backslashes in it", () => {
+  const B = String.fromCharCode(92);
+  const windowsPath = ["C:", "Users", "Administrator", ".local", "bin", "claude-aify"].join(B);
+  const plan = interpreterFor("#!/usr/bin/env bash\n", windowsPath, "win32", ["--check"]);
+  const launcherArg = plan.args.find((a) => a.includes("claude-aify"));
+  assert.ok(launcherArg, `the launcher is not in ${JSON.stringify(plan.args)}`);
+  assert.ok(!launcherArg.includes(B), `a backslash survived: ${launcherArg}`);
+  assert.equal(launcherArg, "C:/Users/Administrator/.local/bin/claude-aify");
+});
+
+test("the launcher's own arguments keep their order after the path", () => {
+  // `bash --managed script` is a different command from `bash script --managed`, and converting the
+  // path must not disturb that.
+  const B = String.fromCharCode(92);
+  const plan = interpreterFor("#!/usr/bin/env bash\n", `C:${B}bin${B}x-aify`, "win32", ["--resume", "abc"]);
+  assert.deepEqual(plan.args, ["C:/bin/x-aify", "--resume", "abc"]);
+});
+
+test("an argument that legitimately contains a backslash is left alone", () => {
+  // Only the LAUNCHER path is converted. A caller passing a Windows path as an argument means it, and
+  // the launcher -- not this function -- decides what to do with it.
+  const B = String.fromCharCode(92);
+  const plan = interpreterFor("#!/usr/bin/env bash\n", `C:${B}bin${B}x-aify`, "win32", [`C:${B}work`]);
+  assert.equal(plan.args[1], `C:${B}work`);
+});
+
+test("a POSIX path is unchanged, because it has nothing to convert", () => {
+  const plan = interpreterFor("#!/usr/bin/env bash\n", "/home/dev/.local/bin/claude-aify", "win32", []);
+  assert.equal(plan.args[0], "/home/dev/.local/bin/claude-aify");
+});
+
+test("off Windows the launcher is spawned directly and is not rewritten", () => {
+  // The kernel reads the shebang there; second-guessing it would break launchers that work today.
+  const plan = interpreterFor("#!/usr/bin/env bash\n", "/usr/local/bin/claude-aify", "linux", ["--check"]);
+  assert.equal(plan.command, "/usr/local/bin/claude-aify");
+  assert.deepEqual(plan.args, ["--check"]);
+});
