@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 
 import { handleRequest } from "../lib/protocol.mjs";
 import { createReaper } from "../lib/reaper.mjs";
+import { createShutdown } from "../lib/shutdown.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { clearOwned, readOwned } from "../lib/owned-processes.mjs";
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
@@ -111,27 +112,31 @@ clearOwned(OWNED_FILE);
 
 const runner = new Runner({ ownedFile: OWNED_FILE });
 
-// AND DIE TOGETHER. The handlers cover the graceful exits; the record above covers the hard kill that
-// runs no handler at all. Both halves are needed: without the handlers a clean Ctrl-C would leak until
-// the next start, and without the record nothing survives a SIGKILL.
-let shuttingDown = false;
-const shutdown = (signal) => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  process.stderr.write(`[aify-env] ${signal}: stopping ${runner.list().length} managed process(es)${chr10}`);
-  Promise.allSettled(runner.list().map((p) => runner.stop(p.id)))
-    .then(() => {
-      clearOwned(OWNED_FILE);
-      process.exit(0);
-    });
-};
+// AND DIE TOGETHER — one path, in lib/shutdown.mjs, because there were two here and they disagreed.
+//
+// The other handler closed the server and exited on the grounds that this environment going down was
+// not a reason to kill somebody else's agent. Node runs every listener, so the winner was whichever
+// reached process.exit first, and that was the one NOT stopping anything. The operator's rule settles
+// it: if aify-env dies, the processes it handles die with it.
+//
+// The record on disk still covers the hard kill that runs no handler at all. Both halves are needed.
+const shutdown = createShutdown({
+  runner,
+  // A FUNCTION, so `server` is looked up when a signal arrives rather than read here, where it is
+  // still in its temporal dead zone.
+  closeServer: () => server.close(),
+  clearOwned: () => clearOwned(OWNED_FILE),
+  exit: (code) => process.exit(code),
+  write: (line) => process.stderr.write(line),
+});
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) {
   try {
-    process.on(signal, () => shutdown(signal));
+    process.on(signal, () => { void shutdown(signal); });
   } catch {
     // Not every signal exists on every platform; the ones that do are enough.
   }
 }
+
 // createReaper rather than an object literal here. This line WAS a literal, wired with
 // `remove: () => {}`, so the sweep ran every thirty seconds, classified correctly, and reaped nothing.
 // A unit test of the sweep could not see it, because the sweep was never wrong. See lib/reaper.mjs.
@@ -243,12 +248,3 @@ const sweepTimer = setInterval(() => {
   unknown = reaper.sweep().unknown;
 }, SWEEP_MS);
 sweepTimer.unref();
-
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    // Stop accepting first, then let the loop drain. Processes we own keep running: this environment
-    // going down is not a reason to kill somebody else's agent, and a new one adopts nothing it cannot
-    // see, which is a Phase 8 subject rather than a reason to reap here.
-    server.close(() => process.exit(0));
-  });
-}
