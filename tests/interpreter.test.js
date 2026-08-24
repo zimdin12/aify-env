@@ -249,3 +249,64 @@ test("off Windows the launcher is spawned directly and is not rewritten", () => 
   assert.equal(plan.command, "/usr/local/bin/claude-aify");
   assert.deepEqual(plan.args, ["--check"]);
 });
+
+// ── Every WSL entry point, not just the first one found ───────────────────────────────
+//
+// This host carries THREE bashes on PATH: Git's, System32's, and an App Execution Alias under
+// AppData/Local/Microsoft/WindowsApps. The skip originally knew only System32, so a daemon whose PATH
+// put WindowsApps first picked the alias and a delegated spawn died with
+//
+//   /bin/bash: C:/Users/Administrator/.local/bin/claude-aify: No such file or directory
+//
+// on a path that was correct. Measured directly: that shell answers "no" to
+// `test -f C:/Users/.../claude-aify` for a file plainly there, because a WSL shell has no C: drive at
+// that path. The second Windows-only defect in this one function, and the second found only by
+// delegating a real spawn rather than by reading.
+
+const WINDOWS_APPS_BASH =
+  ["C:", "Users", "dev", "AppData", "Local", "Microsoft", "WindowsApps", "bash.EXE"].join(String.fromCharCode(92));
+const SYSTEM32_BASH = ["C:", "Windows", "System32", "bash.EXE"].join(String.fromCharCode(92));
+const GIT_BASH = ["C:", "Program Files", "Git", "usr", "bin", "bash.EXE"].join(String.fromCharCode(92));
+
+function pathWith(...directories) {
+  return {
+    sep: ";",
+    pathValue: directories.join(";"),
+    pathExt: ["", ".EXE"],
+    exists: (candidate) => [WINDOWS_APPS_BASH, SYSTEM32_BASH, GIT_BASH].includes(candidate),
+  };
+}
+
+const dirOf = (full) => full.slice(0, full.lastIndexOf(String.fromCharCode(92)));
+
+test("a WindowsApps bash is skipped in favour of a real one further down PATH", () => {
+  const resolved = resolveExecutable("bash", pathWith(dirOf(WINDOWS_APPS_BASH), dirOf(GIT_BASH)));
+  assert.equal(resolved, GIT_BASH, "the WSL App Execution Alias was chosen");
+});
+
+test("both WSL entry points are skipped, in either order", () => {
+  for (const order of [
+    [dirOf(WINDOWS_APPS_BASH), dirOf(SYSTEM32_BASH), dirOf(GIT_BASH)],
+    [dirOf(SYSTEM32_BASH), dirOf(WINDOWS_APPS_BASH), dirOf(GIT_BASH)],
+  ]) {
+    assert.equal(resolveExecutable("bash", pathWith(...order)), GIT_BASH, order.join(" then "));
+  }
+});
+
+test("with ONLY a WSL bash available it is still returned, rather than nothing", () => {
+  // Skipping is a preference, not a veto. A host with no other shell should get a launch attempt and
+  // a real error, not a silent refusal that looks like the launcher was never found.
+  const resolved = resolveExecutable("bash", pathWith(dirOf(WINDOWS_APPS_BASH)));
+  assert.equal(resolved, "bash", "an unresolvable name falls back to the bare command");
+});
+
+test("a non-shell in WindowsApps is not skipped", () => {
+  // The rule is about POSIX shells that are WSL doorways, not about the directory being untrustworthy.
+  const python = ["C:", "Users", "dev", "AppData", "Local", "Microsoft", "WindowsApps", "python.EXE"]
+    .join(String.fromCharCode(92));
+  const resolved = resolveExecutable("python", {
+    sep: ";", pathValue: dirOf(python), pathExt: ["", ".EXE"],
+    exists: (candidate) => candidate === python,
+  });
+  assert.equal(resolved, python);
+});
