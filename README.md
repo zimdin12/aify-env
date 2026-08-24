@@ -25,10 +25,10 @@ npm install
 `node-pty` is the only dependency that matters, and it is the one that can fail: it is a native module,
 so a host without build tools gets a working install with NO TERMINALS. That is not a broken state and
 aify-env does not pretend otherwise — processes run with piped stdio, a console cannot render a TUI for
-them, and `aify-env-doctor` says so in as many words. Check before you trust it:
+them, and `aify-env doctor` says so in as many words. Check before you trust it:
 
 ```bash
-node bin/aify-env-doctor.mjs
+aify-env doctor
 ```
 
 Then run it:
@@ -43,13 +43,13 @@ whatever asks, so it is not something to expose. `--port 0` takes an ephemeral p
 The default was 8801 until 2026-08-20, which aify-comms publishes for its Dashboard Next. Two tiers on
 one host is the topology this project exists for, so that was a collision by construction rather than
 bad luck -- and on the machine where it was found, `curl 127.0.0.1:8801/health` returned
-`{"status":"healthy"}` from the dashboard. `aify-env-doctor` refuses that impostor, because a real
+`{"status":"healthy"}` from the dashboard. `aify-env doctor` refuses that impostor, because a real
 environment reports the processes and terminals it owns; a defence is not a reason to keep a collision.
 
 ### On PATH, and updating
 
 ```bash
-npm install -g .        # aify-env, aify-env-doctor, aify-env-tui
+npm install -g .        # one command: aify-env (with `doctor` and `tui` subcommands)
 git pull && npm install -g .    # updating is the same command
 ```
 
@@ -148,9 +148,9 @@ aify-env --version
 aify-env-tui             a live view: services, owned processes, its own traffic
 aify-env-tui --once      render one frame and exit -- what a script wants
 
-aify-env-doctor              passed / failed / unanswered, human-readable
-aify-env-doctor --json       {summary, counts, exitCode, checks:[{id, state, detail, fix}]}
-aify-env-doctor --strict     exit non-zero when anything failed OR went UNANSWERED
+aify-env doctor              passed / failed / unanswered, human-readable
+aify-env doctor --json       {summary, counts, exitCode, checks:[{id, state, detail, fix}]}
+aify-env doctor --strict     exit non-zero when anything failed OR went UNANSWERED
 ```
 
 **`--strict` is the one to reach for in a script**, and the word "unanswered" in its description is
@@ -182,7 +182,7 @@ report green when nobody could check it. So a clone that skips the install gets 
 is honest, and confusing if you were not told. Now you were.
 
 On a host where the native build genuinely cannot succeed, that same red is the truth: this environment
-runs processes with piped stdio and a console cannot render a TUI for them. `aify-env-doctor` says the same
+runs processes with piped stdio and a console cannot render a TUI for them. `aify-env doctor` says the same
 thing in its own words.
 
 Several of them exist because a component observed only in its empty or failing state has not been
@@ -190,7 +190,7 @@ observed:
 
 - the allowlist is fed a REAL launcher rendered by the `aify-wrapper` package next door, because every
   other case in that file is hand-written text that would keep passing if the real marker line changed;
-- `aify-env-doctor` is run against a live environment AND a stopped one in the same run, because a checker
+- `aify-env doctor` is run against a live environment AND a stopped one in the same run, because a checker
   seen only saying no cannot be trusted when it says no;
 - the view is rendered with a real process in it, because a perfect empty frame proves the renderer and
   nothing about the snapshot ever being filled in;

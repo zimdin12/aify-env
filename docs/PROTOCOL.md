@@ -37,7 +37,7 @@ only when the service sends a string, so a service sending a number or an object
 than making this a parser of somebody else's mistakes.
 
 **`processes` and `terminals` together IDENTIFY an aify-env, and that is now load-bearing.** A responder
-that answers `/health` without both is not one, and `aify-env-doctor` says so rather than counting it. This
+that answers `/health` without both is not one, and `aify-env doctor` says so rather than counting it. This
 is not decoration: on the host where the check was written, an unrelated FastAPI service occupied the
 environment's port and answered `{"status": "healthy"}`, and the doctor called it a running environment
 while the TUI, one command later, reported no terminals and no processes. `status: "healthy"` is the

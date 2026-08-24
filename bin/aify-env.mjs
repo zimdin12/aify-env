@@ -10,8 +10,13 @@
 // fixed rather than configurable for the same reason a guard that can be turned off is decoration.
 //
 //   aify-env                 run in the foreground on 127.0.0.1:8802
+//   aify-env doctor          what this host can say about itself, and what each service said
+//   aify-env tui             the same, live
 //   aify-env --port 0        pick an ephemeral port (used by tests)
 //   aify-env --version
+//
+// ONE command on PATH, with subcommands. Three sibling binaries is what collided with aify-comms'
+// own `aify-doctor`; a collision is only the loud version of the problem.
 //
 // There is deliberately no `--host`.
 
@@ -41,6 +46,32 @@ if (args.includes("--version")) {
   process.stdout.write(`aify-env ${VERSION}\n`);
   process.exit(0);
 }
+// SUBCOMMANDS, not sibling binaries. One product should put one command on PATH: three of them is what
+// collided with aify-comms' own `aify-doctor`, and a collision is only the loud version of the problem
+// -- the quiet one is a reader having to know which of three commands answers their question.
+//
+// An UNKNOWN subcommand is refused rather than falling through. Falling through would mean a typo like
+// `aify-env doctr` silently STARTS the environment, which supersedes a running daemon and reaps its
+// managed workers -- the one mistake here that costs someone their fleet.
+const SUBCOMMANDS = { doctor: "./aify-env-doctor.mjs", tui: "./aify-env-tui.mjs" };
+const firstArg = args[0];
+if (firstArg && !firstArg.startsWith("-")) {
+  const target = SUBCOMMANDS[firstArg];
+  if (!target) {
+    const known = Object.keys(SUBCOMMANDS).join(", ");
+    // Its OWN newline, not the module-level `chr10`, which is declared further down and would be in
+    // the temporal dead zone here. This file has already shipped that exact bug once, in this exact
+    // variable, and it only fired when there was something to report.
+    const eol = String.fromCharCode(10);
+    process.stderr.write(`aify-env: unknown subcommand '${firstArg}'. Known: ${known}.` + eol);
+    process.stderr.write("aify-env with no subcommand starts the environment." + eol);
+    process.exit(64);
+  }
+  process.argv = [process.argv[0], process.argv[1], ...args.slice(1)];
+  await import(target);
+  process.exit(0);
+}
+
 const portFlag = args.indexOf("--port");
 const port = portFlag === -1 ? DEFAULT_PORT : Number(args[portFlag + 1]);
 

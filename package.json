@@ -5,9 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "aify-env": "./bin/aify-env.mjs",
-    "aify-env-doctor": "./bin/aify-env-doctor.mjs",
-    "aify-env-tui": "./bin/aify-env-tui.mjs"
+    "aify-env": "./bin/aify-env.mjs"
   },
   "files": [
     "lib/",
