@@ -116,3 +116,28 @@ test("a server that was never listening is not a reason to leak processes", asyn
   await shutdown("SIGINT");
   assert.deepEqual(events, ["stopped:a", "exit:0"]);
 });
+
+test("anything that must stop first stops before the processes do", async () => {
+  // Today that is the live view: a frame landing mid-teardown paints a screen that is already untrue.
+  const events = [];
+  const shutdown = createShutdown({
+    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    beforeStop: () => events.push("view-stopped"),
+    clearOwned: () => {},
+    exit: (code) => events.push(`exit:${code}`),
+  });
+  await shutdown("SIGINT");
+  assert.deepEqual(events, ["view-stopped", "stopped:a", "exit:0"]);
+});
+
+test("a decoration that fails to stop does not leave agents running", async () => {
+  const events = [];
+  const shutdown = createShutdown({
+    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    beforeStop: () => { throw new Error("the view is wedged"); },
+    clearOwned: () => {},
+    exit: (code) => events.push(`exit:${code}`),
+  });
+  await shutdown("SIGINT");
+  assert.deepEqual(events, ["stopped:a", "exit:0"]);
+});

@@ -101,3 +101,109 @@ test("rendering is pure: the same snapshot renders identically twice", () => {
   // early warning that a clock crept in.
   assert.deepEqual(renderDashboard(SNAPSHOT), renderDashboard(SNAPSHOT));
 });
+
+// ── AGENTS: displayed, never decided ──────────────────────────────────────────────────
+//
+// The operator asked to see managed agents in this view. The tempting implementation reads this
+// environment's own process table and calls a live pid a running agent -- a second answer to a
+// question aify-comms owns, and a wrong one, because alive is not working. So the rows are relayed and
+// these tests pin that a process cannot change what an agent row says.
+
+test("agent rows render what the service said, attributed to it", () => {
+  const lines = renderDashboard({
+    version: "0.6.0", endpoint: "http://127.0.0.1:8802",
+    terminals: { available: true, reason: "" }, services: [], processes: [], unknown: [],
+    agents: [
+      { service: "aify-comms", id: "mc-coder", name: "Coder", runtime: "claude-code", mode: "managed", status: "working" },
+    ],
+    traffic: { requests: 0, bytesOut: 0 },
+  });
+  const row = lines.find((l) => l.includes("mc-coder"));
+  assert.ok(row, "the agent was not rendered");
+  assert.match(row, /working/);
+  assert.match(row, /claude-code/);
+  assert.match(row, /aify-comms/);
+  assert.ok(lines.some((l) => /not decided here/.test(l)), "the view must say whose answer this is");
+});
+
+test("a LIVE process does not change what an agent row says", () => {
+  // The whole boundary in one assertion. The environment owns a running pty; the service says that
+  // agent is offline. The view must say offline.
+  const lines = renderDashboard({
+    version: "0.6.0", endpoint: "http://127.0.0.1:8802",
+    terminals: { available: true, reason: "" }, services: [],
+    processes: [{ id: "t1", pid: 4242, service: "aify-comms", terminal: true, uptimeMs: 600000 }],
+    unknown: [],
+    agents: [
+      { service: "aify-comms", id: "mc-coder", name: "Coder", runtime: "claude-code", mode: "managed", status: "offline" },
+    ],
+    traffic: { requests: 0, bytesOut: 0 },
+  });
+  const row = lines.find((l) => l.includes("mc-coder"));
+  assert.match(row, /offline/, "a live process was allowed to override the service's answer");
+  assert.ok(!/working|online/.test(row), row);
+});
+
+test("a service that could not be asked says so, and never 'none running'", () => {
+  const lines = renderDashboard({
+    version: "0.6.0", endpoint: "http://127.0.0.1:8802",
+    terminals: { available: true, reason: "" }, services: [], processes: [], unknown: [],
+    agents: [],
+    agentsUnavailable: [{ service: "aify-comms", reason: "timed out" }],
+    traffic: { requests: 0, bytesOut: 0 },
+  });
+  const said = lines.join("\n");
+  assert.match(said, /could not be asked/);
+  assert.match(said, /timed out/);
+  assert.ok(!/no agents running|none running/i.test(said), "silence was reported as an answer");
+});
+
+test("with no services at all the view says there was nobody to ask", () => {
+  const lines = renderDashboard({
+    version: "0.6.0", endpoint: "http://127.0.0.1:8802",
+    terminals: { available: true, reason: "" }, services: [], processes: [], unknown: [],
+    agents: [], agentsUnavailable: [],
+    traffic: { requests: 0, bytesOut: 0 },
+  });
+  assert.ok(lines.some((l) => l.includes("no services to ask")));
+});
+
+test("a filtered list carries its remainder note", () => {
+  const lines = renderDashboard({
+    version: "0.6.0", endpoint: "http://127.0.0.1:8802",
+    terminals: { available: true, reason: "" }, services: [], processes: [], unknown: [],
+    agents: [{ service: "s", id: "a", name: "A", runtime: "codex", mode: "managed", status: "online" }],
+    agentsNote: "35 not shown: 35 offline",
+    traffic: { requests: 0, bytesOut: 0 },
+  });
+  assert.ok(lines.some((l) => l.includes("35 not shown")), "a filtered view read as the whole set");
+});
+
+test("rows handed to the view are rendered even with no answered count", () => {
+  // The regression that restructured this block: keying the whole section on `agentsAnswered` meant a
+  // snapshot carrying rows without that field rendered nothing at all. A view that silently drops
+  // data it was given is worse than one that mislabels an empty state.
+  const lines = renderDashboard({
+    version: "0.6.0", endpoint: "e", terminals: { available: true, reason: "" },
+    services: [], processes: [], unknown: [],
+    agents: [{ service: "s", id: "kept", name: "K", runtime: "codex", mode: "managed", status: "online" }],
+    traffic: { requests: 0, bytesOut: 0 },
+  });
+  assert.ok(lines.some((l) => l.includes("kept")), "a row was dropped for want of a count");
+});
+
+test("asked and told none is live reads differently from nobody to ask", () => {
+  const asked = renderDashboard({
+    version: "0.6.0", endpoint: "e", terminals: { available: true, reason: "" },
+    services: [], processes: [], unknown: [], agents: [], agentsAnswered: 2,
+    traffic: { requests: 0, bytesOut: 0 },
+  }).join("\n");
+  const nobody = renderDashboard({
+    version: "0.6.0", endpoint: "e", terminals: { available: true, reason: "" },
+    services: [], processes: [], unknown: [], agents: [], agentsAnswered: 0,
+    traffic: { requests: 0, bytesOut: 0 },
+  }).join("\n");
+  assert.match(asked, /no agent is live, per 2 service\(s\) asked/);
+  assert.match(nobody, /no services to ask/);
+  assert.notEqual(asked, nobody, "two different facts rendered the same line");
+});

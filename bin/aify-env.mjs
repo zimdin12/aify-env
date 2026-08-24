@@ -9,9 +9,9 @@
 // on request; reachable from another machine it is a remote shell with a JSON interface. The host is
 // fixed rather than configurable for the same reason a guard that can be turned off is decoration.
 //
-//   aify-env                 run in the foreground on 127.0.0.1:8802
+//   aify-env                 run in the foreground on 127.0.0.1:8802, showing the live view
 //   aify-env doctor          what this host can say about itself, and what each service said
-//   aify-env tui             the same, live
+//   aify-env tui             the live view alone, against a daemon already running
 //   aify-env --port 0        pick an ephemeral port (used by tests)
 //   aify-env --version
 //
@@ -19,6 +19,11 @@
 // own `aify-doctor`; a collision is only the loud version of the problem.
 //
 // There is deliberately no `--host`.
+//
+// THE VIEW OPENS IN THE TERMINAL THAT STARTS IT, and only there: piped or redirected output keeps the
+// plain banner, because escapes in a log are noise and the banner is what a service manager parses.
+// `AIFY_NO_DASHBOARD=1` opts out. What the view shows about AGENTS is relayed from each service and
+// attributed to it -- this environment knows which processes it started, and alive is not working.
 
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -28,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { handleRequest } from "../lib/protocol.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
+import { startDashboard } from "../lib/dashboard.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { clearOwned, readOwned } from "../lib/owned-processes.mjs";
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
@@ -112,6 +118,13 @@ clearOwned(OWNED_FILE);
 
 const runner = new Runner({ ownedFile: OWNED_FILE });
 
+// An escape hatch for anyone who wants the daemon in a terminal without the view taking it over.
+const NO_DASHBOARD = ["1", "true", "yes"].includes(
+  String(process.env.AIFY_NO_DASHBOARD ?? "").trim().toLowerCase(),
+);
+/** Set once the view is running, so shutdown can stop redrawing before it tears anything down. */
+let stopDashboard = () => {};
+
 // AND DIE TOGETHER — one path, in lib/shutdown.mjs, because there were two here and they disagreed.
 //
 // The other handler closed the server and exited on the grounds that this environment going down was
@@ -122,6 +135,8 @@ const runner = new Runner({ ownedFile: OWNED_FILE });
 // The record on disk still covers the hard kill that runs no handler at all. Both halves are needed.
 const shutdown = createShutdown({
   runner,
+  // Stop redrawing first: a frame landing mid-teardown paints a screen already untrue.
+  beforeStop: () => stopDashboard(),
   // A FUNCTION, so `server` is looked up when a signal arrives rather than read here, where it is
   // still in its temporal dead zone.
   closeServer: () => server.close(),
@@ -229,7 +244,7 @@ const server = createServer(async (request, response) => {
   response.end(payload);
 });
 
-server.listen(port, HOST, () => {
+server.listen(port, HOST, async () => {
   const bound = server.address();
   const support = terminalSupport();
   // One write, so the banner arrives whole. Two writes is a race for anything reading startup output
@@ -241,6 +256,31 @@ server.listen(port, HOST, () => {
       ? "terminals: available\n"
       : `terminals: UNAVAILABLE (${support.reason}) — processes will run with piped stdio\n`),
   );
+
+  // THE TERMINAL THAT STARTS THE ENVIRONMENT SHOWS WHAT IT IS DOING. Operator request, 2026-08-24:
+  // running `aify-env` should open the view, not print two lines and go quiet.
+  //
+  // Only when stdout is a TTY. Piped or redirected -- a service manager, a log file, a test capturing
+  // startup -- keeps the plain banner, because screen-clearing escapes in a log are noise nobody asked
+  // for and that banner is what those readers parse.
+  //
+  // The view owns no lifecycle: `stop` is called from the shutdown path, so an interrupt still means
+  // "take the managed processes with you" rather than being pre-empted by a handler belonging to a
+  // screen. Two exit paths racing is the defect this repo just removed.
+  if (process.stdout.isTTY && !NO_DASHBOARD) {
+    try {
+      const view = await startDashboard({
+        endpoint: `http://${HOST}:${bound.port}`,
+        registryPath: join(homedir(), ".aify", "services.json"),
+        intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),
+      });
+      stopDashboard = view.stop;
+    } catch (failure) {
+      // A view that cannot draw must never stop the environment from serving. It is the decoration;
+      // the daemon is the product.
+      process.stderr.write(`[aify-env] dashboard unavailable: ${failure.message}${chr10}`);
+    }
+  }
 });
 
 const SWEEP_MS = Number(process.env.AIFY_SWEEP_MS || 30_000);

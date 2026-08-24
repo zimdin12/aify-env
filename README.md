@@ -148,6 +148,8 @@ aify-env --version
 aify-env-tui             a live view: services, owned processes, its own traffic
 aify-env-tui --once      render one frame and exit -- what a script wants
 
+aify-env                     run the environment, with the live view in this terminal
+aify-env tui                 the live view alone, against a daemon already running
 aify-env doctor              passed / failed / unanswered, human-readable
 aify-env doctor --json       {summary, counts, exitCode, checks:[{id, state, detail, fix}]}
 aify-env doctor --strict     exit non-zero when anything failed OR went UNANSWERED
