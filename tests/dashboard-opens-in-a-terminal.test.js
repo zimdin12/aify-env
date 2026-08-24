@@ -63,13 +63,13 @@ test("piped output keeps the plain banner and prints no escapes", async () => {
     const out = await collect(child, 2500);
     assert.match(out, /aify-env .* listening on/, `no banner: ${out}`);
     assert.ok(!out.includes(CLEAR), "a screen-clearing escape reached a pipe");
-    assert.ok(!/AGENTS/.test(out), "the view opened on a non-terminal");
+    assert.ok(!/PROCESSES/.test(out), "the view opened on a non-terminal");
   } finally {
     child.kill();
   }
 });
 
-test("a terminal gets the view, with the agent section in it", async (t) => {
+test("a terminal gets the view", async (t) => {
   let pty;
   try {
     pty = await import("node-pty");
@@ -90,7 +90,10 @@ test("a terminal gets the view, with the agent section in it", async (t) => {
     const plain = out.split(ESC).join("");
     assert.match(plain, /SERVICES/);
     assert.match(plain, /PROCESSES/);
-    assert.match(plain, /AGENTS/, "the section the operator asked for is missing");
+    // No AGENTS section: asking a service for its agent list was reverted on the operator's ruling
+    // that it is not this environment's concern. What the view says about running work is PROCESSES,
+    // which aify-env started and therefore knows.
+    assert.ok(!/AGENTS/.test(plain), "the view is asking a service for its domain data again");
     assert.match(plain, /TRAFFIC/);
   } finally {
     child.kill();
@@ -119,7 +122,7 @@ test("AIFY_NO_DASHBOARD keeps a terminal on the plain banner", async (t) => {
     // Asserted on the view's CONTENT, not on the absence of a screen-clear escape. ConPTY emits its
     // own escapes when a terminal is allocated, so "no escapes" is not evidence about this program --
     // the first version of this test asserted exactly that and failed against a working opt-out.
-    assert.ok(!/AGENTS/.test(plain), "the opt-out did not stop the view");
+    assert.ok(!/PROCESSES/.test(plain), "the opt-out did not stop the view");
     assert.ok(!/TRAFFIC/.test(plain), "the opt-out did not stop the view");
   } finally {
     child.kill();

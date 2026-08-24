@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  DEFAULT_AGENTS_TIMEOUT_MS,
   DEFAULT_PROBE_TIMEOUT_MS,
   collectSnapshot,
   knock,
@@ -24,13 +23,6 @@ const REGISTRY = JSON.stringify({
 const ENV_HEALTH = {
   version: "0.6.0", terminals: true, processes: [], unknown: [],
   traffic: { requests: 3, bytesOut: 40 },
-};
-
-const AGENTS = {
-  agents: {
-    live: { name: "Live", runtime: "codex", sessionMode: "managed", status: "working" },
-    dead: { name: "Dead", runtime: "codex", sessionMode: "managed", status: "offline" },
-  },
 };
 
 /** A fetch that answers from a table and records what it was asked, including each budget. */
@@ -55,46 +47,6 @@ const options = (fetchImpl) => ({
   readFile: () => REGISTRY,
 });
 
-test("a healthy environment and service produce rows the service supplied", async () => {
-  const snapshot = await collectSnapshot(options(fakeFetch({
-    "8802/health": ENV_HEALTH,
-    "8800/health": { status: "healthy", version: "0.6.0", build: "abc" },
-    "/api/v1/agents": AGENTS,
-  })));
-  assert.equal(snapshot.version, "0.6.0");
-  assert.equal(snapshot.terminals.available, true);
-  assert.equal(snapshot.agentsAnswered, 1);
-  assert.deepEqual(snapshot.agents.map((a) => a.id), ["live"]);
-  assert.match(snapshot.agentsNote, /1 not shown/);
-  assert.deepEqual(snapshot.agentsUnavailable, []);
-});
-
-test("a service that does not answer is recorded as unasked, never as empty", async () => {
-  // The failure this collector exists to avoid. "Did not reply" and "replied with none" are different
-  // facts, and only one of them says anything about agents.
-  const snapshot = await collectSnapshot(options(fakeFetch({
-    "8802/health": ENV_HEALTH,
-    "8800/health": { status: "healthy" },
-    // no /api/v1/agents entry: the fetch throws
-  })));
-  assert.equal(snapshot.agentsAnswered, 0);
-  assert.deepEqual(snapshot.agents, []);
-  assert.equal(snapshot.agentsUnavailable.length, 1);
-  assert.equal(snapshot.agentsUnavailable[0].service, "aify-comms");
-  assert.match(snapshot.agentsUnavailable[0].reason, /ECONNREFUSED/);
-});
-
-test("a service answering with something unreadable is also not an answer about agents", async () => {
-  const impl = async (url) => {
-    if (String(url).endsWith("8802/health")) return { json: async () => ENV_HEALTH };
-    if (String(url).endsWith("8800/health")) return { json: async () => ({ status: "healthy" }) };
-    return { json: async () => { throw new Error("not json"); } };
-  };
-  const snapshot = await collectSnapshot(options(impl));
-  assert.equal(snapshot.agentsAnswered, 0);
-  assert.match(snapshot.agentsUnavailable[0].reason, /unreadable/);
-});
-
 test("an environment that is not answering is said out loud, not blanked", async () => {
   const snapshot = await collectSnapshot(options(fakeFetch({ "8800/health": { status: "healthy" } })));
   assert.equal(snapshot.version, "?");
@@ -111,17 +63,6 @@ test("an unreadable registry means no services, not a crash", async () => {
     readFile: () => { throw new Error("ENOENT"); },
   });
   assert.deepEqual(snapshot.services, []);
-  assert.equal(snapshot.agentsAnswered, 0);
-  assert.deepEqual(snapshot.agentsUnavailable, []);
-});
-
-test("the agent list gets a longer budget than a health probe", async () => {
-  // Not decoration: the agent list is ~60 KB against a health payload's ~200 bytes and is served by a
-  // single-worker process. Borrowing the probe budget made a healthy service read as "timed out".
-  assert.ok(
-    DEFAULT_AGENTS_TIMEOUT_MS > DEFAULT_PROBE_TIMEOUT_MS,
-    `agents ${DEFAULT_AGENTS_TIMEOUT_MS} must exceed probe ${DEFAULT_PROBE_TIMEOUT_MS}`,
-  );
 });
 
 test("knock turns a timeout into a stated reason rather than an exception", async () => {
@@ -159,13 +100,12 @@ test("the first frame is drawn before the caller is resumed", async () => {
   // So a caller can await a visible screen rather than racing it.
   const written = [];
   const { stop } = await startDashboard(drawOptions(
-    fakeFetch({ "8802/health": ENV_HEALTH, "8800/health": { status: "healthy" }, "/api/v1/agents": AGENTS }),
+    fakeFetch({ "8802/health": ENV_HEALTH, "8800/health": { status: "healthy" } }),
     { once: true, write: (text) => written.push(text) },
   ));
   stop();
   assert.equal(written.length, 1, "no frame, or more than one, before resolving");
   assert.match(written[0], /SERVICES/);
-  assert.match(written[0], /AGENTS/);
 });
 
 test("once means once: nothing is scheduled", async () => {
