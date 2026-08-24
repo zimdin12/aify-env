@@ -244,6 +244,34 @@ const server = createServer(async (request, response) => {
   response.end(payload);
 });
 
+// A PORT ALREADY IN USE IS AN ORDINARY CONDITION, so it gets an ordinary message.
+//
+// Without this the process died on an unhandled 'error' event and printed a Node stack trace, for the
+// most likely mistake anyone makes with this command: running it twice. The remedy is obvious once
+// stated and invisible in a trace, and an operator meeting that dump has no reason to think an
+// environment is already up and serving perfectly well.
+//
+// Exit 69 (EX_UNAVAILABLE) rather than 1: a supervisor restarting on failure should not fight the
+// instance that already holds the port.
+server.on("error", (failure) => {
+  if (failure?.code === "EADDRINUSE") {
+    process.stderr.write(
+      `aify-env: an environment is already running on http://${HOST}:${port}.${chr10}`
+      + `  see it:  aify-env tui${chr10}`
+      + `  ask it:  aify-env doctor${chr10}`
+      + `  replace it: stop that one first — starting a second would not have owned its processes.${chr10}`,
+    );
+    process.exit(69);
+  }
+  if (failure?.code === "EACCES") {
+    process.stderr.write(`aify-env: not allowed to listen on ${HOST}:${port}.${chr10}`);
+    process.exit(77);
+  }
+  // Anything else is genuinely unexpected and keeps its detail, which is what a trace is FOR.
+  process.stderr.write(`aify-env: could not listen on ${HOST}:${port}: ${failure?.stack ?? failure}${chr10}`);
+  process.exit(70);
+});
+
 server.listen(port, HOST, async () => {
   const bound = server.address();
   const support = terminalSupport();
