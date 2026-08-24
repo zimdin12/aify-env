@@ -145,3 +145,56 @@ test("POSITIVE CONTROL: bash resolves to a real absolute path on this machine", 
   assert.notEqual(found, "bash", "bash did not resolve; node-pty would refuse this");
   assert.match(found, /bash/i);
 });
+
+// WSL's bash is not a usable interpreter for a Windows-path launcher.
+//
+// Found on a live host, not in a fixture. `resolveExecutable("bash")` walks PATH and returns the first
+// match; on a daemon whose PATH puts C:\Windows\system32 before Git's usr\bin, that is
+// C:\Windows\system32\bash.EXE — WSL. It cannot open a Windows path, and bash's own quote removal eats
+// the backslashes on the way, so C:\dir\probe-aify arrives as C:dirprobe-aify. Exit 127, in every path
+// form: forward slashes, backslashes, short names, long names.
+//
+// The suite could not see it. tests that start their own daemon inherit the PATH of a Git-Bash parent,
+// where Git bash comes first — the same code taking the other branch. The branch that runs on a real
+// Windows host was the broken one.
+//
+// Skipping it and continuing the walk is the fix, not erroring: a host may legitimately have WSL bash
+// AND Git bash, and the second one is the answer.
+test("the System32 WSL bash is skipped when resolving a POSIX shell on Windows", () => {
+  const B = String.fromCharCode(92);
+  const pathValue = [`C:${B}Windows${B}system32`, `C:${B}Program Files${B}Git${B}usr${B}bin`].join(";");
+  const seen = [];
+  const exists = (candidate) => {
+    seen.push(candidate);
+    return candidate.toLowerCase().endsWith("bash.exe");
+  };
+
+  const got = resolveExecutable("bash", { pathValue, sep: ";", pathExt: ["", ".EXE"], exists });
+  assert.equal(got, `C:${B}Program Files${B}Git${B}usr${B}bin${B}bash.EXE`,
+    "the Git bash further down PATH is the usable one");
+  assert.ok(seen.some((c) => c.toLowerCase().includes("system32")),
+    "it must have LOOKED at System32 — skipping something never examined proves nothing");
+});
+
+test("a host with only the System32 bash gets the name back rather than a shell that cannot work", () => {
+  const B = String.fromCharCode(92);
+  const got = resolveExecutable("bash", {
+    pathValue: `C:${B}Windows${B}system32`,
+    sep: ";", pathExt: ["", ".EXE"],
+    exists: (c) => c.toLowerCase().endsWith("bash.exe"),
+  });
+  // Falling back to the bare name lets the OS decide, which is what happened before any resolution
+  // existed. Returning the WSL path would be actively choosing the one that cannot work.
+  assert.equal(got, "bash");
+});
+
+test("System32 is only special for POSIX shells, not for every executable", () => {
+  const B = String.fromCharCode(92);
+  const got = resolveExecutable("where", {
+    pathValue: `C:${B}Windows${B}system32`,
+    sep: ";", pathExt: ["", ".EXE"],
+    exists: (c) => c.toLowerCase().endsWith("where.exe"),
+  });
+  assert.equal(got, `C:${B}Windows${B}system32${B}where.EXE`,
+    "ordinary Windows executables in System32 are exactly where they should be found");
+});
