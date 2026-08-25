@@ -78,6 +78,41 @@ tree, because a launcher is a script and the agent is its child.
 One case it cannot fix and does not hide: if a launcher dies before the agent it started, the agent is
 orphaned with no parent, and no pid-tree walk can find it from the record.
 
+## Starting a second one takes over
+
+`aify-env` supersedes the environment already running: it stops the incumbent and takes the port. That
+is what starting an environment means, and it matches what the aify-comms bridge has always done.
+
+**The predecessor's processes are not stranded.** They are in the on-disk record, and the replacement
+reaps from it -- but only AFTER the port is its own. That ordering is load-bearing and was wrong: the
+reap ran BEFORE the bind, so a second start read the record of the instance already running, found its
+processes alive and verifiably ours, killed them as orphans, and only then discovered the port was
+taken and exited. The incumbent kept serving, robbed of its work.
+
+**The holder is asked before it is killed.** `/health` reports the pid, so a replacement asks the port
+who is there rather than scanning the process table: a pid says nothing about what a process is, and a
+healthy status alone could come from anything serving JSON. Something that does not identify as an
+aify-env is left alone, named, and the start exits 69 -- ending whatever happens to hold a port is how
+you stop somebody else's server.
+
+## What the view shows, and what it may not
+
+Services it can reach, the processes it started, and its own traffic. Each process row carries:
+
+- **agent** -- the `label` the caller supplied at spawn. aify-comms passes the agent id. aify-env
+  stores and displays the string and reads no meaning into it; knowing what an agent IS belongs to the
+  service. Without it a row reads `p2  pid 129340  aify-comms`, which cannot answer "which of my
+  agents is this".
+- **title** -- whatever terminal title the process set, taken off its output as it passes. Only the
+  process knows what it is doing, and it already says so in a sequence every terminal honours.
+- **up** -- derived where a clock is allowed. The view is pure and holds none.
+
+**Resident agents never appear here**, and that is not a gap: they connect straight to their service
+and this environment never starts them. What this list shows is what it launched.
+
+Colour and width are decided by the caller, so a pipe gets neither and `NO_COLOR` is honoured. Every
+state is a word as well as a colour -- a glyph alone fails for a piped view or a colour-blind reader.
+
 ## Why it exists
 
 Spawning used to live inside a coordinating service. That is fine with one service and impossible with
@@ -141,12 +176,12 @@ carrying no clue at all.
 ## What it does today
 
 ```
-aify-env                 run the environment on 127.0.0.1:8802
+aify-env                 run the environment on 127.0.0.1:8802, with the live view in this terminal
+aify-env tui             the live view alone, against an environment already running
+aify-env tui --once      render one frame and exit -- what a script or a test wants
+aify-env doctor          what this host can say about itself, and what each service said
 aify-env --port 0        pick an ephemeral port (what the tests use)
 aify-env --version
-
-aify-env-tui             a live view: services, owned processes, its own traffic
-aify-env-tui --once      render one frame and exit -- what a script wants
 
 aify-env                     run the environment, with the live view in this terminal
 aify-env tui                 the live view alone, against a daemon already running
