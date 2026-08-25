@@ -181,7 +181,13 @@ test("a host with only the System32 bash gets the name back rather than a shell 
   const got = resolveExecutable("bash", {
     pathValue: `C:${B}Windows${B}system32`,
     sep: ";", pathExt: ["", ".EXE"],
-    exists: (c) => c.toLowerCase().endsWith("bash.exe"),
+    // ONLY the WSL shells exist here. Saying "every bash.exe exists" would now include the Git
+    // fallback locations the resolver checks after PATH, and this test is about a host that has
+    // neither -- where the bare name, and letting the OS decide, is the honest last resort.
+    exists: (c) => {
+      const lower = c.toLowerCase().split(String.fromCharCode(92)).join("/");
+      return lower.endsWith("bash.exe") && !lower.includes("/git/");
+    },
   });
   // Falling back to the bare name lets the OS decide, which is what happened before any resolution
   // existed. Returning the WSL path would be actively choosing the one that cannot work.
@@ -293,11 +299,19 @@ test("both WSL entry points are skipped, in either order", () => {
   }
 });
 
-test("with ONLY a WSL bash available it is still returned, rather than nothing", () => {
-  // Skipping is a preference, not a veto. A host with no other shell should get a launch attempt and
-  // a real error, not a silent refusal that looks like the launcher was never found.
-  const resolved = resolveExecutable("bash", pathWith(dirOf(WINDOWS_APPS_BASH)));
-  assert.equal(resolved, "bash", "an unresolvable name falls back to the bare command");
+test("with ONLY a WSL bash available the bare name comes back, rather than nothing", () => {
+  // Skipping is a preference, not a veto. A host with no usable shell should get a launch attempt and
+  // a real error, not a silent refusal that reads as "the launcher was never found".
+  //
+  // `exists` must also deny the Git fallback locations the resolver checks after PATH -- otherwise
+  // this describes a host that HAS a working shell, and the resolver rightly finds it.
+  const onlyWsl = {
+    sep: ";",
+    pathValue: dirOf(WINDOWS_APPS_BASH),
+    pathExt: ["", ".EXE"],
+    exists: (candidate) => candidate === WINDOWS_APPS_BASH,
+  };
+  assert.equal(resolveExecutable("bash", onlyWsl), "bash");
 });
 
 test("a non-shell in WindowsApps is not skipped", () => {
