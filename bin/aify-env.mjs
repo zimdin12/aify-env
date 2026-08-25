@@ -93,28 +93,35 @@ const FRAME_END = chr10 + chr10;
 // the next instance cleans up from it.
 const OWNED_FILE = process.env.AIFY_ENV_PROCESS_RECORD || join(homedir(), ".aify", "env-processes.json");
 
-// REAP BEFORE LISTENING. Anything in the record is by definition from an instance that is no longer
-// running -- this one has not started a process yet -- so a live pid there is an orphan.
+// REAP ONLY ONCE THE PORT IS OURS. Everything in the record belongs to whichever instance wrote it,
+// and it is an ORPHAN only if nobody is still serving. Holding the port is what proves that.
 //
-// The killing decision fails CLOSED: a pid that cannot be confirmed as ours is left alone and
+// This ran BEFORE listening, and the order was the bug: a second start read the record of the instance
+// already running, found its processes alive and verifiably ours, killed them as orphans, and only
+// then discovered the port was taken and exited. The incumbent kept serving, robbed of its agents.
+// Proven with a real process in tests/a-second-start-does-not-rob-the-first.test.js.
+//
+// The killing decision still fails CLOSED: a pid that cannot be confirmed as ours is left alone and
 // reported. Pid reuse is real, and ending a stranger's process is a worse failure than the leak.
-const leftovers = planOrphanReap(readOwned(OWNED_FILE), { isAlive: defaultIsAlive, verify: defaultVerify });
-for (const entry of leftovers.reap) {
-  // The TREE, not the pid: the recorded process is a launcher, and the agent it started is a child of
-  // it. Reaping only the launcher leaves exactly the process an operator cared about.
-  const killed = killTree(entry.pid);
-  process.stderr.write(killed
-    ? `[aify-env] reaped orphan pid ${entry.pid} (${entry.service}) and its children, from a previous instance${chr10}`
-    : `[aify-env] could not reap pid ${entry.pid} (${entry.service})${chr10}`);
-}
-for (const { entry, reason } of leftovers.skipped) {
-  // Said out loud rather than swallowed. "Left running because we could not prove it was ours" is
-  // something an operator must be able to act on.
-  if (reason !== "already gone") {
-    process.stderr.write(`[aify-env] left pid ${entry.pid} (${entry.service}) alone: ${reason}${chr10}`);
+function reapLeftovers() {
+  const leftovers = planOrphanReap(readOwned(OWNED_FILE), { isAlive: defaultIsAlive, verify: defaultVerify });
+  for (const entry of leftovers.reap) {
+    // The TREE, not the pid: the recorded process is a launcher, and the agent it started is a child of
+    // it. Reaping only the launcher leaves exactly the process an operator cared about.
+    const killed = killTree(entry.pid);
+    process.stderr.write(killed
+      ? `[aify-env] reaped orphan pid ${entry.pid} (${entry.service}) and its children, from a previous instance${chr10}`
+      : `[aify-env] could not reap pid ${entry.pid} (${entry.service})${chr10}`);
   }
+  for (const { entry, reason } of leftovers.skipped) {
+    // Said out loud rather than swallowed. "Left running because we could not prove it was ours" is
+    // something an operator must be able to act on.
+    if (reason !== "already gone") {
+      process.stderr.write(`[aify-env] left pid ${entry.pid} (${entry.service}) alone: ${reason}${chr10}`);
+    }
+  }
+  clearOwned(OWNED_FILE);
 }
-clearOwned(OWNED_FILE);
 
 const runner = new Runner({ ownedFile: OWNED_FILE });
 
@@ -253,15 +260,59 @@ const server = createServer(async (request, response) => {
 //
 // Exit 69 (EX_UNAVAILABLE) rather than 1: a supervisor restarting on failure should not fight the
 // instance that already holds the port.
-server.on("error", (failure) => {
+/** Whether the thing holding our port is an aify-env, and which pid it is. */
+async function incumbent() {
+  try {
+    const response = await fetch(`http://${HOST}:${port}/health`, { signal: AbortSignal.timeout(3000) });
+    const body = await response.json();
+    // Both, because either alone is weak: a pid says nothing about what the process is, and a healthy
+    // status could come from anything that serves JSON on this port.
+    if (body?.status === "healthy" && Number.isInteger(body?.pid)) return { pid: body.pid, version: body.version };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+let superseding = false;
+server.on("error", async (failure) => {
   if (failure?.code === "EADDRINUSE") {
+    // TAKE OVER, rather than refuse. Operator ruling: starting the environment means this one serves.
+    // The predecessor's processes are not abandoned -- they are in the record, and this instance reaps
+    // from it after the port is ours, which is precisely why the reap moved.
+    //
+    // Only after ASKING. Killing whatever holds a port is how you end somebody else's server, so a
+    // holder that does not identify as an aify-env is left alone and reported.
+    if (superseding) {
+      process.stderr.write(`aify-env: could not take http://${HOST}:${port} even after stopping the previous instance.${chr10}`);
+      process.exit(69);
+    }
+    const holder = await incumbent();
+    if (!holder) {
+      process.stderr.write(
+        `aify-env: ${HOST}:${port} is held by something that is not an aify-env.${chr10}`
+        + `  It has been left alone. Free the port, or run with --port <n>.${chr10}`,
+      );
+      process.exit(69);
+    }
+    superseding = true;
     process.stderr.write(
-      `aify-env: an environment is already running on http://${HOST}:${port}.${chr10}`
-      + `  see it:  aify-env tui${chr10}`
-      + `  ask it:  aify-env doctor${chr10}`
-      + `  replace it: stop that one first — starting a second would not have owned its processes.${chr10}`,
+      `aify-env: superseding the environment already running on ${HOST}:${port} (pid ${holder.pid}, `
+      + `version ${holder.version ?? "unknown"}).${chr10}`,
     );
-    process.exit(69);
+    try {
+      killTree(holder.pid);
+    } catch {
+      // Reported by the retry failing, rather than swallowed here where it would read as success.
+    }
+    // Give the socket time to be released before trying again. A tighter loop just spends the same
+    // wait in more attempts.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      if (!(await incumbent())) break;
+    }
+    server.listen(port, HOST);
+    return;
   }
   if (failure?.code === "EACCES") {
     process.stderr.write(`aify-env: not allowed to listen on ${HOST}:${port}.${chr10}`);
@@ -275,6 +326,9 @@ server.on("error", (failure) => {
 server.listen(port, HOST, async () => {
   const bound = server.address();
   const support = terminalSupport();
+  // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
+  // reapLeftovers.
+  reapLeftovers();
   // One write, so the banner arrives whole. Two writes is a race for anything reading startup output
   // to know the process is up — including the tests, which caught exactly that.
   process.stdout.write(
