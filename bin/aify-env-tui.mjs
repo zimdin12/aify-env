@@ -28,6 +28,10 @@ const { stop } = await startDashboard({
   registryPath,
   once,
   clearScreen: !once,
+  // A pipe gets no escapes: --once is what a script or a test uses, and colour in captured output is
+  // noise that has to be stripped again by whoever reads it.
+  columns: process.stdout.columns || 100,
+  color: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
   intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),
   probeTimeoutMs: Number(process.env.AIFY_PROBE_TIMEOUT_MS || 1500),
   agentsTimeoutMs: Number(process.env.AIFY_AGENTS_TIMEOUT_MS || 6000),

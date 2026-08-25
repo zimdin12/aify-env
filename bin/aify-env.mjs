@@ -355,6 +355,10 @@ server.listen(port, HOST, async () => {
         endpoint: `http://${HOST}:${bound.port}`,
         registryPath: join(homedir(), ".aify", "services.json"),
         intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),
+        // Decided HERE, where the screen is, and passed to a pure renderer. NO_COLOR is the
+        // convention every other tool honours and costs one condition to respect.
+        columns: process.stdout.columns || 100,
+        color: !process.env.NO_COLOR,
       });
       stopDashboard = view.stop;
     } catch (failure) {

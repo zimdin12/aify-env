@@ -127,7 +127,10 @@ test("the view reports the environment's own traffic, and it is NOT zero after u
       await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) });
     }
     const rendered = frame(base, registry).stdout;
-    const match = /TRAFFIC\s+(\d+) requests/.exec(rendered);
+    // Matched on the COUNT rather than on it sharing a line with the heading. TRAFFIC is a section
+    // header now and the numbers sit under it, which is a layout choice the contract never had a view
+    // on: what matters is that the counter is shown and has moved.
+    const match = /(\d+) requests handled/.exec(rendered);
     assert.ok(match, `no traffic line in the view:\n${rendered}`);
     assert.ok(Number(match[1]) >= 3, `traffic read ${match[1]} after at least 3 requests`);
   } finally {

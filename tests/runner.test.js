@@ -18,7 +18,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { Runner, terminalSupport } from "../lib/runner.mjs";
+import { Runner, terminalSupport, lastTerminalTitle } from "../lib/runner.mjs";
 import { ProcessRegistry } from "../lib/process-registry.mjs";
 
 // A launcher, not just a marker: aify-env requires a shebang too, because a file that merely QUOTES
@@ -162,4 +162,44 @@ test("list() returns a COPY, so a caller cannot mutate the registry through it",
   registry.add({ service: "s", pid: 1 });
   registry.list().length = 0;
   assert.equal(registry.list().length, 1);
+});
+
+// ── The terminal title a process sets ─────────────────────────────────────────────────
+//
+// The operator asked to see the title bar text in the view. Only the process knows it, and it says so
+// in an OSC sequence every terminal already honours -- so it is read off the output as it passes
+// rather than asked for. Runs on every byte a process emits, so it must be cheap and must never throw.
+
+test("an OSC 0 title is picked out of a chunk", () => {
+  const E = String.fromCharCode(27);
+  const BELL = String.fromCharCode(7);
+  assert.equal(lastTerminalTitle(`${E}]0;claude - C:/Docker${BELL}`), "claude - C:/Docker");
+});
+
+test("OSC 2 sets a title too", () => {
+  const E = String.fromCharCode(27);
+  const BELL = String.fromCharCode(7);
+  assert.equal(lastTerminalTitle(`${E}]2;second${BELL}`), "second");
+});
+
+test("the LAST title in a chunk wins, because it is the current one", () => {
+  const E = String.fromCharCode(27);
+  const BELL = String.fromCharCode(7);
+  assert.equal(lastTerminalTitle(`${E}]0;first${BELL}output${E}]0;latest${BELL}`), "latest");
+});
+
+test("a string terminator ends a title as well as a bell", () => {
+  const E = String.fromCharCode(27);
+  assert.equal(lastTerminalTitle(`${E}]0;via-st${E}${String.fromCharCode(92)}`), "via-st");
+});
+
+test("output with no title yields null, not an empty title", () => {
+  // Null and "" are different: one means the process never said, the other that it said nothing.
+  assert.equal(lastTerminalTitle("ordinary output"), null);
+  assert.equal(lastTerminalTitle(""), null);
+});
+
+test("a sequence split across chunks is skipped rather than half-read", () => {
+  const E = String.fromCharCode(27);
+  assert.equal(lastTerminalTitle(`${E}]0;unterminated`), null);
 });

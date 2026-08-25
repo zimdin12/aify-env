@@ -38,9 +38,13 @@ test("registered services are listed with what they said about themselves", () =
 test("a SILENT service is shown as unanswered, not as down", () => {
   // The distinction a viewer acts on: silent may mean uninstalled or switched off, and showing it as
   // broken sends somebody to debug a service that is simply not running today.
-  const view = render();
-  assert.match(view, /aify-graph.*unanswered/s);
-  assert.doesNotMatch(view, /aify-graph.*(down|failed|broken)/s);
+  // Asserted on the service's OWN ROW rather than on the order two words happen to appear in. The
+  // first version matched /aify-graph.*unanswered/, which broke when the state column moved ahead of
+  // the name -- an ordering the contract never cared about.
+  const row = renderDashboard(SNAPSHOT).find((line) => line.includes("aify-graph"));
+  assert.ok(row, "the service is not shown at all");
+  assert.match(row, /unanswered/);
+  assert.doesNotMatch(row, /down|failed|broken/);
 });
 
 test("owned processes are shown with pid and owning service", () => {
@@ -100,4 +104,82 @@ test("rendering is pure: the same snapshot renders identically twice", () => {
   // Anything time-derived inside would make the view flicker and make this test flaky, which is the
   // early warning that a clock crept in.
   assert.deepEqual(renderDashboard(SNAPSHOT), renderDashboard(SNAPSHOT));
+});
+
+// ── A view an operator can actually read ──────────────────────────────────────────────
+//
+// The first version of this dashboard was padded plain text: no colour, fixed-width padding that
+// misaligned the moment a value was longer than the guess, no column headers, and no truncation, so a
+// long detail wrapped and broke the layout. The operator's verdict was that it was not a TUI. These
+// pin what makes it one.
+
+const ESCAPE = String.fromCharCode(27);
+const OWNED = {
+  version: "0.6.0", endpoint: "http://127.0.0.1:8802",
+  terminals: { available: true, reason: "" }, services: [], unknown: [],
+  processes: [
+    { id: "p2", pid: 129340, service: "aify-comms", terminal: true, uptimeMs: 412000,
+      label: "probe-one", title: "claude - C:/Docker/aify-comms" },
+    { id: "p3", pid: 7, service: "aify-comms", terminal: false, uptimeMs: 65000, label: "", title: "" },
+  ],
+  traffic: { requests: 167, bytesOut: 126175 },
+};
+
+test("a process row names the agent the caller gave it", () => {
+  // `p2  pid 129340  aify-comms` cannot tell an operator WHICH agent that is, which is what they asked.
+  const row = renderDashboard(OWNED).find((line) => line.includes("129340"));
+  assert.match(row, /probe-one/);
+});
+
+test("a process with no label renders a placeholder, not an empty column", () => {
+  const row = renderDashboard(OWNED).find((line) => line.includes(" 7 "));
+  assert.ok(row, "the unlabelled process vanished");
+  assert.ok(!/undefined|null/.test(row), row);
+});
+
+test("the terminal title the process set is shown", () => {
+  const row = renderDashboard(OWNED).find((line) => line.includes("129340"));
+  assert.match(row, /claude - C:/);
+});
+
+test("uptime is rendered from the field the collector supplies", () => {
+  // It read `uptimeMs` while the registry only stored `startedAtMs`, so every row showed "up -".
+  const row = renderDashboard(OWNED).find((line) => line.includes("129340"));
+  assert.match(row, /6m/);
+});
+
+test("no escape sequence appears when colour is off", () => {
+  // The default suits a pipe. Escapes in captured output are noise somebody has to strip again.
+  const view = renderDashboard(OWNED).join("\n");
+  assert.ok(!view.includes(ESCAPE), "an escape reached a non-colour render");
+});
+
+test("colour is applied only when asked for", () => {
+  const view = renderDashboard(OWNED, { color: true }).join("\n");
+  assert.ok(view.includes(ESCAPE), "colour was requested and none was applied");
+});
+
+test("columns line up once escapes are removed", () => {
+  // The whole point of measuring width rather than counting characters: a coloured cell is longer in
+  // bytes and identical on screen, and padding that counts the escapes misaligns every row after it.
+  const plain = (line) => line.split(ESCAPE).join("").replace(/\[[0-9;]*m/g, "");
+  const coloured = renderDashboard(OWNED, { color: true }).map(plain);
+  const mono = renderDashboard(OWNED, { color: false });
+  const rows = (lines) => lines.filter((l) => /129340|\s7\s/.test(l));
+  assert.deepEqual(rows(coloured).map((l) => l.length), rows(mono).map((l) => l.length));
+});
+
+test("a long value is clipped rather than allowed to wrap", () => {
+  const wide = {
+    ...OWNED,
+    processes: [{ ...OWNED.processes[0], title: "x".repeat(400) }],
+  };
+  for (const line of renderDashboard(wide, { columns: 100 })) {
+    assert.ok(line.length <= 100, `a line ran past the terminal width: ${line.length}`);
+  }
+});
+
+test("the same snapshot renders identically twice, with and without colour", () => {
+  assert.deepEqual(renderDashboard(OWNED), renderDashboard(OWNED));
+  assert.deepEqual(renderDashboard(OWNED, { color: true }), renderDashboard(OWNED, { color: true }));
 });
