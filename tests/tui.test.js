@@ -97,7 +97,14 @@ test("an empty host renders without throwing and says it is empty", () => {
     traffic: { requests: 0, bytesOut: 0 },
   }).join("\n");
   assert.match(view, /no services/i);
-  assert.match(view, /no processes/i);
+  // The PROCESSES line no longer says "no processes": an empty list now names WHICH empty it is,
+  // after the operator read the old wording as a fault while the environment was merely idle. The
+  // property this test was protecting is unchanged and asserted directly -- a fresh host renders a
+  // sentence, not a blank rectangle.
+  assert.match(view, /no spawn has reached it yet/);
+  const lines = view.split(String.fromCharCode(10));
+  const processesLine = lines[lines.findIndex((l) => l.includes("PROCESSES")) + 1];
+  assert.ok(processesLine && processesLine.trim().length > 10, "the panel rendered blank");
 });
 
 test("rendering is pure: the same snapshot renders identically twice", () => {
