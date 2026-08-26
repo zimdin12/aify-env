@@ -221,12 +221,19 @@ const server = createServer(async (request, response) => {
         response.write("data: " + JSON.stringify(chunk) + FRAME_END);
         traffic.bytesOut += Buffer.byteLength(chunk);
       },
-      (code) => {
+      (code, signal) => {
         // A NAMED event, so a consumer reading data: frames as output cannot mistake an exit for a
         // line the process printed. Then the stream ends: a console told the process is gone has
         // nothing left to wait for, and leaving it open makes a dead agent look like a thinking one
         // -- which is the failure this event exists to prevent.
-        response.write("event: exit" + chr10 + "data: " + JSON.stringify({ code }) + FRAME_END);
+        //
+        // TWO FIELDS SINCE 2026-08-26, because one could not say what happened. `code` may now be
+        // null -- that is what a signalled death looks like, and it used to be coerced to 0 before it
+        // ever reached this line. `signal` is OMITTED rather than sent empty, so a consumer can tell
+        // "nothing killed it" from "killed by something I have no name for", and so an older consumer
+        // reading only `code` sees a frame the same shape it always saw.
+        const frame = signal ? { code, signal } : { code };
+        response.write("event: exit" + chr10 + "data: " + JSON.stringify(frame) + FRAME_END);
         response.end();
       },
     );
