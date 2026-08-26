@@ -104,7 +104,15 @@ const OWNED_FILE = process.env.AIFY_ENV_PROCESS_RECORD || join(homedir(), ".aify
 // The killing decision still fails CLOSED: a pid that cannot be confirmed as ours is left alone and
 // reported. Pid reuse is real, and ending a stranger's process is a worse failure than the leak.
 function reapLeftovers() {
-  const leftovers = planOrphanReap(readOwned(OWNED_FILE), { isAlive: defaultIsAlive, verify: defaultVerify });
+  // `ownerIsAlive` is the guard the port could not be: an entry written by an instance that is STILL
+  // RUNNING belongs to that instance, not to a crash. Holding the port proves nobody else is serving
+  // only when the port is a fixed one -- `--port 0` takes an ephemeral port that is always free, so
+  // this function ran in full for a daemon that owned nothing and reaped a live environment's fleet.
+  const leftovers = planOrphanReap(readOwned(OWNED_FILE), {
+    isAlive: defaultIsAlive,
+    verify: defaultVerify,
+    ownerIsAlive: defaultIsAlive,
+  });
   for (const entry of leftovers.reap) {
     // The TREE, not the pid: the recorded process is a launcher, and the agent it started is a child of
     // it. Reaping only the launcher leaves exactly the process an operator cared about.

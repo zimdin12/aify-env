@@ -29,8 +29,26 @@ test("a started process is written down, and reads back", () => {
   const file = tmp();
   recordStarted(file, { id: "p1", pid: 4242, service: "aify-comms", launcher: "/l/claude-aify", startedAt: 1000 });
   assert.deepEqual(readOwned(file), [
-    { id: "p1", pid: 4242, service: "aify-comms", launcher: "/l/claude-aify", startedAt: 1000 },
+    { id: "p1", pid: 4242, service: "aify-comms", launcher: "/l/claude-aify", startedAt: 1000, owner: process.pid },
   ]);
+});
+
+test("the writing instance stamps itself as the OWNER, without being asked", () => {
+  // Not optional, and not the caller's job to remember. `owner` is what lets a later instance tell an
+  // orphan from another LIVE instance's process, and the entry that most needs it is the one written
+  // by code that has never heard of the field. Defaulting to `process.pid` at the write site is what
+  // makes every entry carry it. See a-live-owners-processes-are-not-orphans.test.js for the incident.
+  const file = tmp();
+  recordStarted(file, { id: "p1", pid: 4242, service: "aify-comms" });
+  assert.equal(readOwned(file)[0].owner, process.pid);
+});
+
+test("an explicit owner is honoured over the default", () => {
+  // A caller recording on another instance's behalf must be able to say so, rather than silently
+  // claiming the entry.
+  const file = tmp();
+  recordStarted(file, { id: "p1", pid: 4242, service: "aify-comms", owner: 12345 });
+  assert.equal(readOwned(file)[0].owner, 12345);
 });
 
 test("several processes accumulate, and stopping removes only its own", () => {
