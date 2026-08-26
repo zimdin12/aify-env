@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { killTreePlan } from "../lib/kill-tree.mjs";
+import { isSelfProtected, killTreePlan } from "../lib/kill-tree.mjs";
 
 test("windows kills the whole tree, forcibly, in one call", () => {
   const plan = killTreePlan(4242, "win32");
@@ -84,4 +84,55 @@ test("nothing is signalled for a pid that failed the guard", () => {
 
 test("a throwing runner is reported, not propagated", () => {
   assert.equal(killTree(1, { platform: "win32", run: () => { throw new Error("no taskkill"); } }), false);
+});
+
+// ---------------------------------------------------------------------------------------------
+// SELF-PROTECTION, added 2026-08-26. Not a new idea: aify-comms carries the same guard on the same
+// syscall, with the incident written beside it -- "a STALE/RECYCLED DB pid could taskkill the bridge,
+// the operator's own shell, or a sibling agent's worker TREE on Windows". aify-env had none.
+//
+// Every pid reaching killTree comes from this environment's own registry, so in the normal case it is
+// a child and this changes nothing. But a pid is a NUMBER, and on a host spawning agents continuously
+// Windows recycles numbers: `/T` on the wrong one takes a whole tree that was never ours.
+// ---------------------------------------------------------------------------------------------
+
+test("this environment's own pid is never tree-killed", () => {
+  assert.equal(isSelfProtected(process.pid), true);
+  const plan = killTreePlan(process.pid, "win32");
+  assert.equal(plan.command, null, "taskkill /T was planned against this very process");
+  assert.equal(plan.refused, "self-protected");
+});
+
+test("the parent is protected too, because ending it ends this environment", () => {
+  assert.equal(isSelfProtected(process.ppid), true);
+  assert.equal(killTreePlan(process.ppid, "linux").viaSignal, null);
+});
+
+test("0 and 1 are refused on every platform", () => {
+  // 0 is "my whole process group" on POSIX and 1 is init. Neither is a mistake worth making once.
+  for (const platform of ["win32", "linux", "darwin"]) {
+    assert.equal(killTreePlan(0, platform).command, null, platform);
+    assert.equal(killTreePlan(1, platform).command, null, platform);
+    assert.equal(killTreePlan(1, platform).viaSignal, null, platform);
+  }
+});
+
+test("an ordinary child pid is still planned normally", () => {
+  // The control. A guard that refused everything would pass every test above and stop the environment
+  // cleaning up after itself -- a leak instead of a cross-kill.
+  assert.equal(isSelfProtected(999999, 4242, 4243), false);
+  assert.equal(killTreePlan(999999, "win32").command, "taskkill");
+  assert.deepEqual(killTreePlan(999999, "linux").viaSignal, [-999999, 999999]);
+});
+
+test("killTree carries out nothing for a protected pid", () => {
+  // The plan is the decision; this proves the decision is honoured rather than recomputed.
+  const calls = [];
+  const attempted = killTree(process.pid, {
+    platform: "win32",
+    run: (...args) => { calls.push(args); },
+    kill: (...args) => { calls.push(args); },
+  });
+  assert.equal(attempted, false);
+  assert.deepEqual(calls, [], "a syscall was issued against a self-protected pid");
 });
