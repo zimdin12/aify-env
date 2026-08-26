@@ -168,3 +168,79 @@ test("the panel says WHO removed it, not just that nothing was reported", async 
   // And an OLD record, written before the reason existed, still renders rather than disappearing.
   assert.match(render(""), /no exit reported/);
 });
+
+// ---------------------------------------------------------------------------------------------
+// WHAT IT WAS SAYING WHEN IT WENT.
+//
+// An exit code cannot tell a crash from a kill. Measured earlier today: on Windows a process
+// terminated from outside reports `(1, null)` and so does a program that simply returned 1. Eight of
+// the operator's agents died reporting exactly that, and the number alone could not separate the two
+// readings. The final bytes usually can -- a stack trace, a provider error, or nothing at all, which
+// is itself the signature of an abrupt end.
+// ---------------------------------------------------------------------------------------------
+
+test("a process that printed before dying has its last words kept", async () => {
+  const runner = new Runner({ openTerminal: null });
+  const handle = await runner.start(spec(
+    "process.stdout.write('Error: provider refused the request'); process.exit(1)",
+  ));
+  await handle.exited;
+  await new Promise((r) => setTimeout(r, 40));
+
+  const exit = lastExit(runner);
+  assert.equal(exit.exitCode, 1);
+  assert.match(exit.lastOutput, /provider refused the request/,
+    "the exit code says 1 and nothing says why; that is the reading this field exists to improve");
+});
+
+test("terminal chrome is stripped so a human can read it", () => {
+  const ESC = String.fromCharCode(27);
+  const registry = new ProcessRegistry();
+  const entry = registry.add({ service: "s", pid: 1, label: "a" });
+  registry.remove(entry.id, {
+    atMs: 1,
+    exitCode: 1,
+    reason: "exited",
+    // A real TUI's last frame: a clear, a colour, the message, a reset, and cursor moves.
+    lastOutput: `${ESC}[2J${ESC}[31mfatal: gateway did not become ready${ESC}[0m\r\n   at boot\n`,
+  });
+  assert.equal(registry.history.recentExits.at(-1).lastOutput,
+    "fatal: gateway did not become ready at boot");
+});
+
+test("a silent death records an empty string, which is itself the finding", () => {
+  // Nothing printed before the end is what an abrupt external kill looks like, and it must be
+  // distinguishable from a crash that explained itself.
+  const registry = new ProcessRegistry();
+  const entry = registry.add({ service: "s", pid: 1, label: "a" });
+  registry.remove(entry.id, { atMs: 1, exitCode: 1, reason: "exited", lastOutput: "" });
+  assert.equal(registry.history.recentExits.at(-1).lastOutput, "");
+});
+
+test("the tail is CLIPPED, and keeps the END", () => {
+  // A ring must not become a log, and the interesting part of a dying process's output is the last
+  // of it -- clipping from the front would keep the boot banner and drop the error.
+  const registry = new ProcessRegistry();
+  const entry = registry.add({ service: "s", pid: 1, label: "a" });
+  registry.remove(entry.id, {
+    atMs: 1, reason: "exited", exitCode: 1,
+    lastOutput: `${"x".repeat(5000)} THE ACTUAL ERROR`,
+  });
+  const kept = registry.history.recentExits.at(-1).lastOutput;
+  assert.ok(kept.length <= 200, `kept ${kept.length} characters`);
+  assert.match(kept, /THE ACTUAL ERROR$/, "the clip kept the beginning instead of the end");
+});
+
+test("this file's own source carries no raw control bytes", async () => {
+  // THREE ATTEMPTS AT THE STRIPPING REGEX put literal escape and control characters into
+  // process-registry.mjs -- once inside the comment that was explaining the problem. A source file
+  // that greps as binary is a source file nobody can review, so the rule is checked rather than
+  // remembered.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const source = readFileSync(
+    fileURLToPath(new URL("../lib/process-registry.mjs", import.meta.url)),
+  );
+  const control = [...source].filter((b) => b < 9 || (b > 10 && b < 32 && b !== 13));
+  assert.deepEqual(control, [], "the registry source contains raw control bytes");
+});
