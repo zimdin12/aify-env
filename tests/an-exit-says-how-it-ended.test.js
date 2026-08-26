@@ -119,3 +119,52 @@ test("the exits are COPIES, like the process list", () => {
   registry.history.recentExits[0].exitCode = 999;
   assert.equal(registry.history.recentExits[0].exitCode, 7, "a reader mutated the registry");
 });
+
+// ---------------------------------------------------------------------------------------------
+// WHICH PATH REMOVED IT, added after the first real reading of this ring.
+//
+// The panel showed two deaths as "no exit reported". That was already an answer -- a process that ends
+// on its own always arrives through the close event carrying a code or a signal, so those two were
+// REMOVED rather than observed exiting. What it could not say was by whom, and "somebody asked for a
+// stop" and "the sweep found a corpse" are different incidents with different culprits.
+// ---------------------------------------------------------------------------------------------
+
+test("an observed exit is recorded as `exited`, with its code", async () => {
+  const runner = new Runner({ openTerminal: null });
+  const handle = await runner.start(spec("process.exit(0)"));
+  await handle.exited;
+  await new Promise((r) => setTimeout(r, 30));
+  const exit = lastExit(runner);
+  assert.equal(exit.reason, "exited");
+  assert.equal(exit.exitCode, 0);
+});
+
+test("a STOP is recorded as `stopped`, and a reap as `reaped`", async () => {
+  const runner = new Runner({ openTerminal: null });
+  const stopped = await runner.start(spec("setTimeout(() => {}, 30000)"));
+  await runner.stop(stopped.id);
+  assert.equal(lastExit(runner).reason, "stopped", "a requested stop is indistinguishable from a reap");
+
+  const reaped = await runner.start(spec("setTimeout(() => {}, 30000)"));
+  runner.release(reaped.id);
+  assert.equal(lastExit(runner).reason, "reaped");
+  // Neither invented a code: nobody watched either of them end.
+  assert.equal(lastExit(runner).exitCode, null);
+  process.kill(reaped.pid, "SIGKILL");
+});
+
+test("the panel says WHO removed it, not just that nothing was reported", async () => {
+  const { renderDashboard } = await import("../lib/tui.mjs");
+  const render = (reason) => renderDashboard({
+    endpoint: "", version: "0.6.0", services: [], processes: [], unknown: [],
+    traffic: { requests: 0, bytesOut: 0 }, nowMs: 1000,
+    history: { startedTotal: 1, lastExitAtMs: 900, recentExits: [
+      { id: "p1", label: "sc-coder", atMs: 900, exitCode: null, exitSignal: "", reason },
+    ] },
+  }, { columns: 120, color: false }).join("\n");
+
+  assert.match(render("stopped"), /stopped on request/);
+  assert.match(render("reaped"), /found already gone/);
+  // And an OLD record, written before the reason existed, still renders rather than disappearing.
+  assert.match(render(""), /no exit reported/);
+});
