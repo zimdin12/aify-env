@@ -244,3 +244,41 @@ test("this file's own source carries no raw control bytes", async () => {
   const control = [...source].filter((b) => b < 9 || (b > 10 && b < 32 && b !== 13));
   assert.deepEqual(control, [], "the registry source contains raw control bytes");
 });
+
+test("a REAPED death keeps its last words, even though it has no exit code", async () => {
+  // THE ASYMMETRY IS THE POINT. The reaper genuinely does not know the exit code -- nobody watched
+  // the process end -- but the OUTPUT is not unknown: it is sitting in the replay buffer that
+  // `#release` is about to delete. Dropping it threw away the only evidence a reaped death leaves.
+  //
+  // Found the hard way on 2026-08-26: two workers died as `found already gone` twelve seconds after a
+  // sibling died as `exited 1`, and the panel could show the sibling's final frame and nothing at all
+  // for the two that mattered, while their bytes were in memory the whole time.
+  const runner = new Runner({ openTerminal: null });
+  const handle = await runner.start(spec(
+    "process.stdout.write('the last thing it said'); setTimeout(() => {}, 30000)",
+  ));
+  await new Promise((r) => setTimeout(r, 120));
+
+  runner.release(handle.id);
+
+  const exit = lastExit(runner);
+  assert.equal(exit.reason, "reaped");
+  assert.equal(exit.exitCode, null, "a reaped death invented an exit code");
+  assert.match(exit.lastOutput, /the last thing it said/,
+    "a reaped death lost the only evidence it had");
+  process.kill(handle.pid, "SIGKILL");
+});
+
+test("a STOP keeps them too, and still claims no code", async () => {
+  const runner = new Runner({ openTerminal: null });
+  const handle = await runner.start(spec(
+    "process.stdout.write('mid-frame when stopped'); setTimeout(() => {}, 30000)",
+  ));
+  await new Promise((r) => setTimeout(r, 120));
+  await runner.stop(handle.id);
+
+  const exit = lastExit(runner);
+  assert.equal(exit.reason, "stopped");
+  assert.equal(exit.exitCode, null);
+  assert.match(exit.lastOutput, /mid-frame when stopped/);
+});
