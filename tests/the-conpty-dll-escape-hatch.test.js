@@ -71,3 +71,37 @@ test("POSIX never sees the option, so this is safe to set anywhere", () => {
   assert.match(unix, /UnixTerminal\.prototype\.kill/);
   assert.doesNotMatch(unix, /ConsoleProcessList/i, "the unix kill path now enumerates a console");
 });
+
+// ---------------------------------------------------------------------------------------------
+// AND THE ENVIRONMENT SAYS WHICH BACKEND IT PICKED.
+//
+// This flag is an experiment an operator runs against a LIVE fleet, and an experiment whose setting
+// cannot be observed is not an experiment. Setting the variable in the wrong shell, or before a
+// launcher that does not forward it, looks exactly like setting it correctly and the deaths
+// continuing -- which is the difference between "the fix did not work" and "the fix was not on".
+// ---------------------------------------------------------------------------------------------
+
+test("terminalSupport reports which kill path this environment will use", async () => {
+  const { terminalSupport } = await import("../lib/runner.mjs");
+  const support = terminalSupport();
+  assert.equal(typeof support.available, "boolean");
+  assert.equal(typeof support.conptyDll, "boolean",
+    "the environment cannot say which node-pty backend it selected");
+  // Off in this process, which is what makes the panel's silence meaningful.
+  assert.equal(support.conptyDll, false);
+});
+
+test("the view names the backend ONLY when it is the non-default one", async () => {
+  const { renderDashboard } = await import("../lib/tui.mjs");
+  const render = (terminals) => renderDashboard({
+    endpoint: "", version: "0.6.0", services: [], processes: [], unknown: [], terminals,
+    traffic: { requests: 0, bytesOut: 0 }, nowMs: 1000, history: { startedTotal: 0 },
+  }, { columns: 120, color: false }).join("\n");
+
+  assert.match(render({ available: true, reason: "", conptyDll: true }), /AIFY_ENV_CONPTY_DLL=1/);
+  // Silent in the normal case: a panel read at a glance during an incident gains no furniture.
+  assert.doesNotMatch(render({ available: true, reason: "", conptyDll: false }), /CONPTY/);
+  assert.doesNotMatch(render({ available: true, reason: "" }), /CONPTY/);
+  // And an unavailable terminal still reports its reason rather than a backend.
+  assert.match(render({ available: false, reason: "node-pty did not load" }), /UNAVAILABLE/);
+});

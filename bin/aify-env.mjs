@@ -342,7 +342,9 @@ server.listen(port, HOST, async () => {
     `aify-env ${VERSION} listening on http://${HOST}:${bound.port}\n`
     // Said at startup rather than discovered when a console renders nothing.
     + (support.available
-      ? "terminals: available\n"
+      // The backend is named only when it is the NON-default one, so a normal boot is unchanged and an
+      // operator running the conpty-DLL experiment can see at a glance that their variable took.
+      ? `terminals: available${support.conptyDll ? " (conpty DLL backend, AIFY_ENV_CONPTY_DLL=1)" : ""}\n`
       : `terminals: UNAVAILABLE (${support.reason}) — processes will run with piped stdio\n`),
   );
 
