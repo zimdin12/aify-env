@@ -35,7 +35,7 @@ import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
 import { startDashboard } from "../lib/dashboard.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
-import { clearOwned, readOwned } from "../lib/owned-processes.mjs";
+import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-processes.mjs";
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
 import { killTree } from "../lib/kill-tree.mjs";
 import { defaultIsAlive } from "../lib/reaper.mjs";
@@ -104,11 +104,13 @@ const OWNED_FILE = process.env.AIFY_ENV_PROCESS_RECORD || join(homedir(), ".aify
 // The killing decision still fails CLOSED: a pid that cannot be confirmed as ours is left alone and
 // reported. Pid reuse is real, and ending a stranger's process is a worse failure than the leak.
 function reapLeftovers() {
+  // READ ONCE, so what is spared and what is written back are the same list.
+  const recorded = readOwned(OWNED_FILE);
   // `ownerIsAlive` is the guard the port could not be: an entry written by an instance that is STILL
   // RUNNING belongs to that instance, not to a crash. Holding the port proves nobody else is serving
   // only when the port is a fixed one -- `--port 0` takes an ephemeral port that is always free, so
   // this function ran in full for a daemon that owned nothing and reaped a live environment's fleet.
-  const leftovers = planOrphanReap(readOwned(OWNED_FILE), {
+  const leftovers = planOrphanReap(recorded, {
     isAlive: defaultIsAlive,
     verify: defaultVerify,
     ownerIsAlive: defaultIsAlive,
@@ -128,7 +130,11 @@ function reapLeftovers() {
       process.stderr.write(`[aify-env] left pid ${entry.pid} (${entry.service}) alone: ${reason}${chr10}`);
     }
   }
-  clearOwned(OWNED_FILE);
+  // KEEP WHAT BELONGS TO A LIVE INSTANCE. This was an unconditional empty, which undid the guard
+  // above: the reaper spared another environment's processes and then deleted the only record that
+  // they exist. Sparing a process and forgetting it is barely better than killing it -- the operator
+  // still ends up with something running that nothing can clean up.
+  clearOwned(OWNED_FILE, { keep: entriesOwnedElsewhere(recorded, { ownerIsAlive: defaultIsAlive }) });
 }
 
 const runner = new Runner({ ownedFile: OWNED_FILE });
@@ -155,7 +161,11 @@ const shutdown = createShutdown({
   // A FUNCTION, so `server` is looked up when a signal arrives rather than read here, where it is
   // still in its temporal dead zone.
   closeServer: () => server.close(),
-  clearOwned: () => clearOwned(OWNED_FILE),
+  // OURS ONLY, on the way out too. Shutdown emptied the whole file, so an environment stopping
+  // normally erased a concurrently-running instance's record exactly as the boot reap did.
+  clearOwned: () => clearOwned(OWNED_FILE, {
+    keep: entriesOwnedElsewhere(readOwned(OWNED_FILE), { ownerIsAlive: defaultIsAlive }),
+  }),
   exit: (code) => process.exit(code),
   write: (line) => process.stderr.write(line),
 });
