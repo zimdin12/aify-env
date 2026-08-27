@@ -141,3 +141,22 @@ test("a decoration that fails to stop does not leave agents running", async () =
   await shutdown("SIGINT");
   assert.deepEqual(events, ["stopped:a", "exit:0"]);
 });
+
+test("each process is NAMED before it is stopped, so a wedged stop says which one", async () => {
+  // `stop()` can block the event loop synchronously: node-pty's ConPTY kill forks a console-list
+  // helper whose AttachConsole is unbounded. On such a run nothing after the call executes, so a line
+  // written AFTER the stop never reaches the screen and the operator sees only "stopping N managed
+  // process(es)" -- which is what "it froze at close again" has looked like twice.
+  //
+  // The ordering is the whole point. A test that only checked the line EXISTS would pass with the
+  // write moved after the stop, where it is worthless.
+  const { events, shutdown } = harness({ stopDelayMs: 5 });
+  await shutdown("SIGINT");
+
+  for (const id of ["a", "b"]) {
+    const named = events.findIndex((e) => e.startsWith("wrote:") && e.includes(`stopping ${id}`));
+    const stopped = events.indexOf(`stopped:${id}`);
+    assert.ok(named >= 0, `${id} was stopped without being named; a wedge here reports nothing`);
+    assert.ok(named < stopped, `${id} was named AFTER its stop, where a blocking stop never prints it`);
+  }
+});
