@@ -26,7 +26,7 @@
 // attributed to it -- this environment knows which processes it started, and alive is not working.
 
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,9 +40,25 @@ import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
 import { killTree } from "../lib/kill-tree.mjs";
 import { defaultIsAlive } from "../lib/reaper.mjs";
 import { homedir } from "node:os";
+import { buildIdentity, sourceFiles } from "../lib/build-identity.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = readFileSync(join(ROOT, "VERSION"), "utf8").trim();
+
+// WHAT IS ACTUALLY LOADED, computed from the files on the way in. `VERSION` says which release
+// this claims to be and does not move for a bug fix; BUILD moves whenever the code does, which is
+// the question an operator restarting to pick up a fix is actually asking. See
+// lib/build-identity.mjs for why it is a content hash rather than a git sha.
+//
+// Read at BOOT, deliberately. A build computed on demand would report whatever is on disk NOW,
+// which is the one answer that cannot tell you whether this process needs restarting.
+const BUILD = buildIdentity(
+  sourceFiles(ROOT, (dir) => readdirSync(dir), join),
+  (path) => readFileSync(path, "utf8"),
+  // Hashed under its path RELATIVE to the package, so the same code installed in two places
+  // reports the same build. An absolute path would make every install look different.
+  (path) => path.slice(ROOT.length).split(String.fromCharCode(92)).join("/"),
+);
 
 /** Never configurable. See above. */
 const HOST = "127.0.0.1";
@@ -50,7 +66,10 @@ const DEFAULT_PORT = 8802;
 
 const args = process.argv.slice(2);
 if (args.includes("--version")) {
-  process.stdout.write(`aify-env ${VERSION}\n`);
+  // BOTH, because one of them is the useful one. This prints what is on DISK; the running
+  // daemon's banner prints what IT loaded. Equal means current, different means restart -- and
+  // neither number needs to mean anything on its own for that comparison to be exact.
+  process.stdout.write(`aify-env ${VERSION} (build ${BUILD})\n`);
   process.exit(0);
 }
 // SUBCOMMANDS, not sibling binaries. One product should put one command on PATH: three of them is what
@@ -212,6 +231,7 @@ const server = createServer(async (request, response) => {
         runner,
         readFile: (path) => readFileSync(path, "utf8"),
         version: VERSION,
+        build: BUILD,
         unknown,
         terminals: terminalSupport(),
         traffic,
