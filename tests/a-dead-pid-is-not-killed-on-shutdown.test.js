@@ -41,8 +41,16 @@ const DEAD_PID = 0x7ffffff0;
  */
 function stopCode() {
   const src = readFileSync(new URL("../lib/runner.mjs", import.meta.url), "utf8");
-  const match = /async stop\(id\) \{[\s\S]*?\n  \}/.exec(src);
-  assert.ok(match, "positive control: stop() was not found in the source");
+  // Sliced by LINES, not by a regex over the whole file. The regex version pinned the signature
+  // (`async stop(id) {`) and stopped matching when the method gained an options parameter; the
+  // obvious repair, `stop\([^)]*\)`, is worse -- the parameter's default is `() => {}`, so the
+  // character class stops at ITS closing paren and the match fails a second time, silently looking
+  // like the same fault. The method's opening line and its closing brace are both unambiguous.
+  const lines = src.split("\n");
+  const open = lines.findIndex((line) => line.startsWith("  async stop("));
+  const close = open < 0 ? -1 : lines.indexOf("  }", open);
+  assert.ok(open >= 0 && close > open, "positive control: stop() was not found in the source");
+  const match = [lines.slice(open, close + 1).join("\n")];
   const code = match[0]
     .split("\n")
     .filter((line) => !line.trim().startsWith("//"))
@@ -62,6 +70,31 @@ test("stop() checks liveness BEFORE either kill", () => {
   assert.ok(guard >= 0);
   assert.ok(guard < code.indexOf("child.kill()"), "the check must precede child.kill()");
   assert.ok(guard < code.indexOf("killTree(pid)"), "the check must precede killTree()");
+});
+
+test("each blocking call is ANNOUNCED before it is made", () => {
+  // THE MUTATION THAT SURVIVED, and how it survived. `shutdown.test.js` asserts that the teardown
+  // prints a phase before the call -- but it drives a FAKE runner that calls `phase()` itself, so it
+  // proves the shutdown prints what it is told and nothing about this method's ordering. Moving the
+  // announcement after `child.kill()` in the real `stop()` left that suite green.
+  //
+  // The ordering is the entire value. `child.kill()` is node-pty's ConPTY kill and can block the
+  // event loop; when it does, nothing after it ever runs. A phase announced afterwards is announced
+  // never, for exactly the case it exists to report.
+  //
+  // Asserted on the source for the same reason the rest of this file is: reproducing a wedged ConPTY
+  // needs a live pty and a suspended console, which is the thing the fix exists to avoid touching.
+  const code = stopCode();
+  const announced = code.indexOf('phase("console-kill")');
+  const called = code.indexOf("child.kill()");
+  assert.ok(announced >= 0, "stop() no longer announces the console kill; a wedge there reports nothing");
+  assert.ok(
+    announced < called,
+    "the console kill is announced AFTER it is made. That call can block the event loop, so the "
+      + "line after it never runs -- the announcement has to already be on screen",
+  );
+  const tree = code.indexOf('phase("tree-kill")');
+  assert.ok(tree > called, "the tree-kill phase must follow the console kill it comes after");
 });
 
 test("the predicate that gates it can say BOTH answers", () => {

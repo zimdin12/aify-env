@@ -280,7 +280,10 @@ test("a stop that never resolves still exits, and says which process wedged", as
 
   assert.deepStrictEqual(exits, [0], "the shutdown did not exit; this is the hang");
   const text = written.join("");
-  assert.match(text, /p2 did not confirm/, "the wedged process was not named");
+  assert.match(text, /p2 \(in \w[\w-]*\) did not confirm/,
+    "the wedged process must be named WITH the call it is sitting in: which of the two blocking "
+      + "calls it wedged in is the difference between an actionable report and another round of "
+      + "guessing");
   assert.doesNotMatch(text, /p1 did not confirm/, "a process that DID stop was reported as stuck");
   assert.strictEqual(
     cleared, 0,
@@ -327,4 +330,103 @@ test("a stop that REJECTS is not a wedge", async () => {
 
   assert.strictEqual(cleared, 1, "a rejected stop was treated as still outstanding");
   assert.doesNotMatch(written.join(""), /did not confirm/);
+});
+
+
+// ---------------------------------------------------------------------------------------------
+// WHICH CALL IT WEDGED IN.
+//
+// `runner.stop()` makes two calls that can block the event loop. `killTree` no longer does.
+// `child.kill()` is node-pty's ConPTY kill and still can -- its console-list helper's AttachConsole
+// is unbounded, and no JS timer fires while it runs, so the deadline cannot save that one. When it
+// happens the screen stops and there is nothing to distinguish it from the case that IS bounded.
+//
+// So the phase line is written BEFORE the call it names. Announcing afterwards is worthless for
+// exactly the case that matters: the line never runs.
+
+test("the teardown names each blocking call BEFORE making it", async () => {
+  const written = [];
+  const shutdown = createShutdown({
+    runner: {
+      list: () => [{ id: "p1", pid: 11 }],
+      stop: async (_id, { phase } = {}) => {
+        phase?.("console-kill");
+        written.push("<the blocking call>");
+        phase?.("tree-kill");
+        phase?.("done");
+      },
+    },
+    clearOwned: () => {},
+    exit: () => {},
+    write: (line) => written.push(line.trim()),
+  });
+  await shutdown("SIGINT");
+
+  const announced = written.findIndex((line) => line.includes("p1 console-kill"));
+  const called = written.indexOf("<the blocking call>");
+  assert.ok(announced >= 0, "the blocking call was made without being named");
+  assert.ok(
+    announced < called,
+    "the phase was announced AFTER the call it names. A call that blocks the loop never reaches "
+      + "the line after it, so that ordering reports nothing for the only case it exists for",
+  );
+});
+
+test("a teardown that works does not narrate its last phase", async () => {
+  // "done" is for the record the timeout reads, not for the screen. A line per phase per process
+  // would be four processes of noise on every clean exit, and a screen nobody reads is the same
+  // failure as a screen that says nothing.
+  const written = [];
+  const shutdown = createShutdown({
+    runner: {
+      list: () => [{ id: "p1", pid: 11 }],
+      stop: async (_id, { phase } = {}) => { phase?.("console-kill"); phase?.("tree-kill"); phase?.("done"); },
+    },
+    clearOwned: () => {},
+    exit: () => {},
+    write: (line) => written.push(line.trim()),
+  });
+  await shutdown("SIGINT");
+  assert.ok(!written.some((line) => line.includes("done")), "the completed phase was printed");
+});
+
+test("the phase reported for a wedged process is the last one it ENTERED", async () => {
+  // Not the first, and not a guess. A process that got through the console kill and hung in the
+  // tree kill must not be reported as stuck in the console kill -- that would send the next
+  // investigation at the call that worked.
+  const written = [];
+  const shutdown = createShutdown({
+    runner: {
+      list: () => [{ id: "p1", pid: 11 }],
+      stop: (_id, { phase } = {}) => {
+        phase?.("console-kill");
+        phase?.("tree-kill");
+        return new Promise(() => {});
+      },
+    },
+    clearOwned: () => {},
+    exit: () => {},
+    write: (line) => written.push(line),
+    stopDeadlineMs: 5,
+  });
+  await shutdown("SIGINT");
+  assert.match(
+    written.join(""), /p1 \(in tree-kill\) did not confirm/,
+    "the wedged process was reported against a phase it had already left",
+  );
+});
+
+test("a stop that ignores the phase hook is still reported, as starting", async () => {
+  // The hook is optional and every other caller omits it. A runner that never calls it must not
+  // make the timeout message throw or read as empty.
+  const written = [];
+  const shutdown = createShutdown({
+    runner: { list: () => [{ id: "p1", pid: 11 }], stop: () => new Promise(() => {}) },
+    clearOwned: () => {},
+    exit: () => {},
+    write: (line) => written.push(line),
+    stopDeadlineMs: 5,
+  });
+  await shutdown("SIGINT");
+  assert.match(written.join(""), /p1 \(in starting\) did not confirm/);
 });
