@@ -122,7 +122,7 @@ const OWNED_FILE = process.env.AIFY_ENV_PROCESS_RECORD || join(homedir(), ".aify
 //
 // The killing decision still fails CLOSED: a pid that cannot be confirmed as ours is left alone and
 // reported. Pid reuse is real, and ending a stranger's process is a worse failure than the leak.
-function reapLeftovers() {
+async function reapLeftovers() {
   // READ ONCE, so what is spared and what is written back are the same list.
   const recorded = readOwned(OWNED_FILE);
   // `ownerIsAlive` is the guard the port could not be: an entry written by an instance that is STILL
@@ -137,7 +137,7 @@ function reapLeftovers() {
   for (const entry of leftovers.reap) {
     // The TREE, not the pid: the recorded process is a launcher, and the agent it started is a child of
     // it. Reaping only the launcher leaves exactly the process an operator cared about.
-    const killed = killTree(entry.pid);
+    const killed = await killTree(entry.pid);
     process.stderr.write(killed
       ? `[aify-env] reaped orphan pid ${entry.pid} (${entry.service}) and its children, from a previous instance${chr10}`
       : `[aify-env] could not reap pid ${entry.pid} (${entry.service})${chr10}`);
@@ -346,7 +346,7 @@ server.on("error", async (failure) => {
       + `version ${holder.version ?? "unknown"}).${chr10}`,
     );
     try {
-      killTree(holder.pid);
+      await killTree(holder.pid);
     } catch {
       // Reported by the retry failing, rather than swallowed here where it would read as success.
     }
@@ -373,7 +373,7 @@ server.listen(port, HOST, async () => {
   const support = terminalSupport();
   // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
   // reapLeftovers.
-  reapLeftovers();
+  await reapLeftovers();
   // One write, so the banner arrives whole. Two writes is a race for anything reading startup output
   // to know the process is up — including the tests, which caught exactly that.
   process.stdout.write(
