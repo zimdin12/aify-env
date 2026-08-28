@@ -18,6 +18,10 @@ function harness({ stopDelayMs = 0, stopThrowsFor = null } = {}) {
   const runner = {
     list: () => [{ id: "a" }, { id: "b" }],
     stop: async (id) => {
+      // ENTRY, not completion. The ordering tests below need to know when a stop BEGAN: a shutdown
+      // that writes every line first and only then starts stopping satisfies "named before it
+      // finished" while destroying the property that line actually carries.
+      events.push(`entered-stop:${id}`);
       if (stopDelayMs) await new Promise((resolve) => setTimeout(resolve, stopDelayMs));
       if (stopThrowsFor === id) {
         events.push(`stop-failed:${id}`);
@@ -92,8 +96,89 @@ test("one process that refuses to die does not strand the others", async () => {
 test("a second signal does not start a second teardown", async () => {
   const { events, shutdown } = harness();
   await Promise.all([shutdown("SIGINT"), shutdown("SIGINT")]);
-  assert.equal(events.filter((e) => e === "exit:0").length, 1);
+  // ONE teardown, whatever else happens. Two would stop each process twice and clear the record from
+  // under the first, which is the reason the guard exists at all.
   assert.equal(events.filter((e) => e === "stopped:a").length, 1);
+  assert.equal(events.filter((e) => e === "entered-stop:a").length, 1);
+});
+
+// THERE IS NO TEST FOR "a double-tap before the stops were issued is ignored", because there is no
+// such window. A gate on that was written, and its test failed on the first run: everything from
+// `beforeStop()` to the last `runner.stop()` call runs synchronously in one turn of the loop, so a
+// second signal is never delivered in between. The gate was removed rather than have a condition
+// that is always true.
+test("a second signal AFTER the stops were issued exits instead of being swallowed", async () => {
+  // WHAT THE OPERATOR ACTUALLY DID, twice: Ctrl+C, nothing, Ctrl+C again, nothing, kill the terminal.
+  // Killing the terminal is the worst available outcome -- the managed processes survive AND the
+  // owned record dies with the window, so nothing can ever reap them. The reflex is already correct;
+  // it just had no effect.
+  const { events, shutdown } = harness({ stopDelayMs: 20 });
+  const first = shutdown("SIGINT");
+  // Let the first reach the point where the stops have been asked for.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await shutdown("SIGINT");
+  assert.ok(
+    events.includes("exit:0"),
+    "the second signal was swallowed, so the only way out is still killing the terminal",
+  );
+  assert.ok(
+    events.some((e) => e.startsWith("wrote:") && e.includes("KEEPING the owned record")),
+    "the early exit must say the record is kept: an operator who thinks it was cleared has no reason "
+      + "to expect the next instance to reap anything",
+  );
+  assert.ok(
+    !events.includes("record-cleared"),
+    "the record was cleared on the escape path, which turns a slow shutdown into a permanent orphan",
+  );
+  await first;
+});
+
+test("stops are entered one at a time, so a synchronous wedge still names its process", async () => {
+  // THE REGRESSION THIS EXISTS TO CATCH, and it was mine. Bounding the shutdown with a deadline meant
+  // tracking each stop's settlement, and the first version wrote that as
+  // `Promise.resolve().then(() => runner.stop(id))`. That defers every call to a microtask, so all N
+  // `stopping pN` lines print before the first stop begins -- and the screen stops being able to say
+  // WHICH process wedged, which is the one thing the previous fix bought.
+  //
+  // The existing ordering test could not see it: it compares each line against that process's OWN
+  // completion, and batching satisfies that too. This compares ACROSS processes.
+  const { events, shutdown } = harness({ stopDelayMs: 5 });
+  await shutdown("SIGINT");
+  const namedB = events.findIndex((e) => e.startsWith("wrote:") && e.includes("stopping b"));
+  const enteredA = events.indexOf("entered-stop:a");
+  assert.ok(enteredA >= 0 && namedB >= 0, "the harness did not record both events");
+  assert.ok(
+    enteredA < namedB,
+    "every process was named before any stop began. A stop that blocks the event loop then shows all "
+      + "the lines and identifies nothing, which is exactly the report that could not be acted on.",
+  );
+});
+
+test("a stop that throws SYNCHRONOUSLY does not strand the processes after it", async () => {
+  // Calling `runner.stop` inline rather than inside a `.then` puts its synchronous throw on the map's
+  // own stack. Without a guard it escapes, the teardown dies there, and every process after the
+  // thrower is left running -- worse than the deferred version this replaced.
+  const events = [];
+  const shutdown = createShutdown({
+    runner: {
+      list: () => [{ id: "a" }, { id: "b" }],
+      stop: (id) => {
+        events.push(`entered-stop:${id}`);
+        if (id === "a") throw new Error("ConPTY refused");
+        events.push(`stopped:${id}`);
+      },
+    },
+    closeServer: () => {},
+    clearOwned: () => events.push("record-cleared"),
+    exit: (code) => events.push(`exit:${code}`),
+    write: () => {},
+  });
+  await shutdown("SIGINT");
+  assert.ok(events.includes("stopped:b"), "a synchronous throw on the first stop stranded the second");
+  assert.ok(events.includes("exit:0"), "a synchronous throw prevented the exit");
+  // It FINISHED, badly. That is not a wedge, so the record is safe to clear -- same rule as a
+  // rejecting stop.
+  assert.ok(events.includes("record-cleared"), "a stop that threw was mistaken for one that wedged");
 });
 
 test("it says how many processes it is taking with it", async () => {
