@@ -160,3 +160,86 @@ test("each process is NAMED before it is stopped, so a wedged stop says which on
     assert.ok(named < stopped, `${id} was named AFTER its stop, where a blocking stop never prints it`);
   }
 });
+
+// ---- a stop that never returns must not become a shutdown that never ends -----------------------
+//
+// THE OPERATOR HIT THIS TWICE. Ctrl+C printed `SIGINT: stopping 3 managed process(es)`, then the
+// three `stopping pN` lines, and then nothing at all until they killed the terminal. This file
+// already recorded the mechanism -- "`Promise.allSettled` guards against a rejection, not against a
+// call that never returns -- so a hang here is a hang forever" -- and named it without bounding it.
+//
+// THE PASTE NARROWED IT. All three `stopping pN` lines appeared. Each is written BEFORE its own
+// `runner.stop()` call and the map runs synchronously, so a synchronous wedge on the first process
+// would have suppressed lines two and three. It did not: every stop was entered and at least one
+// never came back. That rules out the synchronous-block theory the old comment leaned on, and it is
+// what makes a timeout the right instrument -- a timer cannot fire if the loop is blocked, and here
+// the loop is not blocked.
+
+test("a stop that never resolves still exits, and says which process wedged", async () => {
+  const written = [];
+  const exits = [];
+  let cleared = 0;
+  const shutdown = createShutdown({
+    runner: {
+      list: () => [{ id: "p1", pid: 11 }, { id: "p2", pid: 22 }],
+      // p1 settles; p2 never does -- the shape the operator saw.
+      stop: (id) => (id === "p1" ? Promise.resolve() : new Promise(() => {})),
+    },
+    clearOwned: () => { cleared += 1; },
+    exit: (code) => exits.push(code),
+    write: (line) => written.push(line),
+    stopDeadlineMs: 5,
+  });
+
+  await shutdown("SIGINT");
+
+  assert.deepStrictEqual(exits, [0], "the shutdown did not exit; this is the hang");
+  const text = written.join("");
+  assert.match(text, /p2 did not confirm/, "the wedged process was not named");
+  assert.doesNotMatch(text, /p1 did not confirm/, "a process that DID stop was reported as stuck");
+  assert.strictEqual(
+    cleared, 0,
+    "the owned record was cleared while a process was still unaccounted for -- that turns a slow "
+      + "shutdown into an orphan no later instance can find",
+  );
+});
+
+test("when every stop returns, the record is cleared and nothing is reported stuck", async () => {
+  // The control. A shutdown that always reported a wedge, or never cleared the record, would pass
+  // the case above while breaking the ordinary path this file's other tests describe.
+  const written = [];
+  const exits = [];
+  let cleared = 0;
+  const shutdown = createShutdown({
+    runner: { list: () => [{ id: "p1", pid: 11 }], stop: () => Promise.resolve() },
+    clearOwned: () => { cleared += 1; },
+    exit: (code) => exits.push(code),
+    write: (line) => written.push(line),
+    stopDeadlineMs: 5,
+  });
+
+  await shutdown("SIGINT");
+
+  assert.deepStrictEqual(exits, [0]);
+  assert.strictEqual(cleared, 1, "a clean shutdown must still clear the owned record");
+  assert.doesNotMatch(written.join(""), /did not confirm/);
+});
+
+test("a stop that REJECTS is not a wedge", async () => {
+  // A refusal is an answer. Treating it as unfinished would keep the owned record for a process that
+  // was accounted for, and orphan-reap the next instance into work it does not need to do.
+  const written = [];
+  let cleared = 0;
+  const shutdown = createShutdown({
+    runner: { list: () => [{ id: "p1", pid: 11 }], stop: () => Promise.reject(new Error("gone")) },
+    clearOwned: () => { cleared += 1; },
+    exit: () => {},
+    write: (line) => written.push(line),
+    stopDeadlineMs: 5,
+  });
+
+  await shutdown("SIGINT");
+
+  assert.strictEqual(cleared, 1, "a rejected stop was treated as still outstanding");
+  assert.doesNotMatch(written.join(""), /did not confirm/);
+});

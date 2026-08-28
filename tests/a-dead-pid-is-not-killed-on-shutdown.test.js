@@ -80,14 +80,32 @@ test("stopping an id the runner never had is a no-op, not a throw", async () => 
   assert.deepEqual(runner.list(), []);
 });
 
-test("the shutdown path still AWAITS the stops, which is why a hang there is fatal", () => {
-  // The other half of the incident, pinned where somebody looking at this file will find it. If the
-  // await were ever removed the hang would stop mattering -- and so would the guarantee that
-  // processes are gone before the daemon exits, which is the operator's stated rule.
+test("the shutdown WAITS for the stops, but not for ever", () => {
+  // WHAT THIS USED TO SAY, and why it changed. It asserted a bare `await Promise.allSettled(...)`
+  // on the grounds that removing the wait would cost "the guarantee that processes are gone before
+  // the daemon exits, which is the operator's stated rule". The wait is still here and the rule is
+  // still the goal. What changed is the recognition that an UNBOUNDED wait never delivered it.
+  //
+  // The operator hit the hang twice. Ctrl+C printed three `stopping pN` lines and then nothing, and
+  // both times they killed the terminal -- which leaves the processes running AND the owned record
+  // stale, the worst of both. So the real choice was never "wait or abandon". It was:
+  //
+  //   hang for ever  -> operator kills the terminal -> processes alive, record stale, nobody reaps
+  //   exit on a deadline -> processes alive, record KEPT, the next instance reaps them
+  //
+  // The second honours the rule by a different route, which is why the timeout path deliberately
+  // does NOT clear the owned file. `shutdown.test.js` drives that behaviour; this asserts the shape
+  // survives, because the shape is what the incident turned on.
   const src = readFileSync(new URL("../lib/shutdown.mjs", import.meta.url), "utf8");
-  assert.match(src, /await Promise\.allSettled\(/, "shutdown no longer waits for the stops");
+  assert.match(src, /await Promise\.race\(\[Promise\.allSettled\(/, "shutdown no longer waits for the stops");
+  assert.match(src, /STOP_DEADLINE_MS/, "the wait is unbounded again, which is the hang");
   assert.match(
     src, /allSettled, not all/,
     "the reason the wait exists is no longer written down beside it",
+  );
+  assert.match(
+    src, /NOT AT ALL when some did not confirm/,
+    "the timeout path may not clear the owned record: that record is the only way a later instance "
+      + "can find a process this one failed to stop",
   );
 });
