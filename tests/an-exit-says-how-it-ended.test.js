@@ -37,6 +37,31 @@ const spec = (script, label = "") => ({
 
 const lastExit = (runner) => runner.history().recentExits.at(-1);
 
+/**
+ * Wait until a running process has actually written `pattern`, rather than for a fixed number of
+ * milliseconds and a hope.
+ *
+ * A REAL child has to be spawned, reach `process.stdout.write`, and have its bytes make it into the
+ * replay buffer. The two tests below budgeted 120 ms for all of that; Node's cold start alone is
+ * 40-80 ms idle on Windows and more under a concurrent suite, so the assertion failed on an empty
+ * buffer rather than on the behaviour under test. `subscribe` replays what is already buffered, which
+ * makes the thing being waited for directly observable.
+ *
+ * The timeout is a BOUND and not a budget: it costs nothing when the write lands, and a genuine
+ * regression still fails in about a second instead of hanging.
+ */
+async function waitForOutput(runner, id, pattern, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let seen = "";
+    const stop = runner.subscribe(id, (chunk) => { seen += chunk; });
+    if (typeof stop === "function") stop();
+    if (pattern.test(seen)) return seen;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`process ${id} never wrote ${pattern} within ${timeoutMs}ms`);
+}
+
 test("a clean exit is remembered as code 0, with the agent that owned it", async () => {
   const runner = new Runner({ openTerminal: null });
   const handle = await runner.start(spec("process.exit(0)", "sc-coder"));
@@ -257,7 +282,7 @@ test("a REAPED death keeps its last words, even though it has no exit code", asy
   const handle = await runner.start(spec(
     "process.stdout.write('the last thing it said'); setTimeout(() => {}, 30000)",
   ));
-  await new Promise((r) => setTimeout(r, 120));
+  await waitForOutput(runner, handle.id, /the last thing it said/);
 
   runner.release(handle.id);
 
@@ -274,7 +299,7 @@ test("a STOP keeps them too, and still claims no code", async () => {
   const handle = await runner.start(spec(
     "process.stdout.write('mid-frame when stopped'); setTimeout(() => {}, 30000)",
   ));
-  await new Promise((r) => setTimeout(r, 120));
+  await waitForOutput(runner, handle.id, /mid-frame when stopped/);
   await runner.stop(handle.id);
 
   const exit = lastExit(runner);
