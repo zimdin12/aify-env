@@ -14,6 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { shortHandle } from "../lib/tui.mjs";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -107,7 +108,14 @@ test("a process started through the daemon APPEARS in the view", async () => {
     const handle = JSON.parse(text);
 
     const rendered = frame(base, registry).stdout;
-    assert.match(rendered, new RegExp(handle.id), "the owned process is not in the view");
+    // THE PROJECTION, not the whole handle. A handle is `<uuid>-p<n>` so a consumer holding one across
+    // a restart cannot match a process the next instance numbered the same; 39 characters is right for
+    // identity and wrong for a table, so the view renders `shortHandle`. Asserting on the full id here
+    // would force the identity back down to whatever fits a column.
+    const shown = shortHandle(handle.id);
+    assert.match(rendered, new RegExp(shown), "the owned process is not in the view");
+    assert.ok(handle.id.endsWith(shown), `the view shows ${shown}, which is not part of ${handle.id} `
+      + "-- an operator reading it could not match it back to the handle");
     assert.match(rendered, /aify-comms/, "the owning service is not in the view");
     assert.doesNotMatch(rendered, /no processes owned/, "the view claimed it owned nothing");
   } finally {
