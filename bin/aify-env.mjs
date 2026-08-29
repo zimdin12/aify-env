@@ -41,6 +41,7 @@ import { killTree } from "../lib/kill-tree.mjs";
 import { defaultIsAlive } from "../lib/reaper.mjs";
 import { homedir, hostname } from "node:os";
 import { buildIdentity, sourceFiles } from "../lib/build-identity.mjs";
+import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
 import { readServices } from "../lib/services.mjs";
 import {
   advertiseTo,
@@ -225,6 +226,20 @@ const traffic = { requests: 0, bytesOut: 0 };
 
 const server = createServer(async (request, response) => {
   traffic.requests += 1;
+
+  // BEFORE THE BODY IS READ, and before anything is dispatched. A page the operator merely visits can
+  // reach this loopback port; binding 127.0.0.1 keeps the network out but not the browser, which is
+  // already on the machine. See lib/browser-requests.mjs for the request shape that needs no
+  // preflight. Refused here rather than in `handleRequest` because it is a property of the TRANSPORT,
+  // not of any route, and a route added later must inherit it without anyone remembering to ask.
+  const browser = browserOriginatedRequest({ method: request.method, headers: request.headers });
+  if (browser.refuse) {
+    process.stderr.write(`[aify-env] ${browser.reason}${chr10}`);
+    response.writeHead(403, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: browser.reason }));
+    return;
+  }
+
   let body = null;
   if (request.method === "POST" || request.method === "PUT") {
     const chunks = [];
