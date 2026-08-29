@@ -26,7 +26,7 @@
 // attributed to it -- this environment knows which processes it started, and alive is not working.
 
 import { createServer } from "node:http";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,8 +39,21 @@ import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-proce
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
 import { killTree } from "../lib/kill-tree.mjs";
 import { defaultIsAlive } from "../lib/reaper.mjs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { buildIdentity, sourceFiles } from "../lib/build-identity.mjs";
+import { readServices } from "../lib/services.mjs";
+import {
+  advertiseTo,
+  advertisementTargets,
+  capabilityFingerprint,
+  environmentAdvertisement,
+  environmentKind,
+  environmentOs,
+  installedHarnesses,
+  machineIdFor,
+  runtimeAvailability,
+  shouldRedetect,
+} from "../lib/advertise.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = readFileSync(join(ROOT, "VERSION"), "utf8").trim();
@@ -421,3 +434,134 @@ const sweepTimer = setInterval(() => {
   unknown = reaper.sweep().unknown;
 }, SWEEP_MS);
 sweepTimer.unref();
+
+// ── telling every registered service what this host can do ───────────────────────────────────────
+//
+// OFF UNTIL ASKED FOR, via `AIFY_ADVERTISE=1`. An aify-comms bridge is still the advertiser on this
+// host, and `runtimes` and `terminalRuntimes` are last-writer-wins: two advertisers computing them
+// differently would flap the row, and flapping reads like failing hardware rather than like two
+// components disagreeing. The cutover is the answer to that, not a race. See aify-comms
+// `docs/ENVIRONMENT_ADVERTISEMENT.md`, "The transition has two advertisers".
+//
+// The timer is `unref`'d exactly like the sweep above: a daemon whose last outstanding work is a
+// heartbeat should still be able to exit.
+
+const ADVERTISE = ["1", "true", "yes"].includes(
+  String(process.env.AIFY_ADVERTISE || "").trim().toLowerCase(),
+);
+const ADVERTISE_MS = Number(process.env.AIFY_ADVERTISE_MS || 30_000);
+const REDETECT_MS = Number(process.env.AIFY_ADVERTISE_REDETECT_MS || 300_000);
+const REGISTRY_FILE = process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json");
+
+/**
+ * Where the wrappers live: every PATH entry, which is where a launcher has to be to be launchable.
+ *
+ * Reading a directory is not running anything in it. Deciding what a launcher is by ASKING it would
+ * start a coding-agent runtime -- a pre-contract wrapper forwards `--check` to the runtime -- which
+ * is how a fleet went down once already.
+ */
+function launcherCandidates() {
+  const separator = process.platform === "win32" ? ";" : ":";
+  const entries = [];
+  const seen = new Set();
+  for (const dir of String(process.env.PATH || "").split(separator).map((d) => d.trim()).filter(Boolean)) {
+    let names = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      // One unreadable directory must not make the rest of PATH unsearchable.
+      continue;
+    }
+    for (const name of names) {
+      const file = `${dir}/${name}`;
+      if (seen.has(file)) continue;
+      seen.add(file);
+      // Only files whose NAME could be a launcher are read. The marker is still what decides, but
+      // reading every executable on PATH to find out would be a great deal of I/O for one answer.
+      if (!name.includes("-aify")) continue;
+      try {
+        entries.push({ file, text: readFileSync(file, "utf8") });
+      } catch {
+        // FAILS CLOSED: unread is absent, never present.
+      }
+    }
+  }
+  return entries;
+}
+
+/** POST one advertisement. Injected into `advertiseTo`, which is otherwise pure. */
+async function postAdvertisement(url, body) {
+  return fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
+  });
+}
+
+let lastDetectedAt = 0;
+let detectedRuntimes = [];
+let lastFingerprint = "";
+
+async function advertiseOnce() {
+  let registryText = "";
+  try {
+    registryText = readFileSync(REGISTRY_FILE, "utf8");
+  } catch {
+    return; // No registry means nobody has asked to be told. Not an error.
+  }
+  const targets = advertisementTargets(readServices(registryText));
+  if (targets.length === 0) return;
+
+  const now = Date.now();
+  if (shouldRedetect({ lastDetectedAt, now, intervalMs: REDETECT_MS })) {
+    detectedRuntimes = runtimeAvailability(installedHarnesses(launcherCandidates()));
+    lastDetectedAt = now;
+  }
+
+  const support = terminalSupport();
+  const kind = environmentKind({ platform: process.platform, env: process.env, exists: existsSync });
+  const body = environmentAdvertisement({
+    hostname: hostname(),
+    kind,
+    os: environmentOs(process.platform),
+    machineId: machineIdFor({
+      platform: process.platform,
+      hostname: hostname(),
+      env: process.env,
+      isWsl: kind === "wsl",
+    }),
+    label: `${environmentOs(process.platform)} on ${hostname()}`,
+    // NO `cwdRoots`. Which directories work may run in is the service's policy, and an advertiser
+    // sending an empty list would erase what the operator configured. Omitted means "kept".
+    runtimes: detectedRuntimes,
+    terminal: support.available,
+    terminalReason: support.reason,
+    version: VERSION,
+    instance: BUILD,
+  });
+
+  // WHAT CHANGED, said once rather than every beat. The fingerprint covers exactly the fields a
+  // re-walk could move, so a line here means a harness was installed or disappeared -- which is the
+  // event an operator is watching for, and it is invisible in a stream of identical heartbeats.
+  const fingerprint = capabilityFingerprint(body);
+  if (lastFingerprint !== "" && fingerprint !== lastFingerprint) {
+    process.stderr.write(
+      `[aify-env] capabilities changed: ${body.terminalRuntimes.join(", ") || "none"}${chr10}`,
+    );
+  }
+  lastFingerprint = fingerprint;
+
+  // Reported, never thrown: a service being down is that service's news, not this daemon's failure.
+  for (const result of (await advertiseTo({ targets, body, post: postAdvertisement })).filter((r) => !r.ok)) {
+    process.stderr.write(
+      `[aify-env] advertisement to ${result.url} failed (${result.status || result.error})${chr10}`,
+    );
+  }
+}
+
+if (ADVERTISE) {
+  void advertiseOnce();
+  const advertiseTimer = setInterval(() => { void advertiseOnce(); }, ADVERTISE_MS);
+  advertiseTimer.unref();
+}
