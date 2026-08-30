@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   advertiseTo,
   advertisementTargets,
+  acceptanceKey,
   advertisementHealth,
   credentialFor,
   advertisementStaleMs,
@@ -383,7 +384,7 @@ const healthWith = (accepted, { now = 1_000_000, targets = [A, B] } = {}) =>
   advertisementHealth({ enabled: true, targets, acceptedAt: new Map(accepted), now, staleMs: STALE_MS });
 
 test("a 200 makes this service advertised", () => {
-  const health = healthWith([[A.url, 1_000_000]]);
+  const health = healthWith([[acceptanceKey(A), 1_000_000]]);
   assert.equal(advertisingToService(health, "aify-comms"), true);
   assert.equal(health.advertising, true);
 });
@@ -396,11 +397,11 @@ test("a 401 or 500 does NOT -- the bridge must keep describing the host", () => 
   assert.equal(health.advertising, false, "no accepted beat means not advertising, to anyone");
   // POSITIVE CONTROL: the same reader DOES report true when a beat was accepted, so the falses
   // above are a real absence rather than a reader that always says no.
-  assert.equal(advertisingToService(healthWith([[A.url, 1_000_000]]), "aify-comms"), true);
+  assert.equal(advertisingToService(healthWith([[acceptanceKey(A), 1_000_000]]), "aify-comms"), true);
 });
 
 test("an accepted beat EXPIRES, so a daemon that stops being heard resumes the bridge", () => {
-  const accepted = [[A.url, 1_000_000]];
+  const accepted = [[acceptanceKey(A), 1_000_000]];
   assert.equal(advertisingToService(healthWith(accepted, { now: 1_000_000 + STALE_MS - 1 }), "aify-comms"), true,
     "inside the window it is still advertised");
   assert.equal(advertisingToService(healthWith(accepted, { now: 1_000_000 + STALE_MS + 1 }), "aify-comms"), false,
@@ -409,7 +410,7 @@ test("an accepted beat EXPIRES, so a daemon that stops being heard resumes the b
 
 test("success to ANOTHER service does not stand this one down", () => {
   // The reason the registry name travels with the endpoint at all.
-  const health = healthWith([[B.url, 1_000_000]]);
+  const health = healthWith([[acceptanceKey(B), 1_000_000]]);
   assert.equal(advertisingToService(health, "other-service"), true);
   assert.equal(advertisingToService(health, "aify-comms"), false,
     "aify-comms was never told, so its bridge must keep advertising");
@@ -419,12 +420,12 @@ test("success to ANOTHER service does not stand this one down", () => {
 test("a future acceptance stamp does not count as fresh", () => {
   // A clock skew or a bad write would otherwise satisfy `<= staleMs` for ever and stand a bridge
   // down permanently -- the same asymmetry the delivery ceiling had to close.
-  assert.equal(advertisingToService(healthWith([[A.url, 9_000_000]], { now: 1_000_000 }), "aify-comms"), false);
+  assert.equal(advertisingToService(healthWith([[acceptanceKey(A), 9_000_000]], { now: 1_000_000 }), "aify-comms"), false);
 });
 
 test("disabled means not advertising, whatever was accepted", () => {
   const health = advertisementHealth({
-    enabled: false, targets: [A], acceptedAt: new Map([[A.url, 1_000_000]]),
+    enabled: false, targets: [A], acceptedAt: new Map([[acceptanceKey(A), 1_000_000]]),
     now: 1_000_000, staleMs: STALE_MS,
   });
   assert.equal(health.advertising, false);
@@ -504,4 +505,64 @@ test("the registry gives targets their key NAMES, and never a key value", () => 
   // The registry is a shared file. A value in it would be a secret shared with everything on the
   // host, so nothing in this pipeline may carry one.
   assert.equal(JSON.stringify(targets).includes("sk-"), false);
+});
+
+// ── two services can share one endpoint, and must not share an acceptance ──────────
+//
+// THE COLLISION. Acceptance was keyed by URL while health was keyed by service NAME, so two
+// registry names pointing at one endpoint read a single stamp: A gets a 2xx, B gets a 401, and
+// BOTH render fresh. They can carry different credentials, which is precisely when one succeeds
+// and the other does not — so the collision is not hypothetical, it is the case that produces it.
+
+test("one accepted and one refused on the SAME endpoint: only the accepted NAME is fresh", async () => {
+  const shared = "http://shared.invalid/api/v1/environments/heartbeat";
+  const targets = [
+    { name: "aify-comms", url: shared, keyEnv: ["GOOD_KEY"] },
+    { name: "other-service", url: shared, keyEnv: ["BAD_KEY"] },
+  ];
+  const accepted = new Map();
+  const results = await advertiseTo({
+    targets,
+    body: {},
+    env: { GOOD_KEY: "sk-good", BAD_KEY: "sk-bad" },
+    // The endpoint accepts one credential and refuses the other, which is the whole point of
+    // per-service keys.
+    post: async (_url, _body, key) => ({ status: key === "sk-good" ? 200 : 401 }),
+  });
+  for (const result of results) {
+    if (result.ok) accepted.set(acceptanceKey(result), 1_000_000);
+  }
+
+  const health = advertisementHealth({
+    enabled: true, targets, acceptedAt: accepted, now: 1_000_000,
+    staleMs: advertisementStaleMs(30_000),
+  });
+  assert.equal(advertisingToService(health, "aify-comms"), true, "the accepted service is described");
+  assert.equal(advertisingToService(health, "other-service"), false,
+    "a REFUSED service was reported as described because it shares an endpoint with an accepted one");
+});
+
+test("an acceptance does not survive the service being renamed or moved", () => {
+  // Both parts are in the key, so a change to either invalidates. A stale acceptance under an old
+  // identity would report a service as described when nothing had told it under its new one.
+  const accepted = new Map([[acceptanceKey({ name: "aify-comms", url: A.url }), 1_000_000]]);
+  const opts = { enabled: true, acceptedAt: accepted, now: 1_000_000, staleMs: advertisementStaleMs(30_000) };
+
+  const sameIdentity = advertisementHealth({ ...opts, targets: [{ name: "aify-comms", url: A.url }] });
+  assert.equal(advertisingToService(sameIdentity, "aify-comms"), true, "control: the key matches");
+
+  const renamed = advertisementHealth({ ...opts, targets: [{ name: "aify-comms-2", url: A.url }] });
+  assert.equal(advertisingToService(renamed, "aify-comms-2"), false, "a rename must invalidate");
+
+  const moved = advertisementHealth({ ...opts, targets: [{ name: "aify-comms", url: B.url }] });
+  assert.equal(advertisingToService(moved, "aify-comms"), false, "a moved endpoint must invalidate");
+});
+
+test("the acceptance key cannot be forged by a name or url containing the separator", () => {
+  // A newline appears in neither a registry key nor a URL, so no two distinct identities can
+  // collapse onto one key.
+  assert.notEqual(
+    acceptanceKey({ name: "a", url: "b" }),
+    acceptanceKey({ name: "a\nb", url: "" }),
+  );
 });

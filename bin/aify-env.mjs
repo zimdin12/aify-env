@@ -48,6 +48,7 @@ import {
   advertisementTargets,
   advertisingEnabled,
   capabilityFingerprint,
+  acceptanceKey,
   advertisementHealth,
   advertisementStaleMs,
   environmentAdvertisement,
@@ -609,7 +610,7 @@ async function advertiseOnce() {
   for (const result of results) {
     if (result.ok) {
       // Only a 2xx counts. This is the whole fix: acceptance is recorded, refusal is not.
-      acceptedBeats.set(result.url, Date.now());
+      acceptedBeats.set(acceptanceKey(result), Date.now());
       continue;
     }
     // Reported, never thrown: a service being down is that service's news, not this daemon's
