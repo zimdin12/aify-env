@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { killTree } from "../lib/kill-tree.mjs";
+import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
 
 const DAEMON = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs");
 const LF = String.fromCharCode(10);
@@ -25,7 +26,7 @@ function startDaemon(record) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, AIFY_ENV_PROCESS_RECORD: record },
+      env: sealedDaemonEnv({ AIFY_ENV_PROCESS_RECORD: record }),
     });
     let out = "";
     const timer = setTimeout(() => reject(new Error(`daemon did not start: ${out}`)), 20_000);

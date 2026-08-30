@@ -13,7 +13,9 @@ import {
   environmentAdvertisement,
   environmentKind,
   environmentOs,
+  advertisingEnabled,
   installedHarnesses,
+  isAdvertising,
   machineIdFor,
   runtimeAvailability,
   shouldRedetect,
@@ -267,6 +269,14 @@ test("the rows feed runtimeAvailability unchanged", () => {
 
 // -- saying nothing, versus saying there is nothing ---------------------------------------------
 
+test("NO label travels, because it is the operator's name and not a host fact", () => {
+  // This tier would generate "windows on StevenZ-L" and overwrite a "Windows on StevenZ-L" somebody
+  // typed, on every beat. The service preserves a label a caller does not mention, so omitting it is
+  // how the operator's choice survives an advertiser that never knew it.
+  const body = environmentAdvertisement(FACTS);
+  assert.ok(!("label" in body), "the advertisement carried a label it invented");
+});
+
 test("an unset cwdRoots is OMITTED, not sent as an empty list", () => {
   // The receiving rule, in the service's own words about this field: null means it said nothing --
   // keep what we had; an empty ARRAY means it said there are none. aify-env owns no roots policy, so
@@ -310,4 +320,40 @@ test("a host it cannot name is `unknown-host`, never an empty half", () => {
   // host that also could not answer.
   assert.equal(machineIdFor({ platform: "win32", hostname: "", env: {} }), "win32:unknown-host");
   assert.equal(machineIdFor({ platform: "win32", hostname: "   ", env: {} }), "win32:unknown-host");
+});
+
+// -- who describes this host ---------------------------------------------------------------------
+
+test("advertising means armed AND with somewhere to post", () => {
+  // THE BRIDGE STANDS DOWN ON THIS, so both halves matter. Armed with no target is the case that
+  // would strand a host: the bridge omits its runtimes believing this daemon covers them, and nobody
+  // sends any.
+  assert.equal(isAdvertising({ enabled: true, targets: ["http://a/x"] }), true);
+  assert.equal(isAdvertising({ enabled: true, targets: [] }), false, "armed, but telling nobody");
+  assert.equal(isAdvertising({ enabled: false, targets: ["http://a/x"] }), false);
+  assert.equal(isAdvertising({}), false);
+  assert.equal(isAdvertising(), false);
+});
+
+test("a target list that is not a list is not a target", () => {
+  // Fails closed: anything unreadable here would otherwise make the bridge stand down for nobody.
+  for (const targets of [null, undefined, "http://a/x", 1, {}]) {
+    assert.equal(isAdvertising({ enabled: true, targets }), false,
+      `targets=${JSON.stringify(targets)} was counted as somewhere to post`);
+  }
+});
+
+test("advertising is ON unless a host says otherwise", () => {
+  // Default-on since the bridge learned to stand down. It was opt-in only while both tiers could
+  // advertise at once, which is the collision that no longer exists.
+  for (const unset of [undefined, null, "", "   "]) {
+    assert.equal(advertisingEnabled(unset), true, `${JSON.stringify(unset)} turned it off`);
+  }
+  for (const on of ["1", "true", "yes", "anything"]) assert.equal(advertisingEnabled(on), true);
+});
+
+test("and an explicit off hands the job back to the bridge", () => {
+  for (const off of ["0", "false", "no", "off", "FALSE", " Off "]) {
+    assert.equal(advertisingEnabled(off), false, `${off} did not turn it off`);
+  }
 });

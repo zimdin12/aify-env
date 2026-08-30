@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
 
 const DAEMON = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs");
 
@@ -27,7 +28,7 @@ function startDaemon(env = {}) {
       stdio: ["ignore", "pipe", "pipe"],
       // Order matters: the seal must beat an ambient AIFY_ENV_PROCESS_RECORD, while a test that
       // deliberately sets one still wins.
-      env: { ...process.env, AIFY_ENV_PROCESS_RECORD: record, ...env },
+      env: sealedDaemonEnv({ AIFY_ENV_PROCESS_RECORD: record, ...env }),
     });
     let output = "";
     const timer = setTimeout(() => reject(new Error(`daemon did not start:\n${output}`)), 20_000);

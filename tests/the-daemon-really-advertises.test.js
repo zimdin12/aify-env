@@ -95,7 +95,7 @@ test("a booted daemon posts an advertisement to every registered service", async
   const body = sent.body;
   // Every field the payload builder claims to fill, checked for a VALUE rather than a key. This is
   // where `BUILD.build` would have shown up: the key was always present, and always `undefined`.
-  for (const field of ["hostname", "kind", "os", "machineId", "label"]) {
+  for (const field of ["hostname", "kind", "os", "machineId"]) {
     assert.equal(typeof body[field], "string", `${field} is not a string`);
     assert.notEqual(body[field].trim(), "", `${field} arrived empty`);
   }
@@ -109,6 +109,8 @@ test("it sends NO id and NO cwdRoots, which are the two the service owns", async
   assert.ok(!("id" in sent.body), "the daemon built an environment id");
   assert.ok(!("cwdRoots" in sent.body),
     "the daemon claimed a roots policy it does not own, which erases the configured roots");
+  assert.ok(!("label" in sent.body),
+    "the daemon named the machine, overwriting whatever the operator called it");
 });
 
 test("the runtimes it advertises are the wrappers actually installed on this host", async () => {

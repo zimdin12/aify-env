@@ -46,7 +46,9 @@ import { readServices } from "../lib/services.mjs";
 import {
   advertiseTo,
   advertisementTargets,
+  advertisingEnabled,
   capabilityFingerprint,
+  isAdvertising,
   environmentAdvertisement,
   environmentKind,
   environmentOs,
@@ -262,6 +264,7 @@ const server = createServer(async (request, response) => {
         build: BUILD,
         unknown,
         terminals: terminalSupport(),
+        advertising: advertisingNow(),
         traffic,
       },
     );
@@ -452,18 +455,19 @@ sweepTimer.unref();
 
 // ── telling every registered service what this host can do ───────────────────────────────────────
 //
-// OFF UNTIL ASKED FOR, via `AIFY_ADVERTISE=1`. An aify-comms bridge is still the advertiser on this
-// host, and `runtimes` and `terminalRuntimes` are last-writer-wins: two advertisers computing them
-// differently would flap the row, and flapping reads like failing hardware rather than like two
-// components disagreeing. The cutover is the answer to that, not a race. See aify-comms
-// `docs/ENVIRONMENT_ADVERTISEMENT.md`, "The transition has two advertisers".
+// ON BY DEFAULT, and the collision it used to risk is closed rather than avoided. `runtimes` and
+// `terminalRuntimes` are last-writer-wins, so two advertisers computing them differently would flap
+// the row -- which reads like failing hardware rather than like two components disagreeing. The
+// bridge now asks this daemon's `/health` whether it is advertising and omits host facts when it is,
+// so exactly one tier describes a host. `AIFY_ADVERTISE=0` hands the job back to the bridge.
+//
+// STANDING DOWN IS SAFE because a heartbeat that omits a field no longer erases it: see aify-comms
+// `service/api_core/environment_registration.py`, which preserves what a caller did not mention.
 //
 // The timer is `unref`'d exactly like the sweep above: a daemon whose last outstanding work is a
 // heartbeat should still be able to exit.
 
-const ADVERTISE = ["1", "true", "yes"].includes(
-  String(process.env.AIFY_ADVERTISE || "").trim().toLowerCase(),
-);
+const ADVERTISE = advertisingEnabled(process.env.AIFY_ADVERTISE);
 const ADVERTISE_MS = Number(process.env.AIFY_ADVERTISE_MS || 30_000);
 const REDETECT_MS = Number(process.env.AIFY_ADVERTISE_REDETECT_MS || 300_000);
 const REGISTRY_FILE = process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json");
@@ -517,15 +521,27 @@ async function postAdvertisement(url, body) {
 let lastDetectedAt = 0;
 let detectedRuntimes = [];
 let lastFingerprint = "";
+//: What /health reports, refreshed by each beat. Read from the SAME resolution the beat uses, so the
+//: answer cannot say "somebody is being told" while the beat posts to nobody -- which is the one
+//: wrong answer that strands a host, because the bridge stands down on it.
+let advertisingTargets = [];
+
+function advertisingNow() {
+  return isAdvertising({ enabled: ADVERTISE, targets: advertisingTargets });
+}
 
 async function advertiseOnce() {
   let registryText = "";
   try {
     registryText = readFileSync(REGISTRY_FILE, "utf8");
   } catch {
-    return; // No registry means nobody has asked to be told. Not an error.
+    // No registry means nobody has asked to be told. Not an error -- but it IS "not advertising",
+    // and saying otherwise would make the bridge stand down for a host nobody is describing.
+    advertisingTargets = [];
+    return;
   }
   const targets = advertisementTargets(readServices(registryText));
+  advertisingTargets = targets;
   if (targets.length === 0) return;
 
   const now = Date.now();
@@ -546,7 +562,6 @@ async function advertiseOnce() {
       env: process.env,
       isWsl: kind === "wsl",
     }),
-    label: `${environmentOs(process.platform)} on ${hostname()}`,
     // NO `cwdRoots`. Which directories work may run in is the service's policy, and an advertiser
     // sending an empty list would erase what the operator configured. Omitted means "kept".
     runtimes: detectedRuntimes,
