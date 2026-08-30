@@ -295,3 +295,43 @@ test("with no key in its environment the daemon sends NO header, not an empty on
   // POSITIVE CONTROL: the recorder DOES capture headers, so the absence above is a real absence.
   assert.equal(typeof sent.headers["content-type"], "string");
 });
+
+test("a REAL advertisement carries NO bridge* key, at any depth", async () => {
+  // THE CROSS-REPO CONTRACT. aify-comms now strips the whole `bridge*` namespace from any beat
+  // that carries no `bridgeId`, because that namespace is bridge authority: `bridgeLastSeen` is
+  // what its spawn gate reads to decide a host has a live claimer, and `bridgeBuild` is what its
+  // `bridge-current` check compares against repo HEAD. A host advertiser that sent either could
+  // get spawns accepted that nothing can claim, or silence the one instrument that reports a
+  // bridge running old code.
+  //
+  // This daemon is not a bridge and must emit none. Asserted against a REAL posted body rather
+  // than the payload builder, because the builder is not the only thing that can add a key.
+  const { sent, output } = await advertisementFromARealDaemon();
+
+  const offenders = [];
+  const walk = (value, path) => {
+    if (!value || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      if (key.startsWith("bridge")) offenders.push(`${path}${key}`);
+      walk(child, `${path}${key}.`);
+    }
+  };
+  walk(sent.body, "");
+  assert.deepEqual(offenders, [],
+    `the advertisement carried bridge-owned key(s), which aify-comms will now strip — and which ` +
+    `would be an attempt to write another tier's authority. Daemon said:\n${output}`);
+
+  // POSITIVE CONTROL: the walk really does reach nested keys, so an empty offender list is a real
+  // absence rather than a walker that never descended.
+  const canary = [];
+  const walkCanary = (value, path) => {
+    if (!value || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "advertiser") canary.push(`${path}${key}`);
+      walkCanary(child, `${path}${key}.`);
+    }
+  };
+  walkCanary(sent.body, "");
+  assert.deepEqual(canary, ["metadata.advertiser"],
+    "the walker did not reach a key known to be nested; the absence above proves nothing");
+});

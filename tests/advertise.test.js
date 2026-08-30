@@ -558,11 +558,34 @@ test("an acceptance does not survive the service being renamed or moved", () => 
   assert.equal(advertisingToService(moved, "aify-comms"), false, "a moved endpoint must invalidate");
 });
 
-test("the acceptance key cannot be forged by a name or url containing the separator", () => {
-  // A newline appears in neither a registry key nor a URL, so no two distinct identities can
-  // collapse onto one key.
-  assert.notEqual(
-    acceptanceKey({ name: "a", url: "b" }),
-    acceptanceKey({ name: "a\nb", url: "" }),
+test("no two distinct identities can collapse onto one acceptance key", () => {
+  // COLLISION-FREE BY CONSTRUCTION. The first version joined the parts with a newline and asserted
+  // in a comment that neither could contain one -- a guarantee claimed rather than held, since
+  // nothing validates a registry key or an endpoint against newlines. Encoding both lengths removes
+  // the assumption instead of restating it, so these adversarial pairs stay distinct whatever a
+  // registry happens to contain.
+  const identities = [
+    // THE PAIR THAT ACTUALLY COLLIDES under a `join("\n")`: both flatten to `a\nb\nc`. My first
+    // version of this list used shapes that merely CONTAINED a newline, and a mutation back to the
+    // delimiter left all of them green -- an adversarial-looking test that adversary never reached.
+    { name: "a", url: "b\nc" },
+    { name: "a\nb", url: "c" },
+
+    { name: "a", url: "b" },
+    { name: "a\nb", url: "" },
+    { name: "", url: "a\nb" },
+    { name: "a", url: "" },
+    { name: "", url: "a" },
+    { name: "a\"", url: "b" },
+    { name: "a", url: "\"b" },
+    { name: "a\\", url: "b" },
+  ];
+  const keys = identities.map(acceptanceKey);
+  assert.equal(
+    new Set(keys).size, identities.length,
+    `two distinct identities produced the same key: ${JSON.stringify(keys)}`,
   );
+  // POSITIVE CONTROL: the SAME identity must still produce the SAME key, or nothing would ever
+  // match and every service would read as never-accepted.
+  assert.equal(acceptanceKey({ name: "a", url: "b" }), acceptanceKey({ name: "a", url: "b" }));
 });
