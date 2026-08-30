@@ -9,6 +9,11 @@ import test from "node:test";
 import {
   advertiseTo,
   advertisementTargets,
+  advertisementHealth,
+  credentialFor,
+  advertisementStaleMs,
+  advertisingToService,
+  MISSED_BEATS_BEFORE_STALE,
   capabilityFingerprint,
   environmentAdvertisement,
   environmentKind,
@@ -182,8 +187,11 @@ test("targets are built from the registry, one per service", () => {
       { name: "broken", endpoint: "" },
     ]),
     [
-      "http://127.0.0.1:8800/api/v1/environments/heartbeat",
-      "http://127.0.0.1:9000/api/v1/environments/heartbeat",
+      // The registry NAME travels with the endpoint. Without it "am I advertising?" is only
+      // answerable for the daemon as a whole, so a success to one service stood another's bridge
+      // down for a beat it never received.
+      { name: "aify-comms", url: "http://127.0.0.1:8800/api/v1/environments/heartbeat", keyEnv: [] },
+      { name: "other", url: "http://127.0.0.1:9000/api/v1/environments/heartbeat", keyEnv: [] },
     ],
   );
 });
@@ -356,4 +364,144 @@ test("and an explicit off hands the job back to the bridge", () => {
   for (const off of ["0", "false", "no", "off", "FALSE", " Off "]) {
     assert.equal(advertisingEnabled(off), false, `${off} did not turn it off`);
   }
+});
+
+// ── advertising is judged on ACCEPTED beats, not on having somewhere to post ────────
+//
+// THE DEFECT. `isAdvertising` was `enabled && targets.length > 0` and consulted no result at all,
+// so a target answering 401/404/500/nothing still reported `advertising: true`. The aify-comms
+// bridge STANDS DOWN on that flag, so a service that never received one advertisement could end up
+// described by nobody while both tiers reported healthy. The four tests below are the four cases
+// the reviewer named as required before this can be called fixed.
+
+const HEARTBEAT = "/api/v1/environments/heartbeat";
+const A = { name: "aify-comms", url: `http://a.invalid${HEARTBEAT}` };
+const B = { name: "other-service", url: `http://b.invalid${HEARTBEAT}` };
+const STALE_MS = advertisementStaleMs(30_000);
+
+const healthWith = (accepted, { now = 1_000_000, targets = [A, B] } = {}) =>
+  advertisementHealth({ enabled: true, targets, acceptedAt: new Map(accepted), now, staleMs: STALE_MS });
+
+test("a 200 makes this service advertised", () => {
+  const health = healthWith([[A.url, 1_000_000]]);
+  assert.equal(advertisingToService(health, "aify-comms"), true);
+  assert.equal(health.advertising, true);
+});
+
+test("a 401 or 500 does NOT -- the bridge must keep describing the host", () => {
+  // Nothing was accepted, so nothing is recorded. This is the case that stood a bridge down for a
+  // beat the service refused.
+  const health = healthWith([]);
+  assert.equal(advertisingToService(health, "aify-comms"), false);
+  assert.equal(health.advertising, false, "no accepted beat means not advertising, to anyone");
+  // POSITIVE CONTROL: the same reader DOES report true when a beat was accepted, so the falses
+  // above are a real absence rather than a reader that always says no.
+  assert.equal(advertisingToService(healthWith([[A.url, 1_000_000]]), "aify-comms"), true);
+});
+
+test("an accepted beat EXPIRES, so a daemon that stops being heard resumes the bridge", () => {
+  const accepted = [[A.url, 1_000_000]];
+  assert.equal(advertisingToService(healthWith(accepted, { now: 1_000_000 + STALE_MS - 1 }), "aify-comms"), true,
+    "inside the window it is still advertised");
+  assert.equal(advertisingToService(healthWith(accepted, { now: 1_000_000 + STALE_MS + 1 }), "aify-comms"), false,
+    "past the window the bridge must take the job back");
+});
+
+test("success to ANOTHER service does not stand this one down", () => {
+  // The reason the registry name travels with the endpoint at all.
+  const health = healthWith([[B.url, 1_000_000]]);
+  assert.equal(advertisingToService(health, "other-service"), true);
+  assert.equal(advertisingToService(health, "aify-comms"), false,
+    "aify-comms was never told, so its bridge must keep advertising");
+  assert.equal(health.advertising, true, "the daemon IS advertising -- just not to aify-comms");
+});
+
+test("a future acceptance stamp does not count as fresh", () => {
+  // A clock skew or a bad write would otherwise satisfy `<= staleMs` for ever and stand a bridge
+  // down permanently -- the same asymmetry the delivery ceiling had to close.
+  assert.equal(advertisingToService(healthWith([[A.url, 9_000_000]], { now: 1_000_000 }), "aify-comms"), false);
+});
+
+test("disabled means not advertising, whatever was accepted", () => {
+  const health = advertisementHealth({
+    enabled: false, targets: [A], acceptedAt: new Map([[A.url, 1_000_000]]),
+    now: 1_000_000, staleMs: STALE_MS,
+  });
+  assert.equal(health.advertising, false);
+});
+
+test("targets keep their registry name so a result can be attributed", () => {
+  const targets = advertisementTargets([
+    { name: "aify-comms", endpoint: "http://a.invalid/" },
+    { name: "other-service", endpoint: "http://b.invalid" },
+  ]);
+  assert.deepEqual(targets.map((t) => t.name), ["aify-comms", "other-service"]);
+  assert.deepEqual(targets.map((t) => t.url), [A.url, B.url]);
+});
+
+test("the staleness window is derived from the beat interval, not a second constant", () => {
+  assert.equal(advertisementStaleMs(30_000), 30_000 * MISSED_BEATS_BEFORE_STALE);
+  assert.equal(advertisementStaleMs(1_000), 1_000 * MISSED_BEATS_BEFORE_STALE);
+});
+
+// ── the advertisement carries a credential when one is configured ──────────────────
+//
+// `postAdvertisement` sent no key at all, so the moment an operator turned `API_KEY` on every
+// advertisement 401'd. Paired with the flag that reported success regardless, the bridge stood down
+// for beats nobody ever accepted. The registry declares WHERE a key lives, never what it is: it is
+// a shared file readable by everything on the host.
+
+test("the key is resolved from the environment by the names the registry declares", () => {
+  const target = { name: "aify-comms", url: A.url, keyEnv: ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"] };
+  assert.equal(credentialFor(target, { AIFY_API_KEY: "sk-second" }), "sk-second");
+  // First non-empty name wins, matching the order the service's own reader uses.
+  assert.equal(
+    credentialFor(target, { CLAUDE_MCP_API_KEY: "sk-first", AIFY_API_KEY: "sk-second" }), "sk-first");
+});
+
+test("no declared names, or names nothing set, means no credential -- not an empty one", () => {
+  assert.equal(credentialFor({ url: A.url, keyEnv: [] }, { AIFY_API_KEY: "sk" }), "");
+  assert.equal(credentialFor({ url: A.url, keyEnv: ["AIFY_API_KEY"] }, {}), "");
+  assert.equal(credentialFor({ url: A.url, keyEnv: ["AIFY_API_KEY"] }, { AIFY_API_KEY: "   " }), "",
+    "whitespace is not a credential");
+  // POSITIVE CONTROL: the same resolver DOES find a real one, so the empties above are real
+  // absences rather than a resolver that never returns anything.
+  assert.equal(credentialFor({ url: A.url, keyEnv: ["AIFY_API_KEY"] }, { AIFY_API_KEY: "sk" }), "sk");
+});
+
+test("advertiseTo hands each target's own credential to the poster", async () => {
+  const seen = [];
+  await advertiseTo({
+    targets: [
+      { name: "aify-comms", url: A.url, keyEnv: ["AIFY_API_KEY"] },
+      { name: "other-service", url: B.url, keyEnv: ["OTHER_KEY"] },
+    ],
+    body: {},
+    env: { AIFY_API_KEY: "sk-comms", OTHER_KEY: "sk-other" },
+    post: async (url, _body, key) => { seen.push([url, key]); return { status: 200 }; },
+  });
+  assert.deepEqual(seen, [[A.url, "sk-comms"], [B.url, "sk-other"]],
+    "each service must get ITS OWN key, never another's");
+});
+
+test("a target with no key still gets its advertisement", async () => {
+  // An unkeyed service is a supported configuration and must not be skipped.
+  const seen = [];
+  const results = await advertiseTo({
+    targets: [{ name: "aify-comms", url: A.url, keyEnv: [] }],
+    body: {}, env: {},
+    post: async (url, _body, key) => { seen.push([url, key]); return { status: 200 }; },
+  });
+  assert.deepEqual(seen, [[A.url, ""]]);
+  assert.equal(results[0].ok, true);
+});
+
+test("the registry gives targets their key NAMES, and never a key value", () => {
+  const targets = advertisementTargets([
+    { name: "aify-comms", endpoint: "http://a.invalid", keyEnv: ["AIFY_API_KEY"] },
+  ]);
+  assert.deepEqual(targets[0].keyEnv, ["AIFY_API_KEY"]);
+  // The registry is a shared file. A value in it would be a secret shared with everything on the
+  // host, so nothing in this pipeline may carry one.
+  assert.equal(JSON.stringify(targets).includes("sk-"), false);
 });

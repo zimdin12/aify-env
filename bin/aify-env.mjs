@@ -48,7 +48,8 @@ import {
   advertisementTargets,
   advertisingEnabled,
   capabilityFingerprint,
-  isAdvertising,
+  advertisementHealth,
+  advertisementStaleMs,
   environmentAdvertisement,
   environmentKind,
   environmentOs,
@@ -264,7 +265,8 @@ const server = createServer(async (request, response) => {
         build: BUILD,
         unknown,
         terminals: terminalSupport(),
-        advertising: advertisingNow(),
+        advertising: advertisingHealthNow().advertising,
+        advertisingTo: advertisingHealthNow().services,
         traffic,
       },
     );
@@ -508,11 +510,21 @@ function launcherCandidates() {
   return entries;
 }
 
-/** POST one advertisement. Injected into `advertiseTo`, which is otherwise pure. */
-async function postAdvertisement(url, body) {
+/**
+ * POST one advertisement. Injected into `advertiseTo`, which is otherwise pure.
+ *
+ * The key is an ARGUMENT, resolved by `credentialFor` from the names the registry declares. It sent
+ * none at all until 2026-08-30, so turning `API_KEY` on 401'd every advertisement -- and the daemon
+ * reported `advertising: true` through all of it while the bridge stood down. `X-API-Key` is the
+ * header the service accepts (`service/main.py`); an empty key sends no header rather than an empty
+ * one, because a blank credential is a 401 with a more confusing cause.
+ */
+async function postAdvertisement(url, body, apiKey = "") {
+  const headers = { "content-type": "application/json" };
+  if (String(apiKey || "").trim() !== "") headers["X-API-Key"] = String(apiKey).trim();
   return fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(5000),
   });
@@ -525,9 +537,19 @@ let lastFingerprint = "";
 //: answer cannot say "somebody is being told" while the beat posts to nobody -- which is the one
 //: wrong answer that strands a host, because the bridge stands down on it.
 let advertisingTargets = [];
+//: Target url -> epoch ms of the last beat that came back 2xx. THE ONLY EVIDENCE that a service is
+//: actually being described by this daemon. Reporting "advertising" from the target LIST instead
+//: meant a 401 counted as success, and the aify-comms bridge stands down on that answer.
+const acceptedBeats = new Map();
 
-function advertisingNow() {
-  return isAdvertising({ enabled: ADVERTISE, targets: advertisingTargets });
+function advertisingHealthNow() {
+  return advertisementHealth({
+    enabled: ADVERTISE,
+    targets: advertisingTargets,
+    acceptedAt: acceptedBeats,
+    now: Date.now(),
+    staleMs: advertisementStaleMs(ADVERTISE_MS),
+  });
 }
 
 async function advertiseOnce() {
@@ -583,7 +605,15 @@ async function advertiseOnce() {
   lastFingerprint = fingerprint;
 
   // Reported, never thrown: a service being down is that service's news, not this daemon's failure.
-  for (const result of (await advertiseTo({ targets, body, post: postAdvertisement })).filter((r) => !r.ok)) {
+  const results = await advertiseTo({ targets, body, post: postAdvertisement, env: process.env });
+  for (const result of results) {
+    if (result.ok) {
+      // Only a 2xx counts. This is the whole fix: acceptance is recorded, refusal is not.
+      acceptedBeats.set(result.url, Date.now());
+      continue;
+    }
+    // Reported, never thrown: a service being down is that service's news, not this daemon's
+    // failure. It is also NOT recorded as an acceptance, so that service's bridge keeps the job.
     process.stderr.write(
       `[aify-env] advertisement to ${result.url} failed (${result.status || result.error})${chr10}`,
     );
