@@ -22,6 +22,7 @@ import { EXIT, summarise, unanswered } from "../lib/health.mjs";
 import {
   environmentCheck,
   looksLikeEnvironment,
+  advertiseCredentialCheck,
   ownedProcessesCheck,
   registryCheck,
   terminalCheck,
@@ -83,11 +84,21 @@ if (looksLikeEnvironment(envAnswer)) {
   const owned = Array.isArray(envAnswer.body?.processes) ? envAnswer.body.processes : [];
   const unknown = Array.isArray(envAnswer.body?.unknown) ? envAnswer.body.unknown : [];
   checks.push(ownedProcessesCheck({ owned, unknown }));
+  // Reads what the daemon reports about ITSELF. The credential lives in its process environment, and
+  // this doctor runs in a different process -- so asking our own environment would answer a question
+  // nobody has, and would answer it wrongly whenever the two shells differ.
+  checks.push(advertiseCredentialCheck({
+    answered: true,
+    enabled: envAnswer.body?.advertisingEnabled ?? null,
+    credentials: envAnswer.body?.advertiseCredentials ?? null,
+    services: envAnswer.body?.advertisingTo ?? null,
+  }));
 } else {
   // Not a guess of zero, and the distinction is load-bearing: "0 processes owned" is what a healthy
   // idle environment looks like, so reporting it when no environment answered turns an absent
   // environment into a calm one.
   checks.push(unanswered("processes", "no aify-env answered, so what it owns is unknown"));
+  checks.push(advertiseCredentialCheck({ answered: false }));
 }
 
 // Only when the registry announces a format we understand. Probing entries pulled out of one we do

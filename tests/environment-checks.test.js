@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  advertiseCredentialCheck,
   terminalCheck,
   registryCheck,
   ownedProcessesCheck,
@@ -216,4 +217,49 @@ test("the terminal row says where it was measured, not just what it found", () =
     /this process|this host/i,
     "the detail promises something about spawned processes that it did not measure",
   );
+});
+
+test("advertiseCredentialCheck fires only when a target is BOTH silent and keyless", () => {
+  const credentials = {
+    "aify-comms": { keyEnv: ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"], hasCredential: false },
+  };
+  const bad = advertiseCredentialCheck({
+    answered: true, enabled: true, credentials, services: { "aify-comms": { fresh: false } },
+  });
+  assert.equal(bad.state, "failed");
+  assert.match(bad.detail, /CLAUDE_MCP_API_KEY or AIFY_API_KEY/);
+  assert.match(bad.fix, /STARTS aify-env/);
+
+  // ACCEPTED BEATS MEAN THE KEY IS NOT THE PROBLEM. This host runs keyless today and its beats land,
+  // so reporting a missing credential here would cry wolf on the ordinary configuration.
+  assert.equal(advertiseCredentialCheck({
+    answered: true, enabled: true, credentials, services: { "aify-comms": { fresh: true } },
+  }).state, "passed");
+});
+
+test("advertising switched OFF is a configuration, not a missing credential", () => {
+  const credentials = { "aify-comms": { keyEnv: ["AIFY_API_KEY"], hasCredential: false } };
+  assert.equal(advertiseCredentialCheck({
+    answered: true, enabled: false, credentials, services: {},
+  }).state, "passed");
+});
+
+test("a daemon that did not answer is UNANSWERED, never a tidy zero", () => {
+  // "no credential configured" and "nobody asked" are different answers and only one is a fact.
+  // The third input pins the `!answered` guard specifically. Without it the case is covered only by
+  // the null check, and a mutation deleting `!answered` stays green -- a guard nothing reaches.
+  for (const input of [
+    { answered: false },
+    { answered: true, credentials: null },
+    { answered: false, credentials: { "aify-comms": { keyEnv: [], hasCredential: true } } },
+  ]) {
+    const check = advertiseCredentialCheck(input);
+    assert.equal(check.state, "unanswered", JSON.stringify(input));
+  }
+});
+
+test("no advertisement targets needs no credential", () => {
+  assert.equal(advertiseCredentialCheck({
+    answered: true, enabled: true, credentials: {}, services: {},
+  }).state, "passed");
 });

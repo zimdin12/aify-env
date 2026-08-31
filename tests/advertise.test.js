@@ -12,6 +12,7 @@ import {
   acceptanceKey,
   advertisementHealth,
   credentialFor,
+  credentialReadiness,
   advertisementStaleMs,
   advertisingToService,
   MISSED_BEATS_BEFORE_STALE,
@@ -589,3 +590,36 @@ test("no two distinct identities can collapse onto one acceptance key", () => {
   // match and every service would read as never-accepted.
   assert.equal(acceptanceKey({ name: "a", url: "b" }), acceptanceKey({ name: "a", url: "b" }));
 });
+
+// ---------------------------------------------------------------------------------------------
+// The advertisement credential. It comes from this daemon's own process environment and NOTHING on
+// the host puts it there -- the aify-comms bridge does not start this daemon. So with `API_KEY` set
+// on that service and no key here, every beat is refused, `advertising` stays false, the bridge
+// correctly keeps describing the host, and the whole chain is silent. These make it visible.
+
+test("credentialReadiness reports WHETHER a key is held, never the key", () => {
+  const targets = [{ name: "aify-comms", url: "http://a", keyEnv: ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"] }];
+  const held = credentialReadiness(targets, { AIFY_API_KEY: "s3cret-value" });
+  assert.equal(held["aify-comms"].hasCredential, true);
+  // The value must not appear anywhere in what is reported. `/health` is unauthenticated, and a
+  // length or a prefix would each narrow a search that a boolean does not.
+  assert.ok(!JSON.stringify(held).includes("s3cret-value"), "the key itself reached the report");
+  assert.deepEqual(held["aify-comms"].keyEnv, ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"]);
+});
+
+test("a variable that is set but EMPTY is not a credential", () => {
+  const targets = [{ name: "aify-comms", url: "http://a", keyEnv: ["AIFY_API_KEY"] }];
+  // Whitespace is what an operator leaves behind by starting to set one and stopping. It would be
+  // sent as a header and refused, which is the failure this reports, not a credential.
+  assert.equal(credentialReadiness(targets, { AIFY_API_KEY: "   " })["aify-comms"].hasCredential, false);
+  assert.equal(credentialReadiness(targets, { AIFY_API_KEY: "" })["aify-comms"].hasCredential, false);
+  // POSITIVE CONTROL: the same reader says true for a real value, so the falses above are a real
+  // absence rather than a reader that always says no.
+  assert.equal(credentialReadiness(targets, { AIFY_API_KEY: "k" })["aify-comms"].hasCredential, true);
+});
+
+test("a target whose registry entry declares NO key variable can never be given one", () => {
+  const targets = [{ name: "legacy", url: "http://a", keyEnv: [] }];
+  assert.equal(credentialReadiness(targets, { AIFY_API_KEY: "k" }).legacy.hasCredential, false);
+});
+

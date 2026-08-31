@@ -50,6 +50,7 @@ import {
   capabilityFingerprint,
   acceptanceKey,
   advertisementHealth,
+  credentialReadiness,
   advertisementStaleMs,
   environmentAdvertisement,
   environmentKind,
@@ -267,7 +268,15 @@ const server = createServer(async (request, response) => {
         unknown,
         terminals: terminalSupport(),
         advertising: advertisingHealthNow().advertising,
+        // ARMED is a different question from BEING HEARD, and the doctor needs both: a daemon told
+        // not to advertise is silent by design, and reporting a missing credential there would fail
+        // a host configured exactly as intended.
+        advertisingEnabled: ADVERTISE,
         advertisingTo: advertisingHealthNow().services,
+        // NAMES AND A BOOLEAN, never a key. Without this, a daemon with no credential is invisible:
+        // every advertisement is refused, `advertising` stays false, the bridge correctly keeps
+        // describing the host, and the operator sees a daemon that runs and is never believed.
+        advertiseCredentials: credentialReadiness(advertisingTargets, process.env),
         traffic,
       },
     );
