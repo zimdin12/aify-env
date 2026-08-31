@@ -99,7 +99,11 @@ if (args.includes("--version")) {
 // An UNKNOWN subcommand is refused rather than falling through. Falling through would mean a typo like
 // `aify-env doctr` silently STARTS the environment, which supersedes a running daemon and reaps its
 // managed workers -- the one mistake here that costs someone their fleet.
-const SUBCOMMANDS = { doctor: "./aify-env-doctor.mjs", tui: "./aify-env-tui.mjs" };
+const SUBCOMMANDS = {
+  doctor: "./aify-env-doctor.mjs",
+  tui: "./aify-env-tui.mjs",
+  credential: "./aify-env-credential.mjs",
+};
 const firstArg = args[0];
 if (firstArg && !firstArg.startsWith("-")) {
   const target = SUBCOMMANDS[firstArg];
