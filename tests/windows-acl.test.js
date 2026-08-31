@@ -68,13 +68,25 @@ test("a private DACL is accepted", () => {
   assert.equal(aclProblem(parseIcaclsAces(REAL_LOCKED), { owner: "STEVENZ-L\\Administrator" }), "");
 });
 
-test("SYSTEM and Administrators are allowed beside the owner, and nobody else is", () => {
-  // They can read anything on the machine already; refusing them would be theatre and would break
-  // hosts where a service account needs them.
-  const withSystem = String.raw`C:\x\a.key STEVENZ-L\Administrator:(F)
-                                NT AUTHORITY\SYSTEM:(F)
-                                BUILTIN\Administrators:(F)`;
-  assert.equal(aclProblem(parseIcaclsAces(withSystem), { owner: "Administrator" }), "");
+test("SYSTEM is allowed beside the owner; the Administrators GROUP is not", () => {
+  // The first version blessed Administrators on the reasoning that it can read anything anyway. That
+  // conflates two claims: whether a principal COULD escalate is not whether the file is currently
+  // granted to more accounts than its owner. On a machine where that group has several members,
+  // "readable by an administrator" means readable by several people.
+  //
+  // It is refusable in practice, which is what makes the strict rule honest rather than aspirational.
+  // MEASURED on this host: a file created inside a locked root receives the token's DEFAULT DACL --
+  // owner, SYSTEM and Administrators, all EXPLICIT, so `/inheritance:r` leaves them -- and one
+  // `/remove:g` in the lockdown leaves exactly owner and SYSTEM.
+  const ownerAndSystem = String.raw`C:\x\a.key STEVENZ-L\Administrator:(F)
+                                    NT AUTHORITY\SYSTEM:(F)`;
+  assert.equal(aclProblem(parseIcaclsAces(ownerAndSystem), { owner: "Administrator" }), "");
+
+  const withGroup = String.raw`C:\x\a.key STEVENZ-L\Administrator:(F)
+                               NT AUTHORITY\SYSTEM:(F)
+                               BUILTIN\Administrators:(F)`;
+  assert.match(aclProblem(parseIcaclsAces(withGroup), { owner: "Administrator" }),
+               /Administrators/, "the Administrators group was still blessed");
 
   const withStranger = String.raw`C:\x\a.key STEVENZ-L\Administrator:(F)
                                   STEVENZ-L\bob:(R)`;
@@ -110,7 +122,11 @@ test("the principal leaf is the last component, lowercased", () => {
 
 test("the lockdown REMOVES inheritance rather than only stopping it", () => {
   const args = icaclsLockdownArgs("C:\\x\\a.key", "BOX\\bob");
-  assert.deepEqual(args, ["C:\\x\\a.key", "/inheritance:r", "/grant:r", "BOX\\bob:(F)"]);
+  assert.deepEqual(args, ["C:\\x\\a.key", "/inheritance:r", "/grant:r", "BOX\\bob:(F)",
+                          "/remove:g", "BUILTIN\\Administrators"]);
+  // The removal is not optional: without it a file created inside a locked root keeps the token's
+  // default grant to that group, and the store would write files its own check then refuses.
+  assert.ok(args.includes("/remove:g"));
   // MEASURED: without `/inheritance:r` the group grant survives and the file stays readable by
   // everyone in that group while icacls reports success. `/grant:r` REPLACES rather than adds, so
   // re-running is idempotent instead of accumulating one entry per run.
