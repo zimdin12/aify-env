@@ -178,21 +178,26 @@ test("an INSECURE file is a fault, not a key", async () => {
   }
 });
 
-test("the content-identity cache serves a repeat read and NOTICES a rotation", async () => {
-  // Mtime alone cannot invalidate this: an atomic replace can land inside one clock tick, and a
-  // cache keyed on it would serve the old key right through a rotation -- which is the one moment
-  // the key is guaranteed to have changed.
+test("A ROTATED KEY IS PICKED UP ON THE VERY NEXT READ", async () => {
+  // There WAS a cache here and the reviewer showed it was pure downside: it called the reader first
+  // -- which already reads every byte -- and only then compared a device/inode/size/mtime tuple to
+  // decide whether to return the PREVIOUS object instead of the fresh one it had just fetched. It
+  // saved no work and added a way to serve a stale key, because that tuple is metadata rather than
+  // content: an inode can be zero or reused, and a same-size atomic replacement can share an mtime
+  // tick. Rotation is the one moment the key is guaranteed to have changed, so it is the one moment
+  // a stale answer is worst.
   const root = scratch();
-  const cache = new Map();
   try {
     await writeCredentialFile({ root, ref: "svc.key", value: FILE_KEY });
-    assert.equal((await credentialForTarget(target(), { root, env: {}, cache })).value, FILE_KEY);
-    assert.equal((await credentialForTarget(target(), { root, env: {}, cache })).value, FILE_KEY);
+    assert.equal((await credentialForTarget(target(), { root, env: {} })).value, FILE_KEY);
 
-    const rotated = "rotated-key-abcdef1234567890";
+    // SAME LENGTH as the original, so a size comparison cannot tell them apart -- which is what the
+    // removed cache would have keyed on.
+    const rotated = "file-key-abcdef0987654321";
+    assert.equal(rotated.length, FILE_KEY.length, "the fixture stopped testing what it says it does");
     await writeCredentialFile({ root, ref: "svc.key", value: rotated });
-    assert.equal((await credentialForTarget(target(), { root, env: {}, cache })).value, rotated,
-                 "the cache served a key that had been rotated away");
+    assert.equal((await credentialForTarget(target(), { root, env: {} })).value, rotated,
+                 "a rotated key was not picked up");
   } finally {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
   }

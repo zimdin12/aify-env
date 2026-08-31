@@ -289,7 +289,7 @@ const server = createServer(async (request, response) => {
         // every advertisement is refused, `advertising` stays false, the bridge correctly keeps
         // describing the host, and the operator sees a daemon that runs and is never believed.
         advertiseCredentials: await credentialReadinessFor(advertisingTargets, {
-          env: process.env, root: credentialRoot(), cache: credentialCache,
+          env: process.env, root: credentialRoot(),
         }),
         // The outcome of the last beat per target, so a reader can tell a refusal from an outage.
         // No response BODY travels -- a service's error text is its own, and could carry anything.
@@ -567,12 +567,6 @@ let advertisingTargets = [];
 //: Target url -> epoch ms of the last beat that came back 2xx. THE ONLY EVIDENCE that a service is
 //: actually being described by this daemon. Reporting "advertising" from the target LIST instead
 //: meant a 401 counted as success, and the aify-comms bridge stands down on that answer.
-//: Read-through cache keyed on CONTENT IDENTITY -- device, inode, size and mtime together, because
-//: an atomic replace can land inside one clock tick and an mtime-only cache would serve the old key
-//: right through a rotation. No expiry: a cache that goes stale on a timer is wrong for the length
-//: of the timer.
-const credentialCache = new Map();
-
 const acceptedBeats = new Map();
 
 //: The LAST OUTCOME per target, accepted or not -- which `acceptedBeats` deliberately cannot carry,
@@ -652,7 +646,7 @@ async function advertiseOnce() {
   const results = await advertiseTo({
     targets, body, post: postAdvertisement, env: process.env,
     credential: async (target) => (await credentialForTarget(target, {
-      env: process.env, root: credentialRoot(), cache: credentialCache,
+      env: process.env, root: credentialRoot(),
     })).value,
   });
   for (const result of results) {
