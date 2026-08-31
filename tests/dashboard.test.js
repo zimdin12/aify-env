@@ -163,3 +163,55 @@ test("a frame that throws does not kill the loop", async () => {
   stop();
   assert.ok(written.length > 1, "one bad frame stopped the view for good");
 });
+
+const ESC = String.fromCharCode(27);
+
+test("the FIRST frame clears, because the screen's contents are unknown", async () => {
+  // There may be a shell prompt or half a log line up there. Treating an unknown screen as blank is
+  // how a repaint leaves somebody's unfinished command sitting under the dashboard.
+  const written = [];
+  const { stop } = await startDashboard(drawOptions(
+    fakeFetch({ "8802/health": ENV_HEALTH }),
+    { once: true, clearScreen: true, write: (text) => written.push(text) },
+  ));
+  stop();
+  assert.equal(written.length, 1, "the first frame did not paint");
+  assert.ok(written[0].startsWith(`${ESC}[2J`), "the first frame did not clear");
+});
+
+test("A REDRAW OF AN UNCHANGED SCREEN IS SILENT", async () => {
+  // The whole reason the full clear went. The old loop wrote a clear plus the entire frame twice a
+  // second whether or not one character differed -- which the eye reads as flicker, and which a side
+  // pane with live output in it could not survive.
+  //
+  // Driven through the interval rather than `once`, because the property belongs to the SECOND frame
+  // of one instance: a fresh instance always faces an unknown screen and must clear.
+  const written = [];
+  const { stop } = await startDashboard(drawOptions(
+    fakeFetch({ "8802/health": ENV_HEALTH }),
+    { intervalMs: 5, clearScreen: true, write: (text) => written.push(text) },
+  ));
+  try {
+    const afterFirst = written.length;
+    assert.ok(afterFirst >= 1, "no first frame");
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(written.length, afterFirst,
+                 `an unchanged screen was repainted ${written.length - afterFirst} time(s)`);
+  } finally {
+    stop();
+  }
+});
+
+test("A PIPE IS NOT A SCREEN: redirected output keeps the plain full write", async () => {
+  // Escapes in a log are noise, and a service manager parsing this output would get cursor moves
+  // interleaved with the banner. That is why `clearScreen` still gates the differential path.
+  const written = [];
+  const { stop } = await startDashboard(drawOptions(
+    fakeFetch({ "8802/health": ENV_HEALTH }),
+    { once: true, clearScreen: false, write: (text) => written.push(text) },
+  ));
+  stop();
+  assert.equal(written.length, 1);
+  assert.ok(!written[0].includes(ESC), "an escape reached a piped log");
+  assert.match(written[0], /SERVICES/);
+});
