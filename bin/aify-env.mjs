@@ -51,6 +51,7 @@ import {
   acceptanceKey,
   advertisementHealth,
   attemptsByService,
+  revokesAcceptance,
 } from "../lib/advertise.mjs";
 import { credentialRoot } from "../lib/credential-fs.mjs";
 import {
@@ -664,6 +665,17 @@ async function advertiseOnce() {
       acceptedBeats.set(acceptanceKey(result), Date.now());
       continue;
     }
+    // A CREDENTIAL REFUSAL REVOKES THE STANDING ACCEPTANCE IMMEDIATELY, rather than letting it age
+    // out over the staleness window. Between a key being rotated and the old acceptance expiring,
+    // this daemon would still report `advertising: true` for that service -- so the aify-comms
+    // bridge would keep standing down while every beat was being refused, and the host would be
+    // described by NOBODY for the length of the window. That is the exact outage the standdown fix
+    // exists to prevent, arriving through the fix for it.
+    //
+    // Scoped to 401 and 403: those are the service SAYING our credential is wrong. A 500 or an
+    // unreachable host says nothing about the key, and dropping an acceptance on one would hand the
+    // job back to the bridge every time somebody restarted a service.
+    if (revokesAcceptance(result)) acceptedBeats.delete(acceptanceKey(result));
     // Reported, never thrown: a service being down is that service's news, not this daemon's
     // failure. It is also NOT recorded as an acceptance, so that service's bridge keeps the job.
     process.stderr.write(

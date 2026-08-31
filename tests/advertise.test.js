@@ -13,6 +13,7 @@ import {
   advertisementHealth,
   credentialFor,
   attemptsByService,
+  revokesAcceptance,
   credentialReadiness,
   advertisementStaleMs,
   advertisingToService,
@@ -684,4 +685,20 @@ test("and WITHOUT one it still reads the environment, so existing callers are un
     body: {}, post, env: { AIFY_API_KEY: "from-the-environment" },
   });
   assert.deepEqual(seen, ["from-the-environment"]);
+});
+
+test("a 401 REVOKES a standing acceptance immediately, a 500 does not", () => {
+  // Between a key being rotated and the old acceptance expiring, this daemon would keep reporting
+  // `advertising: true` while every beat was refused -- so the aify-comms bridge would stay stood
+  // down and the host would be described by NOBODY for the length of the staleness window. That is
+  // the outage the standdown fix exists to prevent, arriving through the fix for it.
+  assert.equal(revokesAcceptance({ ok: false, status: 401 }), true);
+  assert.equal(revokesAcceptance({ ok: false, status: 403 }), true);
+
+  // A 500 or an unreachable host says NOTHING about the key. Revoking on those would hand the
+  // description job back to the bridge every time somebody restarted a service.
+  assert.equal(revokesAcceptance({ ok: false, status: 500 }), false);
+  assert.equal(revokesAcceptance({ ok: false, status: 0, error: "ECONNREFUSED" }), false);
+  assert.equal(revokesAcceptance({ ok: true, status: 200 }), false);
+  assert.equal(revokesAcceptance(null), false);
 });
