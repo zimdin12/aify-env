@@ -202,3 +202,26 @@ test("A ROTATED KEY IS PICKED UP ON THE VERY NEXT READ", async () => {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
   }
 });
+
+test("an ENVIRONMENT key with stray whitespace is REFUSED, never quietly trimmed", async () => {
+  // Trimming would turn a key that picked up a space into a DIFFERENT key from the one the service
+  // was configured with, and the 401 that follows has no visible cause on either side. The store
+  // already refuses those bytes on the way in; the environment path has to hold the same line, or
+  // the two disagree about what the effective key even is.
+  const root = scratch();
+  try {
+    for (const bad of [` ${ENV_KEY}`, `${ENV_KEY} `, `${ENV_KEY}\r`]) {
+      const answer = await credentialForTarget(
+        target({ credentialRef: "" }), { root, env: { AIFY_API_KEY: bad } });
+      assert.equal(answer.state, "CREDENTIAL_INVALID", JSON.stringify(bad));
+      assert.equal(answer.value, "", "an unusable key was still handed over");
+    }
+    // POSITIVE CONTROL: a clean key from the same path resolves, so the refusal is about the bytes
+    // rather than about the environment source.
+    const good = await credentialForTarget(
+      target({ credentialRef: "" }), { root, env: { AIFY_API_KEY: ENV_KEY } });
+    assert.equal(good.value, ENV_KEY);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  }
+});

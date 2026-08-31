@@ -25,6 +25,7 @@ import {
   fileSecurityProblem,
   inspectCredentialFile,
   listCredentialFiles,
+  listCredentialStore,
   readCredentialFile,
   removeCredentialFile,
   writeCredentialFile,
@@ -503,5 +504,64 @@ test("TWO REFERENCES DIFFERING ONLY IN CASE CANNOT SHARE ONE FILE", async () => 
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
+
+test("A COLLIDING WRITE IS REFUSED BEFORE IT CAN REPLACE ANOTHER SERVICE'S FILE", async () => {
+  // The read check catches a wrong-case LOOKUP. This is the other half and it is the destructive
+  // one: on a case-insensitive volume, storing `foo.key` REPLACES an existing `Foo.key`, so another
+  // service loses its credential before any reader is in a position to notice. The damage happens
+  // first and the detection second.
+  const root = scratch();
+  try {
+    await writeCredentialFile({ root, ref: "Foo.key", value: KEY });
+    const before = fs.readFileSync(path.join(root, "Foo.key"), "utf8");
+
+    const colliding = await writeCredentialFile({ root, ref: "foo.key", value: "other-service-key-123456" });
+    assert.equal(colliding.ok, false, "a colliding write was allowed");
+    assert.equal(colliding.state, CREDENTIAL_INSECURE, colliding.detail);
+    assert.match(colliding.detail, /differs only in case/);
+    assert.equal(fs.readFileSync(path.join(root, "Foo.key"), "utf8"), before,
+                 "the other service's credential was overwritten");
+
+    // POSITIVE CONTROL: a genuinely different reference still stores, so the guard is about
+    // collision rather than about refusing a second credential in the store.
+    const other = await writeCredentialFile({ root, ref: "bar.key", value: KEY });
+    assert.equal(other.ok, true, other.detail);
+    // And rewriting the SAME reference is a rotation, not a collision.
+    const rotate = await writeCredentialFile({ root, ref: "Foo.key", value: "rotated-key-0987654321ab" });
+    assert.equal(rotate.ok, true, rotate.detail);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
+
+test("AN UNREADABLE STORE IS NOT AN EMPTY ONE", async () => {
+  // The failure-reads-as-absence shape this whole carrier exists to end. An orphan check running
+  // over a root it could not read would report a clean store, and the colliding-write guard
+  // consulting it would find no collisions because it found nothing at all.
+  const parent = scratch();
+  const root = path.join(parent, "credentials");
+  fs.writeFileSync(root, "i am a file, not a directory\n");
+  try {
+    const answer = await listCredentialStore(root);
+    assert.notEqual(answer.problem, "", "an unreadable store reported as empty");
+    assert.deepEqual(answer.names, []);
+    await assert.rejects(() => listCredentialFiles(root), /could not be listed/);
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
+
+test("a store that was never created IS empty, and says so without complaint", async () => {
+  // The distinction that makes the test above meaningful: absence is a normal state on a host that
+  // has never stored a credential, and treating it as a fault would make every such host look broken.
+  const parent = scratch();
+  try {
+    const answer = await listCredentialStore(path.join(parent, "never-made"));
+    assert.equal(answer.problem, "");
+    assert.deepEqual(answer.names, []);
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true, maxRetries: 3 });
   }
 });

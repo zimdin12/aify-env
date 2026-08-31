@@ -57,7 +57,11 @@ test("a hidden or oversized reference is refused", () => {
   assert.match(credentialRefProblem(""), /empty/);
 });
 
-test("the default reference CANNOT COLLIDE between two different services", () => {
+test("the default reference makes an accidental collision vanishingly unlikely", () => {
+  // NOT "cannot collide", which is what this said. Twelve hex characters is 48 bits -- a bounded
+  // improbability, not a guarantee, and certifying uniqueness from a truncated hash is the kind of
+  // claim that gets believed and never rechecked. What PREVENTS a collision is the registry closure
+  // and the store refusing a colliding write; this only stops two names mangling into one.
   // The first version replaced refused characters with `-` and truncated, so `a/b` and `a-b` both
   // became `a-b.key`: two services sharing one credential file, each overwriting the other's key.
   // Its comment claimed the replacement PREVENTED collapse and demonstrated the opposite.

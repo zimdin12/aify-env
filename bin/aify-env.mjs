@@ -548,7 +548,11 @@ function launcherCandidates() {
  */
 async function postAdvertisement(url, body, apiKey = "") {
   const headers = { "content-type": "application/json" };
-  if (String(apiKey || "").trim() !== "") headers["X-API-Key"] = String(apiKey).trim();
+  // SENT EXACTLY AS RESOLVED. This trimmed, which would put a DIFFERENT key on the wire from the one
+  // the store holds -- and the resulting 401 would have no visible cause on either side. The
+  // resolver validates the bytes and refuses anything with surrounding whitespace, so by the time a
+  // key reaches here there is nothing left to tidy and tidying it can only introduce a mismatch.
+  if (String(apiKey || "") !== "") headers["X-API-Key"] = String(apiKey);
   return fetch(url, {
     method: "POST",
     headers,
