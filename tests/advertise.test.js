@@ -12,6 +12,7 @@ import {
   acceptanceKey,
   advertisementHealth,
   credentialFor,
+  attemptsByService,
   credentialReadiness,
   advertisementStaleMs,
   advertisingToService,
@@ -623,3 +624,34 @@ test("a target whose registry entry declares NO key variable can never be given 
   assert.equal(credentialReadiness(targets, { AIFY_API_KEY: "k" }).legacy.hasCredential, false);
 });
 
+test("attemptsByService keeps the last outcome per service, and NO response body", () => {
+  const targets = [{ name: "aify-comms", url: "http://a", keyEnv: [] }];
+  const attempts = new Map([[acceptanceKey(targets[0]),
+    { at: 1234, ok: false, status: 401, error: "" }]]);
+  const out = attemptsByService(targets, attempts);
+  assert.deepEqual(out["aify-comms"], { at: 1234, ok: false, status: 401, error: "" });
+  // A service's error TEXT is its own and could carry anything, including something it should not
+  // have said. Only a status number and this daemon's own transport error travel.
+  assert.deepEqual(Object.keys(out["aify-comms"]).sort(), ["at", "error", "ok", "status"]);
+});
+
+test("a target never beaten to is NULL, not a zeroed attempt", () => {
+  // A zeroed row would read as "tried and got nothing", which is evidence this daemon does not have.
+  const targets = [{ name: "aify-comms", url: "http://a", keyEnv: [] }];
+  assert.equal(attemptsByService(targets, new Map())["aify-comms"], null);
+  // POSITIVE CONTROL: the same reader returns a record when one exists.
+  const seen = new Map([[acceptanceKey(targets[0]), { at: 5, ok: true, status: 200, error: "" }]]);
+  assert.equal(attemptsByService(targets, seen)["aify-comms"].ok, true);
+});
+
+test("attempts are keyed by SERVICE identity, so two services on one endpoint do not share one", () => {
+  // The same collision `acceptanceKey` exists to prevent, in the second map that now uses it.
+  const targets = [
+    { name: "aify-comms", url: "http://shared", keyEnv: [] },
+    { name: "other", url: "http://shared", keyEnv: [] },
+  ];
+  const attempts = new Map([[acceptanceKey(targets[0]), { at: 1, ok: true, status: 200, error: "" }]]);
+  const out = attemptsByService(targets, attempts);
+  assert.equal(out["aify-comms"].ok, true);
+  assert.equal(out.other, null, "an acceptance for one service was read for another");
+});

@@ -91,7 +91,7 @@ if (looksLikeEnvironment(envAnswer)) {
     answered: true,
     enabled: envAnswer.body?.advertisingEnabled ?? null,
     credentials: envAnswer.body?.advertiseCredentials ?? null,
-    services: envAnswer.body?.advertisingTo ?? null,
+    attempts: envAnswer.body?.advertiseAttempts ?? null,
   }));
 } else {
   // Not a guess of zero, and the distinction is load-bearing: "0 processes owned" is what a healthy

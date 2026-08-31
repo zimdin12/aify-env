@@ -50,6 +50,7 @@ import {
   capabilityFingerprint,
   acceptanceKey,
   advertisementHealth,
+  attemptsByService,
   credentialReadiness,
   advertisementStaleMs,
   environmentAdvertisement,
@@ -277,6 +278,9 @@ const server = createServer(async (request, response) => {
         // every advertisement is refused, `advertising` stays false, the bridge correctly keeps
         // describing the host, and the operator sees a daemon that runs and is never believed.
         advertiseCredentials: credentialReadiness(advertisingTargets, process.env),
+        // The outcome of the last beat per target, so a reader can tell a refusal from an outage.
+        // No response BODY travels -- a service's error text is its own, and could carry anything.
+        advertiseAttempts: attemptsByService(advertisingTargets, lastAttempts),
         traffic,
       },
     );
@@ -552,6 +556,13 @@ let advertisingTargets = [];
 //: meant a 401 counted as success, and the aify-comms bridge stands down on that answer.
 const acceptedBeats = new Map();
 
+//: The LAST OUTCOME per target, accepted or not -- which `acceptedBeats` deliberately cannot carry,
+//: because it records only 2xx. Without it "we are not being heard" is one undifferentiated state,
+//: and a service that is DOWN is indistinguishable from one that REFUSED our credential. Those need
+//: different words from the doctor: one is somebody else's outage, the other is a key to set here.
+//: `advertiseTo` has always returned `{ok, status, error}` per target; it was only ever printed.
+const lastAttempts = new Map();
+
 function advertisingHealthNow() {
   return advertisementHealth({
     enabled: ADVERTISE,
@@ -617,6 +628,10 @@ async function advertiseOnce() {
   // Reported, never thrown: a service being down is that service's news, not this daemon's failure.
   const results = await advertiseTo({ targets, body, post: postAdvertisement, env: process.env });
   for (const result of results) {
+    lastAttempts.set(acceptanceKey(result), {
+      at: Date.now(), ok: result.ok === true,
+      status: Number(result.status || 0), error: String(result.error || ""),
+    });
     if (result.ok) {
       // Only a 2xx counts. This is the whole fix: acceptance is recorded, refusal is not.
       acceptedBeats.set(acceptanceKey(result), Date.now());

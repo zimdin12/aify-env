@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  advertiseAttemptCause,
   advertiseCredentialCheck,
   terminalCheck,
   registryCheck,
@@ -219,28 +220,62 @@ test("the terminal row says where it was measured, not just what it found", () =
   );
 });
 
-test("advertiseCredentialCheck fires only when a target is BOTH silent and keyless", () => {
+test("advertiseAttemptCause separates a refusal from an outage", () => {
+  // The distinction the first version of this check did not make, and the reason it was revised: a
+  // service that refused our key is a fault on THIS host; a service that is down is somebody else's.
+  assert.equal(advertiseAttemptCause({ ok: true, status: 200 }), "accepted");
+  assert.equal(advertiseAttemptCause({ ok: false, status: 401 }), "refused-credential");
+  assert.equal(advertiseAttemptCause({ ok: false, status: 403 }), "refused-credential");
+  assert.equal(advertiseAttemptCause({ ok: false, status: 0, error: "ECONNREFUSED" }), "unreachable");
+  assert.equal(advertiseAttemptCause({ ok: false, status: 500 }), "refused-other");
+  // NEVER ATTEMPTED is not a failed attempt: a daemon that has not beaten yet gathered no evidence.
+  assert.equal(advertiseAttemptCause(null), "never-attempted");
+  assert.equal(advertiseAttemptCause(undefined), "never-attempted");
+});
+
+test("only a 401/403 blames the credential", () => {
   const credentials = {
     "aify-comms": { keyEnv: ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"], hasCredential: false },
   };
-  const bad = advertiseCredentialCheck({
-    answered: true, enabled: true, credentials, services: { "aify-comms": { fresh: false } },
+  const verdict = (attempts) => advertiseCredentialCheck({
+    answered: true, enabled: true, credentials, attempts,
   });
-  assert.equal(bad.state, "failed");
-  assert.match(bad.detail, /CLAUDE_MCP_API_KEY or AIFY_API_KEY/);
-  assert.match(bad.fix, /STARTS aify-env/);
 
-  // ACCEPTED BEATS MEAN THE KEY IS NOT THE PROBLEM. This host runs keyless today and its beats land,
-  // so reporting a missing credential here would cry wolf on the ordinary configuration.
-  assert.equal(advertiseCredentialCheck({
-    answered: true, enabled: true, credentials, services: { "aify-comms": { fresh: true } },
-  }).state, "passed");
+  const refused = verdict({ "aify-comms": { ok: false, status: 401 } });
+  assert.equal(refused.state, "failed");
+  assert.match(refused.detail, /CLAUDE_MCP_API_KEY or AIFY_API_KEY/);
+  assert.match(refused.fix, /STARTS aify-env/);
+
+  // A SERVICE THAT IS DOWN IS NOT A CREDENTIAL FAULT. This is the conflation the review caught: we
+  // ARE unheard, and there is no evidence about why, so it is unanswered rather than a verdict.
+  for (const attempt of [
+    { ok: false, status: 0, error: "ECONNREFUSED" },
+    { ok: false, status: 500 },
+    null,
+  ]) {
+    const check = verdict({ "aify-comms": attempt });
+    assert.equal(check.state, "unanswered", JSON.stringify(attempt));
+    assert.doesNotMatch(check.detail, /set one of/, "it named a key on evidence it does not have");
+  }
+
+  assert.equal(verdict({ "aify-comms": { ok: true, status: 200 } }).state, "passed");
+});
+
+test("a credential that IS set and still refused is named as WRONG, not missing", () => {
+  // Telling an operator to set a variable they have already set sends them to check the wrong thing.
+  const credentials = { "aify-comms": { keyEnv: ["AIFY_API_KEY"], hasCredential: true } };
+  const check = advertiseCredentialCheck({
+    answered: true, enabled: true, credentials,
+    attempts: { "aify-comms": { ok: false, status: 403 } },
+  });
+  assert.equal(check.state, "failed");
+  assert.match(check.detail, /wrong value, not a missing one/);
 });
 
 test("advertising switched OFF is a configuration, not a missing credential", () => {
   const credentials = { "aify-comms": { keyEnv: ["AIFY_API_KEY"], hasCredential: false } };
   assert.equal(advertiseCredentialCheck({
-    answered: true, enabled: false, credentials, services: {},
+    answered: true, enabled: false, credentials, attempts: {},
   }).state, "passed");
 });
 
@@ -253,13 +288,12 @@ test("a daemon that did not answer is UNANSWERED, never a tidy zero", () => {
     { answered: true, credentials: null },
     { answered: false, credentials: { "aify-comms": { keyEnv: [], hasCredential: true } } },
   ]) {
-    const check = advertiseCredentialCheck(input);
-    assert.equal(check.state, "unanswered", JSON.stringify(input));
+    assert.equal(advertiseCredentialCheck(input).state, "unanswered", JSON.stringify(input));
   }
 });
 
 test("no advertisement targets needs no credential", () => {
   assert.equal(advertiseCredentialCheck({
-    answered: true, enabled: true, credentials: {}, services: {},
+    answered: true, enabled: true, credentials: {}, attempts: {},
   }).state, "passed");
 });
