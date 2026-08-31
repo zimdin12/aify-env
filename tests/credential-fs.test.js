@@ -479,3 +479,29 @@ test("and the READER actually passes it -- driven through inspect, not asserted 
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
   }
 });
+
+test("TWO REFERENCES DIFFERING ONLY IN CASE CANNOT SHARE ONE FILE", async () => {
+  // On Windows and on macOS's default volume they ARE one file, so two services whose references
+  // differ only in case would silently share a credential -- each reading the other's key while
+  // every other check passed. MEASURED here: `lstat("foo.key")` succeeds against a file named
+  // `Foo.key`, so nothing above this notices.
+  const root = scratch();
+  try {
+    await writeCredentialFile({ root, ref: "Foo.key", value: KEY });
+    const exact = await readCredentialFile({ root, ref: "Foo.key" });
+    assert.equal(exact.state, CREDENTIAL_OK, exact.detail);
+
+    const wrongCase = await readCredentialFile({ root, ref: "foo.key" });
+    if (exact.identity && fs.existsSync(path.join(root, "foo.key"))) {
+      // A case-INSENSITIVE filesystem: the lookup succeeds and must be refused.
+      assert.equal(wrongCase.state, CREDENTIAL_INSECURE, wrongCase.detail);
+      assert.match(wrongCase.detail, /differs only in case/);
+      assert.equal(wrongCase.value, "", "it handed over another reference's key");
+    } else {
+      // A case-SENSITIVE filesystem: there is simply no such file, which is the right answer too.
+      assert.equal(wrongCase.state, CREDENTIAL_MISSING);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
