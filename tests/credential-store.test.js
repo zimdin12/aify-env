@@ -16,6 +16,7 @@ import {
   MAX_CREDENTIAL_BYTES,
   credentialRefIsValid,
   credentialRefProblem,
+  credentialOrphans,
   credentialRefsCollide,
   credentialValueProblem,
   decodeCredential,
@@ -185,4 +186,32 @@ test("a value with a control character or surrounding whitespace is never stored
 
 test("the store directory name is fixed, so two readers cannot look in different places", () => {
   assert.equal(CREDENTIAL_DIR_NAME, "credentials");
+});
+
+test("an orphan is a secret nothing references; a dangling ref is a service that will fail", () => {
+  // TWO PROBLEMS, TWO OWNERS. An orphan sits on disk and will never be presented -- left by a removed
+  // service or a rotation that changed the reference. A dangling reference is the urgent half:
+  // something IS pointed at a file that is not there, so that service cannot advertise.
+  const answer = credentialOrphans({
+    storeNames: ["a.key", "stale.key"],
+    registryRefs: ["a.key", "gone.key"],
+  });
+  assert.deepEqual(answer.orphans, ["stale.key"]);
+  assert.deepEqual(answer.dangling, ["gone.key"]);
+});
+
+test("matching is CASE-FOLDED, so a live key is never reported as unreferenced", () => {
+  // On a case-insensitive volume `Foo.key` and `foo.key` are ONE file. Reporting the file as an
+  // orphan because the registry spelled it differently would invite somebody to delete a live key.
+  const answer = credentialOrphans({ storeNames: ["Foo.key"], registryRefs: ["foo.key"] });
+  assert.deepEqual(answer.orphans, []);
+  assert.deepEqual(answer.dangling, []);
+});
+
+test("an empty store and an empty registry agree without complaint", () => {
+  const answer = credentialOrphans({ storeNames: [], registryRefs: [] });
+  assert.deepEqual(answer.orphans, []);
+  assert.deepEqual(answer.dangling, []);
+  // Blank references are not references: a service with no credential must not read as dangling.
+  assert.deepEqual(credentialOrphans({ storeNames: [], registryRefs: ["", "  "] }).dangling, []);
 });

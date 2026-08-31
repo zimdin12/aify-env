@@ -23,6 +23,7 @@ import {
   environmentCheck,
   looksLikeEnvironment,
   advertiseCredentialCheck,
+  credentialStoreCheck,
   ownedProcessesCheck,
   registryCheck,
   terminalCheck,
@@ -33,6 +34,7 @@ import {
   registryVersion,
   SUPPORTED_REGISTRY_VERSION,
 } from "../lib/services.mjs";
+import { credentialRoot, listCredentialStore } from "../lib/credential-fs.mjs";
 import { terminalSupport } from "../lib/runner.mjs";
 
 const args = process.argv.slice(2);
@@ -110,6 +112,18 @@ if (declaredVersion === null || declaredVersion === SUPPORTED_REGISTRY_VERSION) 
     checks.push(probeService(service, await knock(`${service.endpoint}/health`)));
   }
 }
+
+// THE CREDENTIAL STORE, compared against what the registry references. Reported, never deleted: a
+// file nobody references today may be referenced by a registry that is briefly unreadable, and
+// deleting a population on that reasoning is how a cleanup becomes an outage.
+const store = await listCredentialStore(credentialRoot());
+checks.push(credentialStoreCheck({
+  storeProblem: store.problem,
+  storeNames: store.problem ? null : store.names,
+  registryRefs: declaredVersion === null || declaredVersion === SUPPORTED_REGISTRY_VERSION
+    ? readServices(source.text ?? "").map((service) => service.credentialRef)
+    : null,
+}));
 
 const result = summarise(checks);
 

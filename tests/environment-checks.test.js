@@ -11,6 +11,7 @@ import { test } from "node:test";
 import {
   advertiseAttemptCause,
   advertiseCredentialCheck,
+  credentialStoreCheck,
   terminalCheck,
   registryCheck,
   ownedProcessesCheck,
@@ -296,4 +297,42 @@ test("no advertisement targets needs no credential", () => {
   assert.equal(advertiseCredentialCheck({
     answered: true, enabled: true, credentials: {}, attempts: {},
   }).state, "passed");
+});
+
+test("A STORE THAT COULD NOT BE READ IS UNANSWERED, never clean", () => {
+  // The distinction `listCredentialStore` exists for. A check reporting "no orphans" because it
+  // could not look is worse than one that says nothing, because it closes the question.
+  const answer = credentialStoreCheck({ storeProblem: "EACCES" });
+  assert.equal(answer.state, "unanswered");
+  assert.match(answer.detail, /could not be read/);
+  // Missing inputs are the same kind of no-evidence rather than a tidy zero.
+  assert.equal(credentialStoreCheck({ storeNames: null, registryRefs: [] }).state, "unanswered");
+  assert.equal(credentialStoreCheck({ storeNames: [], registryRefs: null }).state, "unanswered");
+});
+
+test("a dangling reference outranks an orphan, because it is the one breaking something now", () => {
+  // An orphan is a secret nobody presents. A dangling reference is a service that cannot advertise
+  // until somebody fixes it, so it is the finding an operator should see first.
+  const both = credentialStoreCheck({
+    storeNames: ["stale.key"], registryRefs: ["gone.key"],
+  });
+  assert.equal(both.state, "failed");
+  assert.match(both.detail, /not stored/);
+  assert.match(both.fix, /installer/);
+});
+
+test("an orphan is REPORTED, and the fix says why it is not deleted", () => {
+  const answer = credentialStoreCheck({ storeNames: ["a.key", "stale.key"], registryRefs: ["a.key"] });
+  assert.equal(answer.state, "failed");
+  assert.match(answer.detail, /stale\.key/);
+  // Never auto-deleted: a registry that is briefly unreadable would otherwise look like permission
+  // to delete everything.
+  assert.match(answer.fix, /reported rather than deleted/);
+});
+
+test("a store whose every file is referenced passes, and an empty one says so", () => {
+  assert.equal(credentialStoreCheck({ storeNames: ["a.key"], registryRefs: ["a.key"] }).state, "passed");
+  const empty = credentialStoreCheck({ storeNames: [], registryRefs: [] });
+  assert.equal(empty.state, "passed");
+  assert.match(empty.detail, /no credentials stored/);
 });
