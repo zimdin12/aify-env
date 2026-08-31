@@ -193,8 +193,11 @@ test("targets are built from the registry, one per service", () => {
       // The registry NAME travels with the endpoint. Without it "am I advertising?" is only
       // answerable for the daemon as a whole, so a success to one service stood another's bridge
       // down for a beat it never received.
-      { name: "aify-comms", url: "http://127.0.0.1:8800/api/v1/environments/heartbeat", keyEnv: [] },
-      { name: "other", url: "http://127.0.0.1:9000/api/v1/environments/heartbeat", keyEnv: [] },
+      // `credentialRef` travels for the same reason and with the same trap: read off the rebuilt
+      // object instead of carried, it is undefined for every service -- which reads exactly like
+      // "this service stores no credential", the state the carrier exists to stop being invisible.
+      { name: "aify-comms", url: "http://127.0.0.1:8800/api/v1/environments/heartbeat", keyEnv: [], credentialRef: "" },
+      { name: "other", url: "http://127.0.0.1:9000/api/v1/environments/heartbeat", keyEnv: [], credentialRef: "" },
     ],
   );
 });
@@ -654,4 +657,31 @@ test("attempts are keyed by SERVICE identity, so two services on one endpoint do
   const out = attemptsByService(targets, attempts);
   assert.equal(out["aify-comms"].ok, true);
   assert.equal(out.other, null, "an acceptance for one service was read for another");
+});
+
+test("THE BEAT USES THE INJECTED RESOLVER, which is what makes the store deliver", async () => {
+  // The delivery join. Everything else in the carrier is scaffolding around this: a key that reaches
+  // `credentialForTarget` and not `post` is a key that was never sent, and the service would refuse
+  // the beat exactly as it did before any of this existed.
+  //
+  // A mutation dropping the resolver survived until this test, because every other case here goes
+  // through the environment-only default.
+  const seen = [];
+  const post = async (url, body, key) => { seen.push(key); return { status: 200 }; };
+  await advertiseTo({
+    targets: [{ name: "aify-comms", url: "http://x", keyEnv: [] }],
+    body: {}, post, env: {},
+    credential: async () => "from-the-store",
+  });
+  assert.deepEqual(seen, ["from-the-store"]);
+});
+
+test("and WITHOUT one it still reads the environment, so existing callers are untouched", async () => {
+  const seen = [];
+  const post = async (url, body, key) => { seen.push(key); return { status: 200 }; };
+  await advertiseTo({
+    targets: [{ name: "aify-comms", url: "http://x", keyEnv: ["AIFY_API_KEY"] }],
+    body: {}, post, env: { AIFY_API_KEY: "from-the-environment" },
+  });
+  assert.deepEqual(seen, ["from-the-environment"]);
 });

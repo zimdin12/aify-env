@@ -51,7 +51,13 @@ import {
   acceptanceKey,
   advertisementHealth,
   attemptsByService,
-  credentialReadiness,
+} from "../lib/advertise.mjs";
+import { credentialRoot } from "../lib/credential-fs.mjs";
+import {
+  credentialForTarget,
+  credentialReadinessFor,
+} from "../lib/credential-resolve.mjs";
+import {
   advertisementStaleMs,
   environmentAdvertisement,
   environmentKind,
@@ -281,7 +287,9 @@ const server = createServer(async (request, response) => {
         // NAMES AND A BOOLEAN, never a key. Without this, a daemon with no credential is invisible:
         // every advertisement is refused, `advertising` stays false, the bridge correctly keeps
         // describing the host, and the operator sees a daemon that runs and is never believed.
-        advertiseCredentials: credentialReadiness(advertisingTargets, process.env),
+        advertiseCredentials: await credentialReadinessFor(advertisingTargets, {
+          env: process.env, root: credentialRoot(), cache: credentialCache,
+        }),
         // The outcome of the last beat per target, so a reader can tell a refusal from an outage.
         // No response BODY travels -- a service's error text is its own, and could carry anything.
         advertiseAttempts: attemptsByService(advertisingTargets, lastAttempts),
@@ -558,6 +566,12 @@ let advertisingTargets = [];
 //: Target url -> epoch ms of the last beat that came back 2xx. THE ONLY EVIDENCE that a service is
 //: actually being described by this daemon. Reporting "advertising" from the target LIST instead
 //: meant a 401 counted as success, and the aify-comms bridge stands down on that answer.
+//: Read-through cache keyed on CONTENT IDENTITY -- device, inode, size and mtime together, because
+//: an atomic replace can land inside one clock tick and an mtime-only cache would serve the old key
+//: right through a rotation. No expiry: a cache that goes stale on a timer is wrong for the length
+//: of the timer.
+const credentialCache = new Map();
+
 const acceptedBeats = new Map();
 
 //: The LAST OUTCOME per target, accepted or not -- which `acceptedBeats` deliberately cannot carry,
@@ -630,7 +644,16 @@ async function advertiseOnce() {
   lastFingerprint = fingerprint;
 
   // Reported, never thrown: a service being down is that service's news, not this daemon's failure.
-  const results = await advertiseTo({ targets, body, post: postAdvertisement, env: process.env });
+  // THE STORE-AWARE RESOLVER, which is what makes the carrier deliver rather than only diagnose.
+  // A fault -- unreadable, insecure, invalid, conflicting -- yields NO key, so a beat goes out
+  // unauthenticated and is refused, and the refusal is then reported with its real cause instead of
+  // this daemon inventing one.
+  const results = await advertiseTo({
+    targets, body, post: postAdvertisement, env: process.env,
+    credential: async (target) => (await credentialForTarget(target, {
+      env: process.env, root: credentialRoot(), cache: credentialCache,
+    })).value,
+  });
   for (const result of results) {
     lastAttempts.set(acceptanceKey(result), {
       at: Date.now(), ok: result.ok === true,
