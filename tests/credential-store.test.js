@@ -16,6 +16,7 @@ import {
   MAX_CREDENTIAL_BYTES,
   credentialRefIsValid,
   credentialRefProblem,
+  credentialRefsCollide,
   credentialValueProblem,
   decodeCredential,
   defaultCredentialRef,
@@ -56,15 +57,42 @@ test("a hidden or oversized reference is refused", () => {
   assert.match(credentialRefProblem(""), /empty/);
 });
 
-test("the default reference is derived from the service name and then VALIDATED", () => {
-  assert.equal(defaultCredentialRef("aify-comms"), "aify-comms.key");
-  // Refused characters become dashes rather than being dropped, so two different services cannot
-  // collapse onto one file by having their separators removed.
-  assert.equal(defaultCredentialRef("a/b"), "a-b.key");
-  // A name made ENTIRELY of refused leading dots would produce a dot-leading or empty reference,
-  // which the grammar refuses -- so the derivation is checked rather than assumed.
-  assert.equal(defaultCredentialRef("..."), "");
+test("the default reference CANNOT COLLIDE between two different services", () => {
+  // The first version replaced refused characters with `-` and truncated, so `a/b` and `a-b` both
+  // became `a-b.key`: two services sharing one credential file, each overwriting the other's key.
+  // Its comment claimed the replacement PREVENTED collapse and demonstrated the opposite.
+  assert.notEqual(defaultCredentialRef("a/b"), defaultCredentialRef("a-b"));
+  // And any two names sharing their usable prefix collided the same way.
+  const long = "x".repeat(40);
+  assert.notEqual(defaultCredentialRef(`${long}one`), defaultCredentialRef(`${long}two`));
+  // Case differences are different identities here, and the registry closure refuses the pair
+  // separately -- see `credentialRefsCollide`.
+  assert.notEqual(defaultCredentialRef("Svc"), defaultCredentialRef("svc"));
+});
+
+test("the default reference stays readable and stays valid", () => {
+  // The prefix is kept only so an operator listing the store can tell which file is whose; the
+  // digest is what makes it unique.
+  const ref = defaultCredentialRef("aify-comms");
+  assert.match(ref, /^aify-comms-[0-9a-f]{12}\.key$/);
+  assert.equal(credentialRefProblem(ref), "");
+  // A name made ENTIRELY of refused characters still yields a valid, unique reference rather than
+  // an empty or dot-leading one.
+  const odd = defaultCredentialRef("...");
+  assert.match(odd, /^svc-[0-9a-f]{12}\.key$/);
+  assert.equal(credentialRefProblem(odd), "");
+  // Nothing at all is still nothing: an unnamed service has no default.
   assert.equal(defaultCredentialRef(""), "");
+  assert.equal(defaultCredentialRef("   "), "");
+});
+
+test("two references that differ only in case are treated as one file", () => {
+  // On Windows and on macOS's default volume they ARE one file, so a registry accepting both would
+  // have two services silently sharing a credential -- and the host it was tested on might be the
+  // one where they are two.
+  assert.equal(credentialRefsCollide("Foo.key", "foo.key"), true);
+  assert.equal(credentialRefsCollide("a.key", "b.key"), false);
+  assert.equal(credentialRefsCollide("", ""), false, "nothing must not collide with nothing");
 });
 
 test("the canonical file is the key and exactly one newline", () => {

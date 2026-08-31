@@ -117,3 +117,41 @@ test("the lockdown REMOVES inheritance rather than only stopping it", () => {
   assert.ok(args.includes("/inheritance:r"));
   assert.ok(args.includes("/grant:r"));
 });
+
+test("AN UNQUALIFIED PRINCIPAL ON THE FIRST LINE needs the path, and gets it", () => {
+  // MEASURED as a real defect: icacls emits unqualified principals (`Everyone` is the obvious one),
+  // and without the path the last backslash falls inside the PATH rather than in a domain. The whole
+  // line then parsed as one principal named after the directory, and the verdict read "readable by
+  // <the path>" -- not a person, and never matching an owner. A store-written file was reported
+  // insecure for a reason that did not exist.
+  const target = String.raw`C:\Users\me\AppData\Local\Temp\aify-cred-uhwDz8`;
+  const line = `${target} storeowner:(F)`;
+
+  const withPath = parseIcaclsAces(line, { path: target });
+  assert.equal(withPath.length, 1);
+  assert.equal(withPath[0].principal, "storeowner");
+  assert.equal(aclProblem(withPath, { owner: "storeowner" }), "");
+
+  // WITHOUT the path the same line is misread -- pinned so the argument cannot quietly become
+  // optional again.
+  const withoutPath = parseIcaclsAces(line);
+  assert.notEqual(withoutPath[0]?.principal, "storeowner",
+                  "the path-less fallback now handles this, so the path argument is untested");
+});
+
+test("a domain-qualified principal still parses with the path supplied", () => {
+  const target = String.raw`C:\x\a.key`;
+  const line = String.raw`C:\x\a.key STEVENZ-L\Administrator:(F)`;
+  const aces = parseIcaclsAces(line, { path: target });
+  assert.equal(aces.length, 1);
+  assert.equal(aces[0].leaf, "administrator");
+});
+
+test("a principal containing SPACES parses with the path supplied", () => {
+  const target = String.raw`C:\x\a.key`;
+  const line = String.raw`C:\x\a.key NT AUTHORITY\Authenticated Users:(R)`;
+  const aces = parseIcaclsAces(line, { path: target });
+  assert.equal(aces.length, 1);
+  assert.equal(aces[0].leaf, "authenticated users");
+  assert.notEqual(aclProblem(aces, { owner: "me" }), "", "a broad group was accepted");
+});

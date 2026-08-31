@@ -22,6 +22,8 @@
 import process from "node:process";
 
 import {
+  CREDENTIAL_OK,
+  MAX_CREDENTIAL_BYTES,
   credentialRefProblem,
   defaultCredentialRef,
 } from "../lib/credential-store.mjs";
@@ -99,11 +101,34 @@ export function referenceFor({ service = "", ref = "" } = {}) {
   return defaultCredentialRef(service);
 }
 
-/** Read stdin to the end. Bounded by the store's own size check, which runs on the value. */
-async function readStdin(stream = process.stdin) {
+/**
+ * Read stdin, ABORTING once it exceeds the limit rather than buffering whatever arrives.
+ *
+ * The first version buffered everything and let the store's size check run afterwards, which is a
+ * check that happens after the damage: anything piped in was already in this process's memory, and
+ * a caller redirecting the wrong file could hand it a gigabyte before being told it was too big.
+ *
+ * Decoding is STRICT and happens here rather than through `Buffer.toString`, which substitutes
+ * U+FFFD for invalid bytes -- turning a mis-encoded key into a plausible one that matches nothing.
+ * That is the same substitution the store already refuses when reading a file, and it has to be
+ * refused on the way in too, or the store would faithfully persist a key nobody issued.
+ */
+export async function readStdinBounded(stream, limit = MAX_CREDENTIAL_BYTES) {
   const chunks = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  return Buffer.concat(chunks).toString("utf8");
+  let total = 0;
+  for await (const chunk of stream) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.byteLength;
+    if (total > limit) {
+      throw new Error(`more than ${limit} bytes arrived on stdin; a key is a token, not a file`);
+    }
+    chunks.push(buffer);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+  } catch {
+    throw new Error("what arrived on stdin is not valid UTF-8");
+  }
 }
 
 /**
@@ -136,12 +161,17 @@ async function main() {
       process.stdout.write(`no credentials stored in ${root}${EOL}`);
       process.exit(EXIT_OK);
     }
+    // LISTS EVERYTHING, EXITS NON-ZERO IF ANY OF IT IS FAULTED. A human wants the whole picture;
+    // automation needs a verdict, and exiting 0 while printing CREDENTIAL_INSECURE is the shape
+    // where a script reports the store healthy because the command "worked".
+    let faulted = 0;
     for (const name of names) {
       const answer = await readCredentialFile({ root, ref: name });
       const detail = answer.detail ? ` -- ${answer.detail}` : "";
       process.stdout.write(`${name}: ${answer.state}${detail}${EOL}`);
+      if (answer.state !== CREDENTIAL_OK) faulted += 1;
     }
-    process.exit(EXIT_OK);
+    process.exit(faulted ? EXIT_FAILED : EXIT_OK);
   }
 
   const ref = referenceFor(options);
@@ -161,7 +191,15 @@ async function main() {
     process.exit(EXIT_OK);
   }
 
-  const value = keyFromStdin(await readStdin());
+  let piped;
+  try {
+    piped = await readStdinBounded(process.stdin);
+  } catch (failure) {
+    // Names the PROBLEM, never what arrived.
+    process.stderr.write(`aify-env credential: ${failure.message}${EOL}`);
+    process.exit(EXIT_FAILED);
+  }
+  const value = keyFromStdin(piped);
   const written = await writeCredentialFile({ root, ref, value });
   if (!written.ok) {
     // The store's messages name the PROBLEM and never the value; this passes them through unchanged

@@ -19,8 +19,12 @@ import {
   EXIT_USAGE,
   keyFromStdin,
   parseCredentialArgs,
+  readStdinBounded,
   referenceFor,
 } from "../bin/aify-env-credential.mjs";
+import { MAX_CREDENTIAL_BYTES, defaultCredentialRef } from "../lib/credential-store.mjs";
+
+const PROBE_REF = defaultCredentialRef("probe");
 
 const COMMAND = fileURLToPath(new URL("../bin/aify-env-credential.mjs", import.meta.url));
 const CANARY = "canary-key-DO-NOT-LEAK-9999";
@@ -76,11 +80,14 @@ test("a --ref the grammar refuses is rejected at parse time", () => {
 });
 
 test("the reference is the caller's if given, else derived from the service name", () => {
-  assert.equal(referenceFor({ service: "aify-comms" }), "aify-comms.key");
+  // DERIVED, not hardcoded: the default now carries a digest so two services cannot collide, and a
+  // test asserting a literal name would have to be rewritten every time that derivation changes --
+  // which is exactly how a test stops describing the contract and starts describing one output.
+  assert.equal(referenceFor({ service: "aify-comms" }), defaultCredentialRef("aify-comms"));
   assert.equal(referenceFor({ service: "aify-comms", ref: "chosen.key" }), "chosen.key");
   assert.equal(referenceFor({ service: "aify-comms", ref: "../escape" }), "",
                "a hostile ref was resolved instead of refused");
-  assert.equal(referenceFor({ service: "..." }), "");
+  assert.equal(referenceFor({ service: "" }), "");
 });
 
 test("exactly ONE trailing line ending is removed from stdin, and nothing else", () => {
@@ -99,12 +106,12 @@ test("set prints the REFERENCE and never the key, and status does not either", a
   try {
     const set = await runCode(["set", "--service", "probe", "--stdin"], { input: `${CANARY}\n`, home });
     assert.equal(set.code, EXIT_OK, set.stderr);
-    assert.equal(set.stdout.trim(), "probe.key");
+    assert.equal(set.stdout.trim(), PROBE_REF);
     assert.ok(!`${set.stdout}${set.stderr}`.includes(CANARY), "the key reached the command's output");
 
     const status = await runCode(["status", "--service", "probe"], { home });
     assert.equal(status.code, EXIT_OK, status.stderr);
-    assert.match(status.stdout, /probe\.key: ok/);
+    assert.ok(status.stdout.includes(`${PROBE_REF}: ok`), status.stdout);
     assert.ok(!`${status.stdout}${status.stderr}`.includes(CANARY), "status printed the key");
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 3 });
@@ -115,7 +122,7 @@ test("the stored file holds exactly the key that was piped in", async () => {
   const home = scratchHome();
   try {
     await runCode(["set", "--service", "probe", "--stdin"], { input: `${CANARY}\n`, home });
-    const stored = fs.readFileSync(path.join(home, ".aify", "credentials", "probe.key"), "utf8");
+    const stored = fs.readFileSync(path.join(home, ".aify", "credentials", PROBE_REF), "utf8");
     // THE JOIN: what the writer put in is what a reader will get out, byte for byte plus the one
     // canonical newline. If these ever disagree the two tiers hold different keys and every call
     // 401s with both halves looking correctly configured.
@@ -131,7 +138,7 @@ test("a key the store refuses fails loudly and writes nothing", async () => {
     const set = await runCode(["set", "--service", "probe", "--stdin"], { input: "\n", home });
     assert.equal(set.code, EXIT_FAILED, set.stdout);
     assert.match(set.stderr, /CREDENTIAL_INVALID/);
-    assert.equal(fs.existsSync(path.join(home, ".aify", "credentials", "probe.key")), false);
+    assert.equal(fs.existsSync(path.join(home, ".aify", "credentials", PROBE_REF)), false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 3 });
   }
@@ -145,8 +152,9 @@ test("remove deletes exactly the named credential and reports it", async () => {
     const removed = await runCode(["remove", "--service", "a"], { home });
     assert.equal(removed.code, EXIT_OK, removed.stderr);
     const store = path.join(home, ".aify", "credentials");
-    assert.equal(fs.existsSync(path.join(store, "a.key")), false);
-    assert.equal(fs.existsSync(path.join(store, "b.key")), true, "remove took the wrong file");
+    assert.equal(fs.existsSync(path.join(store, defaultCredentialRef("a"))), false);
+    assert.equal(fs.existsSync(path.join(store, defaultCredentialRef("b"))), true,
+                 "remove took the wrong file");
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 3 });
   }
@@ -182,4 +190,48 @@ test("importing the module does NOT run the command", async () => {
   const module = await import("../bin/aify-env-credential.mjs");
   assert.equal(typeof module.parseCredentialArgs, "function");
   assert.equal(EXIT_OK, 0);
+});
+
+test("stdin is BOUNDED while it streams, not after it has all arrived", async () => {
+  // The first version buffered everything and let the store's size check run afterwards -- a check
+  // that happens after the damage. A caller redirecting the wrong file could hand this process a
+  // gigabyte before being told it was too big.
+  const { Readable } = await import("node:stream");
+  const oversized = Readable.from([Buffer.alloc(MAX_CREDENTIAL_BYTES + 1, 97)]);
+  await assert.rejects(() => readStdinBounded(oversized), /more than \d+ bytes/);
+
+  // POSITIVE CONTROL at the boundary: exactly the limit is accepted, so the bound is a limit rather
+  // than a refusal of everything large.
+  const atLimit = Readable.from([Buffer.alloc(MAX_CREDENTIAL_BYTES, 97)]);
+  assert.equal((await readStdinBounded(atLimit)).length, MAX_CREDENTIAL_BYTES);
+});
+
+test("stdin is decoded STRICTLY, so a mis-encoded key is refused rather than mangled", async () => {
+  // `Buffer.toString` substitutes U+FFFD for invalid bytes, which would turn a mis-encoded key into
+  // a plausible one that matches nothing -- and this host would then faithfully store a key nobody
+  // ever issued. It is the same substitution the store already refuses when READING a file.
+  const { Readable } = await import("node:stream");
+  await assert.rejects(
+    () => readStdinBounded(Readable.from([Buffer.from([0xff, 0xfe, 0x41])])),
+    /not valid UTF-8/);
+});
+
+test("status exits NON-ZERO when any stored credential is faulted", async () => {
+  // A human wants the whole list; automation needs a verdict. Exiting 0 while printing
+  // CREDENTIAL_INSECURE is the shape where a script reports the store healthy because the command
+  // "worked" -- the same failure-reads-as-success this whole carrier exists to end.
+  const home = scratchHome();
+  try {
+    await runCode(["set", "--service", "probe", "--stdin"], { input: `${CANARY}\n`, home });
+    const healthy = await runCode(["status"], { home });
+    assert.equal(healthy.code, EXIT_OK, healthy.stdout);
+
+    // Corrupt the stored bytes: the file is now INVALID rather than absent.
+    fs.writeFileSync(path.join(home, ".aify", "credentials", PROBE_REF), "no trailing newline");
+    const faulted = await runCode(["status"], { home });
+    assert.notEqual(faulted.code, EXIT_OK, "a faulted store reported success");
+    assert.match(faulted.stdout, /CREDENTIAL_INVALID/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 3 });
+  }
 });

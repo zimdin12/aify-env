@@ -23,12 +23,15 @@ import {
   currentWindowsOwner,
   ensureCredentialRoot,
   fileSecurityProblem,
+  inspectCredentialFile,
   listCredentialFiles,
   readCredentialFile,
   removeCredentialFile,
   writeCredentialFile,
 } from "../lib/credential-fs.mjs";
-import { CREDENTIAL_INVALID, CREDENTIAL_MISSING, CREDENTIAL_OK } from "../lib/credential-store.mjs";
+import {
+  CREDENTIAL_INVALID, CREDENTIAL_MISSING, CREDENTIAL_OK,
+} from "../lib/credential-store.mjs";
 
 const KEY = "s3cret-value-1234567890-abcdef";
 
@@ -282,5 +285,197 @@ test("UNREADABLE and INSECURE are distinct states, and neither is absence", () =
   for (const state of [CREDENTIAL_UNREADABLE, CREDENTIAL_INSECURE]) {
     assert.notEqual(state, CREDENTIAL_MISSING);
     assert.notEqual(state, CREDENTIAL_OK);
+  }
+});
+
+test("A ROOT THAT IS A LINK IS REFUSED, before the store is used at all", async () => {
+  // `mkdir -p` follows a pre-existing symlink or junction at this path, and so does every write
+  // after it -- putting the whole store wherever it points, in a directory whose custody nobody
+  // checked. lstat sees the link; a stat would see the target and report everything fine.
+  const parent = scratch();
+  const elsewhere = path.join(parent, "elsewhere");
+  const root = path.join(parent, "credentials");
+  fs.mkdirSync(elsewhere);
+  let linked = true;
+  try {
+    fs.symlinkSync(elsewhere, root, "junction");
+  } catch {
+    linked = false; // creating links can need privileges this process does not have
+  }
+  try {
+    if (linked) {
+      const problem = await ensureCredentialRoot(root);
+      assert.match(problem, /link/);
+      const write = await writeCredentialFile({ root, ref: "a.key", value: KEY });
+      assert.equal(write.ok, false, "a secret was written into a linked root");
+      assert.equal(fs.existsSync(path.join(elsewhere, "a.key")), false,
+                   "the secret landed where the link pointed");
+    }
+  } finally {
+    try { fs.rmSync(parent, { recursive: true, force: true, maxRetries: 3 }); } catch { /* ok */ }
+  }
+});
+
+test("a root that exists and is not a directory is refused", async () => {
+  const parent = scratch();
+  const root = path.join(parent, "credentials");
+  fs.writeFileSync(root, "i am a file\n");
+  try {
+    assert.match(await ensureCredentialRoot(root), /not a directory/);
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
+
+test("NOTHING IS WRITTEN WHEN THE ROOT CANNOT BE PROVEN PRIVATE", async () => {
+  // THE ORDER IS THE FIX. The first version created the root, wrote the secret into it, attempted a
+  // lockdown whose error it discarded, renamed, and only THEN checked custody -- so it could exit
+  // non-zero having left the key on disk readable by a group. Checking first means a failure here
+  // leaves no secret behind at all.
+  const parent = scratch();
+  const root = path.join(parent, "credentials");
+  fs.writeFileSync(root, "not a directory\n");
+  try {
+    const write = await writeCredentialFile({ root, ref: "a.key", value: KEY });
+    assert.equal(write.ok, false);
+    assert.equal(write.state, CREDENTIAL_INSECURE, write.detail);
+    // The only thing at that path is still the file that was blocking it.
+    assert.equal(fs.readFileSync(root, "utf8"), "not a directory\n");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
+
+test("on Windows an owner that cannot be determined stops the write rather than guessing", async () => {
+  // Without a name to grant to there is nothing to lock down TO, and proceeding would create the
+  // store with whatever the parent hands down -- which on this host is a group with Modify.
+  const root = scratch();
+  try {
+    // An environment with no USERNAME, so the branch is DRIVEN rather than read. On a host that has
+    // one, a test that did not inject this could never reach the refusal at all.
+    const problem = await ensureCredentialRoot(root, {
+      platform: "win32", owner: "", env: {}, run: async () => ({ stdout: "" }),
+    });
+    assert.match(problem, /which account/);
+    assert.equal(fs.readdirSync(root).length, 0, "it created something without an owner to grant to");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
+
+test("a FAILED lockdown stops the write, and leaves the previous credential intact", async () => {
+  // A rotation that fails must not also destroy the key that was working.
+  const root = scratch();
+  try {
+    await writeCredentialFile({ root, ref: "a.key", value: KEY });
+    const before = fs.readFileSync(path.join(root, "a.key"), "utf8");
+
+    // An icacls that reports failure on every call.
+    const failing = async () => { const e = new Error("icacls refused"); e.stdout = ""; throw e; };
+    const second = await writeCredentialFile({
+      root, ref: "a.key", value: "a-different-key-0987654321", platform: "win32",
+      owner: "Somebody", run: failing,
+    });
+    assert.equal(second.ok, false, "a write completed despite a failed lockdown");
+    assert.equal(fs.readFileSync(path.join(root, "a.key"), "utf8"), before,
+                 "a failed rotation destroyed the working credential");
+    assert.deepEqual(fs.readdirSync(root).filter((n) => n.endsWith(".tmp")), [],
+                     "a temp file holding the new secret was left behind");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
+
+test("the staged file is inspected through the SAME reader as a public read", async () => {
+  // Two separate checks would be two rule sets to keep in step, and the one that drifted would be
+  // the staged one -- the path where being wrong means shipping a readable secret.
+  const root = scratch();
+  try {
+    await writeCredentialFile({ root, ref: "a.key", value: KEY });
+    const direct = await inspectCredentialFile({ target: path.join(root, "a.key") });
+    const viaRef = await readCredentialFile({ root, ref: "a.key" });
+    assert.equal(direct.state, viaRef.state);
+    assert.equal(direct.value, viaRef.value);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
+
+test("a lockdown that fails ON THE TEMP FILE stops the write, and writes no credential", async () => {
+  // REACHED DELIBERATELY. The neighbouring test's stub fails every icacls call, so the write is
+  // refused at the ROOT stage and never touches the temp-file lockdown -- a mutation removing that
+  // guard stayed green, which is a guard with no reachable path. This stub succeeds for the root
+  // and fails only for the staged file, which is the window where a secret already exists on disk
+  // and its permissions are the only thing standing between it and everyone else.
+  const root = scratch();
+  // Unqualified on purpose: icacls prints principals both ways, and an owner with no domain keeps
+  // this fixture free of the backslashes that a shell heredoc keeps eating.
+  const owner = "storeowner";
+  const run = async (_cmd, args) => {
+    const target = String(args[0] || "");
+    const locking = args.includes("/grant:r");
+    if (locking && target.endsWith(".tmp")) {
+      const failure = new Error("icacls refused the staged file");
+      failure.stdout = "";
+      throw failure;
+    }
+    // A private-looking DACL for everything else, so the root passes its verification.
+    return { stdout: `${target} ${owner}:(F)` };
+  };
+  try {
+    const write = await writeCredentialFile({
+      root, ref: "a.key", value: KEY, platform: "win32", owner, run,
+    });
+    assert.equal(write.ok, false, "a secret was published despite a failed lockdown");
+    assert.equal(write.state, CREDENTIAL_INSECURE, write.detail);
+    assert.match(write.detail, /could not restrict the new file/);
+    assert.equal(fs.existsSync(path.join(root, "a.key")), false,
+                 "the unprotected staged file became the credential");
+    assert.deepEqual(fs.readdirSync(root).filter((n) => n.endsWith(".tmp")), [],
+                     "the staged secret was left on disk");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
+
+test("the custody verdict passes the PATH to the ACL parser, which matters off this host", () => {
+  // A mutation removing `aclPath` came back INERT here, and the reason is worth writing down rather
+  // than treating as coverage: this host's owner is DOMAIN-QUALIFIED, so the parser's path-less
+  // fallback finds the right principal by accident. On a host whose account has no domain --
+  // `currentWindowsOwner` then returns a bare username, and the grant is `name:(F)` -- the last
+  // backslash falls inside the path and the file is reported readable by a directory. That host
+  // would refuse every credential it had just written, and nothing on THIS machine would show it.
+  const target = String.raw`C:\Users\me\AppData\Local\Temp\store\a.key`;
+  const aclText = `${target} localaccount:(F)`;
+  const stats = statLike({ mode: 0o777, uid: 4242 });
+
+  assert.equal(
+    fileSecurityProblem({ platform: "win32", stats, aclText, aclPath: target, owner: "localaccount" }),
+    "", "a correctly locked file was refused because the parser was not given the path");
+
+  // And without the path the same inputs are misread, which is what makes the argument load-bearing.
+  assert.notEqual(
+    fileSecurityProblem({ platform: "win32", stats, aclText, owner: "localaccount" }), "");
+});
+
+test("and the READER actually passes it -- driven through inspect, not asserted on the verdict", async () => {
+  // The direct assertion above proves the RULE. It does not prove the reader obeys it: a mutation
+  // that stopped passing the path left it green, because the test called the verdict itself. This
+  // drives `inspectCredentialFile`, which is the caller that has to hand the path over.
+  const root = scratch();
+  try {
+    const file = path.join(root, "a.key");
+    fs.writeFileSync(file, `${KEY}
+`);
+    // An UNQUALIFIED owner, which is what a local account with no domain produces. On this host the
+    // real owner is domain-qualified, so nothing here would notice the omission without it.
+    const run = async (_cmd, args) => ({ stdout: `${String(args[0])} localaccount:(F)` });
+    const answer = await inspectCredentialFile({
+      target: file, platform: "win32", owner: "localaccount", run,
+    });
+    assert.equal(answer.state, CREDENTIAL_OK,
+                 `the reader did not give the parser the path: ${answer.detail}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
   }
 });
