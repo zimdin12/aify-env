@@ -1,2 +1,9 @@
 node_modules/
 *.log
+
+# Never commit a credential. Neither repo reads a `.env` today, which is exactly why the
+# omission was easy to miss: the file only appears once somebody adds one, and by then the habit of
+# `git add -A` is already established. aify-comms has ignored it since the beginning.
+.env
+.env.*
+!.env.example
