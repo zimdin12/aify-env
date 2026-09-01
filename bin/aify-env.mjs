@@ -13,7 +13,13 @@
 //   aify-env doctor          what this host can say about itself, and what each service said
 //   aify-env tui             the live view alone, against a daemon already running
 //   aify-env --port 0        pick an ephemeral port (used by tests)
+//   aify-env --force         take the port even though the incumbent is running agents, ending them
 //   aify-env --version
+//
+// STARTING WHEN ONE IS ALREADY RUNNING TAKES OVER, and the incumbent's agents die with it -- they
+// cannot be adopted, because a PTY-backed child is bound to a ConPTY its parent owns. So a takeover
+// REFUSES by default when the incumbent reports running processes, names them, and points at
+// `aify-env tui` for watching one without disturbing it. `--force` is how you say you meant it.
 //
 // ONE command on PATH, with subcommands. Three sibling binaries is what collided with aify-comms'
 // own `aify-doctor`; a collision is only the loud version of the problem.
@@ -40,7 +46,7 @@ import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-processes.mjs";
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
 import { killTree } from "../lib/kill-tree.mjs";
-import { looksLikeEnvironment } from "../lib/environment-checks.mjs";
+import { looksLikeEnvironment, workLostToSupersession } from "../lib/environment-checks.mjs";
 import { defaultIsAlive } from "../lib/reaper.mjs";
 import { homedir, hostname } from "node:os";
 import { buildIdentity, sourceFiles } from "../lib/build-identity.mjs";
@@ -130,6 +136,9 @@ if (firstArg && !firstArg.startsWith("-")) {
   process.exit(0);
 }
 
+// The operator saying they meant it. Without this a takeover REFUSES when the incumbent is running
+// anything, because superseding ends that work and nothing can rescue it.
+const force = args.includes("--force");
 const portFlag = args.indexOf("--port");
 const port = portFlag === -1 ? DEFAULT_PORT : Number(args[portFlag + 1]);
 
@@ -381,7 +390,11 @@ async function incumbent() {
     // a `terminals` object, both of which /health above always sends -- and nothing else on a host has
     // reason to report those.
     if (!looksLikeEnvironment({ ok: true, status: response.status, body })) return null;
-    if (Number.isInteger(body?.pid)) return { pid: body.pid, version: body.version };
+    // `processes` travels with the pid: a takeover ENDS them, so the caller must be able to say what
+    // it is about to cost before it costs it.
+    if (Number.isInteger(body?.pid)) {
+      return { pid: body.pid, version: body.version, processes: body.processes };
+    }
     return null;
   } catch {
     return null;
@@ -406,6 +419,27 @@ server.on("error", async (failure) => {
       process.stderr.write(
         `aify-env: ${HOST}:${port} is held by something that is not an aify-env.${chr10}`
         + `  It has been left alone. Free the port, or run with --port <n>.${chr10}`,
+      );
+      process.exit(69);
+    }
+    // WHAT THIS WOULD COST, BEFORE IT COSTS IT. The incumbent's processes die with it and cannot be
+    // rescued -- see workLostToSupersession for why adoption is impossible here. So the one thing left
+    // is to refuse by default and say what is in the way.
+    //
+    // The operator's own words: "i had to start because i needed to see what is going on". Twice on
+    // 2026-09-01 that cost five agents, three of them mid-work, with no warning either time.
+    const atRisk = workLostToSupersession(holder.processes, { force });
+    if (atRisk.length > 0) {
+      const named = atRisk
+        .map((entry) => `    ${entry.label || entry.service || "(unnamed)"}  pid ${entry.pid ?? "?"}`)
+        .join(chr10);
+      process.stderr.write(
+        `aify-env: the environment on ${HOST}:${port} (pid ${holder.pid}) is running ${atRisk.length} `
+        + `process${atRisk.length === 1 ? "" : "es"}. Taking over would END ${atRisk.length === 1 ? "it" : "them"}:${chr10}`
+        + `${named}${chr10}`
+        + `  Nothing has been touched. To watch this environment without disturbing it, run `
+        + `\`aify-env tui\`.${chr10}`
+        + `  To take over anyway and end the work above, re-run with --force.${chr10}`,
       );
       process.exit(69);
     }

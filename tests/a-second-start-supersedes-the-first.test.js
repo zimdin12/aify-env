@@ -61,8 +61,8 @@ function longLauncher(dir) {
   return file;
 }
 
-const start = (env, port) =>
-  spawn(process.execPath, [ENTRY, "--port", String(port)], { env, stdio: ["ignore", "pipe", "pipe"] });
+const start = (env, port, extra = []) =>
+  spawn(process.execPath, [ENTRY, "--port", String(port), ...extra], { env, stdio: ["ignore", "pipe", "pipe"] });
 
 function waitFor(child, pattern, ms = 20000) {
   return new Promise((resolve, reject) => {
@@ -120,7 +120,11 @@ test("the predecessor's processes are reaped by the replacement, not stranded", 
     const { pid } = await created.json();
     assert.ok(alive(pid), "nothing was running, so this test would prove nothing");
 
-    second = start(box.env(box.record), PORT);
+    // `--force` BECAUSE THE TAKEOVER NOW REFUSES BY DEFAULT when the incumbent is running anything.
+    // That guard is the subject of a-takeover-says-what-it-would-cost.test.js; what THIS test is about
+    // is the property that must survive it -- once a takeover does happen, the predecessor's processes
+    // are cleaned up rather than left running with nobody owning them.
+    second = start(box.env(box.record), PORT, ["--force"]);
     await waitFor(second, /listening/);
     // The replacement reaps from the record once the port is its own.
     for (let i = 0; i < 40 && alive(pid); i += 1) await new Promise((r) => setTimeout(r, 200));
