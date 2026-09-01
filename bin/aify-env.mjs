@@ -40,6 +40,7 @@ import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-processes.mjs";
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
 import { killTree } from "../lib/kill-tree.mjs";
+import { looksLikeEnvironment } from "../lib/environment-checks.mjs";
 import { defaultIsAlive } from "../lib/reaper.mjs";
 import { homedir, hostname } from "node:os";
 import { buildIdentity, sourceFiles } from "../lib/build-identity.mjs";
@@ -370,9 +371,17 @@ async function incumbent() {
   try {
     const response = await fetch(`http://${HOST}:${port}/health`, { signal: AbortSignal.timeout(3000) });
     const body = await response.json();
-    // Both, because either alone is weak: a pid says nothing about what the process is, and a healthy
-    // status could come from anything that serves JSON on this port.
-    if (body?.status === "healthy" && Number.isInteger(body?.pid)) return { pid: body.pid, version: body.version };
+    // IDENTIFIED BY SHAPE, because the answer to this question decides whose process tree gets killed.
+    // `status: "healthy"` plus a pid was the old test, and it is the most common health body in
+    // existence -- any dev server, any sidecar, anything at all that serves JSON on this port and
+    // reports its own pid passed it, and `killTree` took the pid on the next line. The doctor had
+    // already been hardened against exactly this (see `looksLikeEnvironment`, which describes a
+    // responder mistaken for an environment on the strength of `{"status":"healthy"}`); the KILL path
+    // was left on the weak test. An aify-env is recognised by what it OWNS -- a `processes` array and
+    // a `terminals` object, both of which /health above always sends -- and nothing else on a host has
+    // reason to report those.
+    if (!looksLikeEnvironment({ ok: true, status: response.status, body })) return null;
+    if (Number.isInteger(body?.pid)) return { pid: body.pid, version: body.version };
     return null;
   } catch {
     return null;

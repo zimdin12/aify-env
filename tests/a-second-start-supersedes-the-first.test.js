@@ -27,6 +27,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
+import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENTRY = path.join(ROOT, "bin", "aify-env.mjs");
 
@@ -39,11 +41,15 @@ function sealed(label) {
   return {
     dir,
     record: path.join(dir, "owned.json"),
-    env: (record) => ({
-      ...process.env,
+    // THROUGH `sealedDaemonEnv`, not a local copy of part of it. This helper's own seals were the
+    // record, the registry and the dashboard -- it never set `AIFY_ADVERTISE=0`, so every daemon
+    // started here inherited the machine's real `~/.aify/services.json`, found the operator's live
+    // aify-comms in it, and posted this host's runtimes and terminal state from a process that exists
+    // for two seconds. Four other test files already went through the shared helper; this one predates
+    // it and kept its own partial version.
+    env: (record) => sealedDaemonEnv({
       AIFY_ENV_PROCESS_RECORD: record,
       AIFY_SERVICE_REGISTRY: path.join(dir, "no-registry.json"),
-      AIFY_NO_DASHBOARD: "1",
     }),
   };
 }
@@ -145,5 +151,49 @@ test("something that is not an aify-env is left alone, and named", async () => {
   } finally {
     child.kill();
     await new Promise((resolve) => stranger.close(resolve));
+  }
+});
+
+test("a stranger that serves a HEALTHY body with a pid is still left alone", async () => {
+  // ENV-H1, external review round 7. The test above spares its stranger for the WRONG REASON: it
+  // serves text/plain, so `await response.json()` throws and the holder reads as unidentifiable. It
+  // passes identically with or without an identity check, which is why it never caught this.
+  //
+  // The dangerous holder is the one that answers correctly. `{status:"healthy", pid:N}` was the whole
+  // of the old test, and it is the most common health body there is -- any dev server, sidecar or
+  // framework that reports its own pid matched it, and `killTree(holder.pid)` ran on the next line
+  // against a process tree belonging to somebody else.
+  //
+  // THE STRANGER IS A SEPARATE PROCESS ON PURPOSE. Served from inside the test runner, proving the
+  // bug would mean killTree taking down the suite that is proving it.
+  const PORT = 8882;
+  const script = "const http = require('node:http');"
+    + "const s = http.createServer((_q, r) => {"
+    + "  r.writeHead(200, { 'content-type': 'application/json' });"
+    + "  r.end(JSON.stringify({ status: 'healthy', pid: process.pid }));"
+    + "});"
+    + `s.listen(${PORT}, '127.0.0.1', () => console.log('stranger ready'));`;
+  const stranger = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "pipe"] });
+  const box = sealed("healthy-stranger");
+  let child = null;
+  try {
+    await waitFor(stranger, /stranger ready/);
+
+    // POSITIVE CONTROL on the stranger: it really is answering the way the old test accepted.
+    const body = await (await fetch(`http://127.0.0.1:${PORT}/health`, {
+      signal: AbortSignal.timeout(8000),
+    })).json();
+    assert.equal(body.status, "healthy");
+    assert.ok(Number.isInteger(body.pid), "the stranger is not serving a pid, so this proves nothing");
+
+    child = start(box.env(box.record), PORT);
+    const output = await waitFor(child, /not an aify-env/);
+    const code = await new Promise((resolve) => child.on("exit", resolve));
+    assert.equal(code, 69);
+    assert.match(output, /left alone/);
+    assert.ok(alive(stranger.pid), "aify-env killed a process tree that was not an environment");
+  } finally {
+    if (child) child.kill();
+    stranger.kill();
   }
 });
