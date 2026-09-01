@@ -27,6 +27,8 @@
 
 import { createServer } from "node:http";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+
+import { hostIsWsl } from "../lib/host-wsl.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,10 +63,8 @@ import {
 import {
   advertisementStaleMs,
   environmentAdvertisement,
-  environmentKind,
-  environmentOs,
+  hostIdentityFacts,
   installedHarnesses,
-  machineIdFor,
   runtimeAvailability,
   shouldRedetect,
 } from "../lib/advertise.mjs";
@@ -611,17 +611,22 @@ async function advertiseOnce() {
   }
 
   const support = terminalSupport();
-  const kind = environmentKind({ platform: process.platform, env: process.env, exists: existsSync });
+  // ONE PROBE, THREE FACTS. `isWsl` used to be `kind === "wsl"`, so the machine id the service
+  // arbitrates supersession on inherited an environment variable that is absent in many child
+  // processes -- and the aify-comms bridge on the same host reads /proc, so the two tiers could name
+  // one machine two different things with nothing raised. `hostIdentityFacts` takes the probe once.
+  const { kind, os: hostOs, machineId } = hostIdentityFacts({
+    platform: process.platform,
+    hostname: hostname(),
+    env: process.env,
+    exists: existsSync,
+    isWsl: hostIsWsl(),
+  });
   const body = environmentAdvertisement({
     hostname: hostname(),
     kind,
-    os: environmentOs(process.platform),
-    machineId: machineIdFor({
-      platform: process.platform,
-      hostname: hostname(),
-      env: process.env,
-      isWsl: kind === "wsl",
-    }),
+    os: hostOs,
+    machineId,
     // NO `cwdRoots`. Which directories work may run in is the service's policy, and an advertiser
     // sending an empty list would erase what the operator configured. Omitted means "kept".
     runtimes: detectedRuntimes,
