@@ -52,6 +52,9 @@ import { homedir, hostname } from "node:os";
 import { buildIdentity, sourceFiles } from "../lib/build-identity.mjs";
 import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
 import { readServices } from "../lib/services.mjs";
+import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
+import { pluginsForServices } from "../lib/plugins/index.mjs";
+import { bootstrapReport, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
 import {
   advertiseTo,
   advertisementTargets,
@@ -219,6 +222,49 @@ async function reapLeftovers() {
 
 const runner = new Runner({ ownedFile: OWNED_FILE });
 
+// SERVICE PLUGINS. This host runs processes for whoever asked; a plugin is how a SERVICE teaches it
+// to fetch that work. The daemon never names a service -- `pluginsForServices` maps registry entries
+// to plugins -- so adding a second `aify-` service changes nothing here.
+const servicePlugins = new ServicePlugins();
+
+/**
+ * WHERE THIS HOST WILL RUN WORK: the directory it was started in, and below.
+ *
+ * THIS IS THE HOST'S OWN BOUND, not a service's. The advertisement deliberately sends no `cwdRoots`
+ * -- which directories work MAY run in is the service's policy -- but what this process is willing
+ * to launch is ours, and a claim guard with no bound is not a guard. It is the last thing between a
+ * service asking for a process and this host starting one anywhere on the machine.
+ *
+ * The operator's model is exactly this: "i run aify-env at C:\ so whole pc is env where i can spawn
+ * managed agents". Where you start it is what it will run.
+ */
+const CWD_ROOTS = [process.cwd()];
+
+/** The identity a plugin needs to name this environment to its service. The SHAPE of that name is
+ *  the service's business, so only the facts travel. */
+function currentAdvertisementBody() {
+  // `hostIdentityFacts`, not a separate `environmentKind` call: ONE PROBE, THREE FACTS. Taking the
+  // probe twice is how the machine id the service arbitrates supersession on came to inherit an
+  // environment variable absent in many child processes, letting two tiers name one machine two
+  // different things with nothing raised.
+  const { kind } = hostIdentityFacts({
+    platform: process.platform,
+    hostname: hostname(),
+    env: process.env,
+    exists: existsSync,
+    isWsl: hostIsWsl(),
+  });
+  return { hostname: hostname(), kind };
+}
+
+/** The key for the service a plugin serves, resolved PER CALL through the same store-aware path the
+ *  advertiser uses -- so a credential written while this daemon runs reaches a running plugin. */
+async function resolvePluginCredential() {
+  const target = advertisingTargets[0] || null;
+  if (!target) return "";
+  return (await credentialForTarget(target, { env: process.env, root: credentialRoot() })) || "";
+}
+
 // An escape hatch for anyone who wants the daemon in a terminal without the view taking it over.
 const NO_DASHBOARD = ["1", "true", "yes"].includes(
   String(process.env.AIFY_NO_DASHBOARD ?? "").trim().toLowerCase(),
@@ -237,7 +283,9 @@ let stopDashboard = () => {};
 const shutdown = createShutdown({
   runner,
   // Stop redrawing first: a frame landing mid-teardown paints a screen already untrue.
-  beforeStop: () => stopDashboard(),
+  // Plugins first: one may be mid-claim, and a claim settled after its processes are gone reports a
+  // spawn as running against a host that no longer exists.
+  beforeStop: async () => { await servicePlugins.stopAll(); stopDashboard(); },
   // A FUNCTION, so `server` is looked up when a signal arrives rather than read here, where it is
   // still in its temporal dead zone.
   closeServer: () => server.close(),
@@ -497,6 +545,42 @@ server.listen(port, HOST, async () => {
   // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
   // reapLeftovers.
   await reapLeftovers();
+
+  // START THE SERVICE PLUGINS, and only now: a plugin claims work, and work claimed before the
+  // leftover reap could be killed by it moments later. After LISTENING, because a plugin that claims
+  // a spawn needs this host able to run it.
+  //
+  // THE CALL LIVES IN `lib/plugin-bootstrap.mjs` so it can be tested. This file cannot be imported
+  // without starting the environment, so anything that can fail in here is only ever proven by
+  // running the daemon -- which nobody does in a test.
+  try {
+    const host = new PluginHost({
+      processes: new PluginProcesses(runner),
+      // NOT the environment id: its shape is a service's convention, and the plugin derives it from
+      // what this host advertises.
+      environmentId: "",
+      credential: async () => resolvePluginCredential(),
+      log: (message) => process.stderr.write(`[aify-env] ${message}${chr10}`),
+    });
+    const outcome = await startServicePlugins({
+      registry: servicePlugins,
+      host,
+      services: readServices(readFileSync(REGISTRY_FILE, "utf8")),
+      build: pluginsForServices,
+      shared: {
+        version: VERSION,
+        // Resolved when asked rather than captured: a registry edit or a rotated key must reach a
+        // running plugin without a restart.
+        advertisement: async () => currentAdvertisementBody(),
+        cwdRoots: async () => CWD_ROOTS,
+        windows: process.platform === "win32",
+      },
+    });
+    for (const line of bootstrapReport(outcome)) process.stderr.write(`[aify-env] ${line}${chr10}`);
+  } catch (error) {
+    process.stderr.write(`[aify-env] service plugins not started: ${error?.message || error}
+`);
+  }
   // One write, so the banner arrives whole. Two writes is a race for anything reading startup output
   // to know the process is up — including the tests, which caught exactly that.
   process.stdout.write(
