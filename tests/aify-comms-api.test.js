@@ -64,9 +64,23 @@ test("the heartbeat carries the bridgeId, which is the whole reason it exists", 
   const f = fakeFetch();
   await api(f).heartbeat({ hostname: "StevenZ-L", kind: "windows" });
   const body = JSON.parse(f.calls[0].options.body);
+
+  // `bridgeId` TOP-LEVEL. The service reads `req.bridgeId` to decide whether the caller is a bridge
+  // at all, and nothing else stamps `bridgeLastSeen`.
   assert.equal(body.bridgeId, IDENTITY.bridgeId);
-  assert.equal(body.bridgeVersion, "0.6.1");
-  assert.ok(body.bridgeStartedAt, "the service arbitrates supersession on when a claimer started");
+
+  // AND THE REST INSIDE `metadata`, which is WHERE, not merely THAT -- the distinction this test
+  // missed and the defect it let through. Supersession arbitration reads the incoming start time
+  // from `metadata`; sent top-level it is invisible, so the service takes the "keep the existing
+  // bridge" branch and returns ok:true while stamping NOTHING. An accepted-and-ignored heartbeat is
+  // indistinguishable from one that worked, so this cost a live debugging session against the real
+  // service rather than one red test here.
+  assert.equal(body.metadata?.bridgeStartedAt, IDENTITY.bridgeStartedAt,
+    "bridgeStartedAt must be inside metadata; top-level it is silently ignored");
+  assert.equal(body.metadata?.bridgeVersion, "0.6.1");
+  assert.equal(body.bridgeStartedAt, undefined,
+    "sending it top-level as well would be the shape that failed");
+
   assert.equal(body.hostname, "StevenZ-L", "the generic advertisement must survive alongside it");
   assert.match(f.calls[0].url, /\/api\/v1\/environments\/heartbeat$/);
 });
@@ -155,4 +169,16 @@ test("a trailing slash on the endpoint does not produce a double slash", () => {
     fetchImpl: fakeFetch(),
   });
   assert.ok(client.identity.bridgeId, "identity survives normalisation");
+});
+
+test("an advertisement's own metadata survives the bridge fields", () => {
+  // The plugin merges its identity INTO whatever metadata the host advertised. Overwriting the
+  // caller's metadata wholesale would erase host facts the service preserves on its behalf.
+  const f = fakeFetch();
+  return api(f).heartbeat({ hostname: "h", kind: "windows", metadata: { advertiser: "aify-env" } })
+    .then(() => {
+      const body = JSON.parse(f.calls[0].options.body);
+      assert.equal(body.metadata.advertiser, "aify-env", "the caller's metadata was discarded");
+      assert.ok(body.metadata.bridgeStartedAt, "and the bridge fields must still be there");
+    });
 });

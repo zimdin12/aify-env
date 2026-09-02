@@ -13,7 +13,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
-import { bootstrapReport, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
+import { bootstrapReport, credentialValue, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
 
 function fakeHost() {
   const runner = {
@@ -115,4 +115,26 @@ test("startServicePlugins never throws, whatever the build does", async () => {
     });
     assert.ok(outcome && Array.isArray(outcome.started), "an outcome must always come back");
   }
+});
+
+test("a credential RESOLUTION is not a key, and the difference 401s everything", () => {
+  // THE DEFECT THIS PINS, found against a live service on 2026-09-02. `credentialForTarget` returns
+  // {state, value, source, detail, ref}. The daemon returned the whole object, so "[object Object]"
+  // went into the X-API-Key header and every plugin heartbeat was refused -- while the advertiser
+  // forty lines below, which takes `.value`, kept working. The symptom was indistinguishable from
+  // having no credential at all, which is why it cost a debugging session instead of a red test.
+  assert.equal(credentialValue({ state: "ok", value: "banana", source: "store" }), "banana");
+  assert.equal(credentialValue({ state: "absent", value: "" }), "");
+});
+
+test("anything that is not a string becomes empty, never the word 'undefined'", () => {
+  // An empty key sends no header at all; the STRING "undefined" is a wrong key, and the service
+  // reports those differently. Stringifying blindly is how one becomes the other.
+  for (const bad of [null, undefined, {}, { value: undefined }, { value: 42 }, 7, []]) {
+    assert.equal(credentialValue(bad), "", `${JSON.stringify(bad)} did not become ""`);
+  }
+});
+
+test("a bare string is accepted, so a simpler resolver is not broken by this", () => {
+  assert.equal(credentialValue("a-key"), "a-key");
 });

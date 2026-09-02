@@ -54,7 +54,7 @@ import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
 import { readServices } from "../lib/services.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
-import { bootstrapReport, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
+import { bootstrapReport, credentialValue, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
 import {
   advertiseTo,
   advertisementTargets,
@@ -262,7 +262,13 @@ function currentAdvertisementBody() {
 async function resolvePluginCredential() {
   const target = advertisingTargets[0] || null;
   if (!target) return "";
-  return (await credentialForTarget(target, { env: process.env, root: credentialRoot() })) || "";
+  // `.value`, and the omission of it cost a live debugging session. `credentialForTarget` returns
+  // {state, value, source, detail, ref} -- a RESOLUTION, not a key. Returning the object put
+  // "[object Object]" in the X-API-Key header, so every plugin heartbeat was refused with 401 while
+  // the daemon's own advertiser -- which does take `.value`, forty lines below -- kept working. Two
+  // callers of one function, one of them wrong, and the symptom was indistinguishable from having no
+  // credential at all.
+  return credentialValue(await credentialForTarget(target, { env: process.env, root: credentialRoot() }));
 }
 
 // An escape hatch for anyone who wants the daemon in a terminal without the view taking it over.
