@@ -49,9 +49,31 @@ environment reports the processes and terminals it owns; a defence is not a reas
 ### On PATH, and updating
 
 ```bash
-npm install -g .        # one command: aify-env (with `doctor` and `tui` subcommands)
-git pull && npm install -g .    # updating is the same command
+./install.sh                 # install or update, asking for anything this host is missing
+git pull && ./install.sh     # updating is the same command
 ```
+
+**The same command does both.** An installer with a separate update path grows a second set of steps
+that drifts from the first, and the half that rots is the one nobody runs by hand.
+
+**It asks for what is missing, and only for that.** A service registered on this host needs a
+credential before aify-env can advertise to it or claim its work; without one every advertisement is
+refused with 401 while both daemons report healthy. That happened on 2026-09-02 and cost a day, so
+the installer now asks rather than proceeding silently. A credential already stored is left exactly
+as it is -- re-asking would train an operator to paste secrets nothing needed, and overwriting a
+working one would turn an update into an outage.
+
+**Unattended runs do not hang and do not lie.** With no terminal it prints what is missing, names the
+command that fixes it, and exits non-zero, because a host that cannot claim anything must not report
+success:
+
+```bash
+./install.sh --no-prompt     # never ask; report and fail if something is missing
+./install.sh --plan-only     # say what would happen; install nothing, ask nothing
+```
+
+`npm install -g .` still works and is what `install.sh` runs. What it does not do is notice a missing
+credential, which is the whole reason the script exists.
 
 Every command is named after the package, and a test enforces it. The doctor was called `aify-doctor`
 until aify-comms turned out to install a different tool under that exact name -- two tiers on one host
