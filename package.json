@@ -19,5 +19,16 @@
   },
   "optionalDependencies": {
     "node-pty": "^1.1.0"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./service-plugins": "./lib/service-plugins.mjs",
+    "./plugin-bootstrap": "./lib/plugin-bootstrap.mjs",
+    "./start-spec": "./lib/start-spec.mjs",
+    "./runner": "./lib/runner.mjs",
+    "./process-registry": "./lib/process-registry.mjs",
+    "./allowlist": "./lib/allowlist.mjs",
+    "./interpreter": "./lib/interpreter.mjs",
+    "./host-wsl": "./lib/host-wsl.mjs"
   }
 }
