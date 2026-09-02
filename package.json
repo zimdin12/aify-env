@@ -15,7 +15,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test --test-timeout=60000 tests/*.test.js"
+    "test": "node tests/run-in-a-temp-root.mjs"
   },
   "optionalDependencies": {
     "node-pty": "^1.1.0"
