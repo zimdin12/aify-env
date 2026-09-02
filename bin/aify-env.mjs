@@ -131,9 +131,29 @@ if (firstArg && !firstArg.startsWith("-")) {
     process.stderr.write("aify-env with no subcommand starts the environment." + eol);
     process.exit(64);
   }
-  process.argv = [process.argv[0], process.argv[1], ...args.slice(1)];
+  // ARGV[1] BECOMES THE SUBCOMMAND'S OWN PATH, which is what a direct `node bin/aify-env-<x>.mjs`
+  // would give it. Keeping the DISPATCHER's path here is what broke `aify-env credential`: that
+  // module runs its `main()` only when `process.argv[1]` ends with its own filename -- a guard that
+  // exists so tests can import its parsing helpers without touching the operator's home directory.
+  // Through the dispatcher the guard was false, so `aify-env credential set` STORED NOTHING, PRINTED
+  // NOTHING, AND EXITED 0. The installer read that empty output as the credential reference, wrote
+  // no `credentialRef` to the registry, and aify-env could not find a key it had never saved: every
+  // advertisement 401'd while both sides reported healthy. A subcommand that silently does nothing
+  // and reports success is the worst shape available, and only this idiom's argv assumption stood
+  // between here and it.
+  process.argv = [process.argv[0], fileURLToPath(new URL(target, import.meta.url)), ...args.slice(1)];
   await import(target);
-  process.exit(0);
+  // AND FLUSH BEFORE EXITING, which is a second, independent hazard on this line: `process.exit()`
+  // discards whatever is still buffered on stdout when stdout is a PIPE, and flushes synchronously
+  // when it is a TTY -- so an interactive run would look right while the installer, which captures
+  // this through a pipe, lost the last line.
+  //
+  // The subcommand's own status is carried out rather than replaced by 0. Exiting 0 for a subcommand
+  // that failed is the same class of lie as losing its output.
+  if (process.stdout.writableLength > 0) {
+    await new Promise((resolve) => process.stdout.once("drain", resolve));
+  }
+  process.exit(process.exitCode ?? 0);
 }
 
 // The operator saying they meant it. Without this a takeover REFUSES when the incumbent is running
