@@ -19,6 +19,13 @@ import {
 } from "../lib/plugins/aify-comms/claim.mjs";
 
 const BACKSLASH = String.fromCharCode(92);
+const NEWLINE = String.fromCharCode(10);
+
+//: A launcher the allowlist accepts. It judges CONTENTS, not names: a shebang declaring the
+//: interpreter, and a HARNESS_WRAPPER_VERSION marker, because enrolment is by carrying the contract
+//: rather than by being named in a list. Injected so these tests need no file on disk.
+const LAUNCHER_TEXT = "#!/usr/bin/env bash" + NEWLINE + 'HARNESS_WRAPPER_VERSION="1.0.0"' + NEWLINE;
+const FS = { readFile: () => LAUNCHER_TEXT, platform: "win32" };
 
 /** An api stand-in that records every report, which is what most assertions read. */
 function fakeApi({ request = null, claimThrows = null } = {}) {
@@ -92,7 +99,7 @@ test("an empty workspace is refused, not treated as the root", () => {
 
 test("nothing to claim is idle, not an error", async () => {
   const api = fakeApi();
-  const result = await runClaimPass({ api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS });
+  const result = await runClaimPass({ api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS, ...FS });
   assert.equal(result.outcome, "idle");
   assert.deepEqual(api.reports, [], "an idle pass must report nothing");
 });
@@ -101,7 +108,7 @@ test("a service that is down is reported, never thrown", async () => {
   // A host that threw here would stop the next pass from ever trying, and aify-env's own job does
   // not depend on any service being reachable.
   const api = fakeApi({ claimThrows: "connect ECONNREFUSED" });
-  const result = await runClaimPass({ api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS });
+  const result = await runClaimPass({ api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS, ...FS });
   assert.equal(result.outcome, "unreachable");
   assert.match(result.detail, /ECONNREFUSED/);
 });
@@ -109,7 +116,7 @@ test("a service that is down is reported, never thrown", async () => {
 test("a claimed request outside the roots is REPORTED failed, not silently dropped", async () => {
   const api = fakeApi({ request: { ...REQUEST, workspace: "C:/Windows/System32" } });
   const processes = fakeProcesses();
-  const result = await runClaimPass({ api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true });
+  const result = await runClaimPass({ api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true, ...FS });
   assert.equal(result.outcome, "refused");
   assert.deepEqual(processes.starts, [], "nothing may be launched outside the advertised roots");
   assert.equal(api.reports.length, 1);
@@ -122,7 +129,7 @@ test("a launcher that will not start is reported with the HOST's own reason", as
   // cause discarded here.
   const api = fakeApi({ request: REQUEST });
   const processes = fakeProcesses({ startThrows: "spawn claude-aify ENOENT" });
-  const result = await runClaimPass({ api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true });
+  const result = await runClaimPass({ api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true, ...FS });
   assert.equal(result.outcome, "failed");
   const statuses = api.reports.map((r) => r.status);
   assert.deepEqual(statuses, [CLAIM_STARTING, CLAIM_FAILED], "starting must be reported before the failure");
@@ -132,7 +139,7 @@ test("a launcher that will not start is reported with the HOST's own reason", as
 test("a good request starts and is reported running, with a handle the service can reach", async () => {
   const api = fakeApi({ request: REQUEST });
   const processes = fakeProcesses();
-  const result = await runClaimPass({ api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true });
+  const result = await runClaimPass({ api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true, ...FS });
   assert.equal(result.outcome, "started");
   assert.deepEqual(api.reports.map((r) => r.status), [CLAIM_STARTING, CLAIM_RUNNING]);
   // WITHOUT THE HANDLE the service knows a spawn is running and has no way to write to it or stop it.
@@ -151,7 +158,7 @@ test("every path that claims a request also reports it", async () => {
     { name: "started", api: fakeApi({ request: REQUEST }), processes: fakeProcesses() },
   ];
   for (const c of cases) {
-    await runClaimPass({ api: c.api, processes: c.processes, environmentId: "e", cwdRoots: ROOTS, windows: true });
+    await runClaimPass({ api: c.api, processes: c.processes, environmentId: "e", cwdRoots: ROOTS, windows: true, ...FS });
     assert.ok(c.api.reports.length > 0, `the ${c.name} path claimed a request and reported nothing`);
     assert.ok(c.api.reports.every((r) => r.id === REQUEST.id), `${c.name} reported against the wrong request`);
   }

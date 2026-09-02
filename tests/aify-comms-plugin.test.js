@@ -25,6 +25,9 @@ import {
  *  purpose: this test's whole point is that our interval must stay inside it, and reading it from
  *  the sibling repo would make the assertion depend on that checkout being present. */
 const SERVICE_FRESH_SECONDS = 90;
+const NEWLINE = String.fromCharCode(10);
+//: A launcher the allowlist accepts -- it judges contents, not names.
+const LAUNCHER_TEXT = "#!/usr/bin/env bash" + NEWLINE + 'HARNESS_WRAPPER_VERSION="1.0.0"' + NEWLINE;
 
 function fakeApi({ heartbeatThrows = null, requests = [] } = {}) {
   const beats = [];
@@ -80,6 +83,7 @@ function makePlugin(api, extra = {}) {
       cwdRoots: async () => ["C:/Users/Administrator"],
       windows: true,
       api,
+      readFile: () => LAUNCHER_TEXT,
       setTimeoutImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
       clearTimeoutImpl: () => {},
       ...extra,
