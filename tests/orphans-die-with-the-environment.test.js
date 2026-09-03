@@ -35,6 +35,20 @@ function startDaemon(record) {
       const m = /listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(out);
       if (m) { clearTimeout(timer); resolve({ child, base: m[1] }); }
     });
+    // DRAINED, AND THAT IS THE WHOLE POINT OF THESE THREE LINES. stderr was piped and never read, so
+    // once the daemon had written ~8KB the pipe filled, its next write BLOCKED, and it stopped
+    // answering HTTP while still being alive. Measured 2026-09-04 before the fix: THREE of seven
+    // isolated runs failed, as `fetch failed` on a request the daemon never got to, or as the file
+    // hitting the 60s timeout waiting on one. Both are the same block wearing different hats, and the
+    // intermittency is just how much the daemon happened to say that run.
+    //
+    // KEPT, NOT DISCARDED, because a daemon that dies for a REAL reason says why on this stream, and
+    // a test that throws away the explanation makes the next failure twice the work.
+    let errOut = "";
+    child.stderr.on("data", (c) => { errOut += c; });
+    child.on("exit", (code, signal) => {
+      if (code !== 0 && code !== null) process.stderr.write(`[daemon exited ${code}${signal ? ` ${signal}` : ""}] ${errOut}`);
+    });
     child.on("error", reject);
   });
 }
