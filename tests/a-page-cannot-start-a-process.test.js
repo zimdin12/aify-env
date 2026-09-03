@@ -37,6 +37,18 @@ test("start a real daemon on an ephemeral port", async () => {
       // No advertising: this test is about the door, and posting to the real registry's services is
       // not something a test may do.
       AIFY_ADVERTISE: "",
+      // AND NO REGISTRY, which is the seal that actually holds. Turning advertising off does NOT turn
+      // CLAIMING off -- a plugin loaded out of a registry claims whether or not it describes the
+      // host -- and this spawn inherited `...process.env`, so it read the operator's real
+      // `~/.aify/services.json`, found the live aify-comms in it, and claimed against production.
+      // Measured 2026-09-03: their environment changed hands and their own aify-env answered "not
+      // the claimer", unable to take a new spawn until a reconciler released it.
+      //
+      // A PATH THAT DOES NOT EXIST, never "": every default in this codebase reads empty as unset,
+      // and unset is the home directory. Intermittent because such a daemon lives for seconds, so
+      // whether it lands a beat before it is killed is a race -- which is why a bisect kept clearing
+      // this file and only a static scan caught it.
+      AIFY_SERVICE_REGISTRY: path.join(scratch, "no-such-registry.json"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
