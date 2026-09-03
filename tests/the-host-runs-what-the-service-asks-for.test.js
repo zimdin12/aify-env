@@ -19,6 +19,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  TERMINAL_ENDED,
   createHandleBook,
   runOneControl,
   runTerminalControlPass,
@@ -665,6 +666,97 @@ test("it says WHY it stopped one, because an unexplained kill is worse than a le
   const logs = [];
   await passWith(apiWithMissingTerminal(), { handles: book, processes, log: (m) => logs.push(String(m)) });
   assert.ok(logs.some((l) => /the service no longer has that terminal/.test(l)));
+});
+
+// ── the row is THERE and the service says the terminal is over ──────────────────────────────────
+//
+// THE HALF THE 404 RULE COULD NOT SEE, measured on the operator's host 2026-09-03. A worker had
+// been running for two hours against `term_1788414394995_c339d2b4`, which the service listed as
+// `stopped` with `process_id` 250952 -- and 250952 was alive. Hundreds of liveness passes walked
+// straight past it, because the row EXISTS: the touch answers 200, not 404, so the rule below fired
+// never. `aify-comms doctor` had been reporting the process as unaccounted the whole time.
+//
+// Every route to that state leaves the same orphan: `comms_remove_agent` stopping the terminal
+// before the cascade, a reconciler declaring the console dead, an operator stopping it from the
+// dashboard. Nothing will hand it work, address it with a control, or report it to anybody.
+//
+// THE SERVICE'S JUDGEMENT, ASKED -- never inferred from quiet. Quiet is what a worker between turns
+// looks like, and killing on quiet destroyed four working sessions earlier the same night.
+
+/** An api whose liveness report answers 200 with a terminal in `status`. */
+function apiReporting(status) {
+  const api = fakeApi({ controls: [] });
+  api.terminalOutput = async (terminalId, body) => {
+    api.outputs.push({ terminalId, ...body });
+    return { ok: true, terminal: { id: terminalId, status } };
+  };
+  return api;
+}
+
+test("A TERMINAL THE SERVICE REPORTS STOPPED GETS ITS WORKER STOPPED", async () => {
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.calls.stops.length = 0;
+
+  await passWith(apiReporting("stopped"), { handles: book, processes });
+  assert.deepEqual(processes.calls.stops, ["proc-1"],
+    "a worker for a terminal the service considers over was left running");
+  assert.equal(book.handleFor("term-1"), "", "and it must be forgotten, or it is retried for ever");
+});
+
+test("every END status the service uses is acted on, not just the one that was measured", async () => {
+  for (const status of TERMINAL_ENDED) {
+    const book = createHandleBook();
+    const processes = fakeProcesses();
+    await run({ handles: book, processes });
+    processes.calls.stops.length = 0;
+
+    await passWith(apiReporting(status), { handles: book, processes });
+    assert.deepEqual(processes.calls.stops, ["proc-1"], `a terminal reported ${status} kept its worker`);
+  }
+});
+
+test("A LIVE STATUS IS LEFT ALONE — this is the direction that kills working sessions", async () => {
+  // The catastrophic mistake, and it has already been made once tonight in a different form. A
+  // running terminal reports `attached`, `running` or `starting`; none of them is an end, and a
+  // host that stopped on anything but an explicit end would reap the fleet it is hosting.
+  for (const status of ["attached", "running", "starting", "active", "recovering", ""]) {
+    const book = createHandleBook();
+    const processes = fakeProcesses();
+    await run({ handles: book, processes });
+    processes.calls.stops.length = 0;
+
+    await passWith(apiReporting(status), { handles: book, processes });
+    assert.deepEqual(processes.calls.stops, [], `a live worker was reaped on status ${status || "(none)"}`);
+    assert.equal(book.handleFor("term-1"), "proc-1", `and it must still be held on ${status || "(none)"}`);
+  }
+});
+
+test("an answer with NO terminal at all changes nothing", async () => {
+  // A service that stops returning the row, an older build, a proxy that strips the body: absence
+  // of a status is not a report of death. Without this the rule would reap on every deployment that
+  // changed the response shape.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.calls.stops.length = 0;
+
+  const api = fakeApi({ controls: [] });
+  api.terminalOutput = async () => ({ ok: true });
+  await passWith(api, { handles: book, processes });
+  assert.deepEqual(processes.calls.stops, []);
+  assert.equal(book.handleFor("term-1"), "proc-1");
+});
+
+test("it says WHY it stopped one on an end status too", async () => {
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  const logs = [];
+  await passWith(apiReporting("failed"), { handles: book, processes, log: (m) => logs.push(String(m)) });
+  assert.ok(logs.some((l) => /the service reports it failed/.test(l)),
+    `an unexplained kill is worse than a leak; logs were ${JSON.stringify(logs)}`);
 });
 
 test("AN OUTAGE IS NOT A 404 — a worker survives the service being down", async () => {
