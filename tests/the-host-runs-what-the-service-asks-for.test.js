@@ -18,7 +18,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { runOneControl, runTerminalControlPass } from "../lib/plugins/aify-comms/terminal-controls.mjs";
+import {
+  createHandleBook,
+  runOneControl,
+  runTerminalControlPass,
+} from "../lib/plugins/aify-comms/terminal-controls.mjs";
 import { workspaceWithinRoots } from "../lib/plugins/aify-comms/claim.mjs";
 
 const ROOTS = ["C:/work"];
@@ -64,10 +68,16 @@ function fakeProcesses({ startThrows = null } = {}) {
     },
     subscribe(id, onOutput, onExit) {
       calls.subscribed.push(id);
+      // THE REAL RUNNER KEYS ITS STREAMS BY ITS OWN PROCESS ID and answers `null` for anything else
+      // — SILENTLY. This fake accepted any id, so it agreed with a call that found no stream, and a
+      // healthy worker's console stayed empty in production while this test passed. A fake that is
+      // more permissive than the thing it stands for is a test that cannot fail.
+      if (id !== "proc-1") return null;
       // Handed back so a test can drive the process's own output and exit, which is the only way to
       // prove this host CARRIES them rather than merely registering interest.
       calls.emit = onOutput;
       calls.exit = onExit;
+      return () => {};
     },
     write(id, data) { calls.writes.push({ id, data }); },
     resize(id, cols, rows) { calls.resizes.push({ id, cols, rows }); },
@@ -89,7 +99,9 @@ const control = (over = {}) => ({ id: "ctl-1", terminalId: "term-1", action: "st
 function run(over = {}) {
   const api = over.api || fakeApi();
   const processes = over.processes || fakeProcesses();
+  const handles = over.handles || createHandleBook();
   return runOneControl({
+    handles,
     control: over.control || control(),
     api,
     processes,
@@ -99,7 +111,7 @@ function run(over = {}) {
     buildSpec: over.buildSpec || buildSpec,
     resolveCandidates: over.resolveCandidates || resolveTo("C:/bin/claude-aify"),
     baseEnv: over.baseEnv || { PATH: "C:/bin", AIFY_AGENT_ROLE: "coder" },
-  }).then((result) => ({ result, api, processes }));
+  }).then((result) => ({ result, api, processes, handles }));
 }
 
 test("a start control RUNS what the service asked for, with its argv", async () => {
@@ -172,15 +184,20 @@ test("a terminal with NO argv is refused rather than split from its command stri
 });
 
 test("input, resize and stop reach the host and are reported", async () => {
-  const write = await run({ control: control({ action: "input", body: "hello" }) });
-  assert.deepEqual(write.processes.calls.writes, [{ id: "term-1", data: "hello" }]);
+  // ADDRESSED BY THE RUNNER'S HANDLE, which the service carries on the control because this host
+  // reported it at start. The runner does not answer to a terminal id, so a write sent that way
+  // reaches nothing and reports success — the same silence as the subscription above.
+  const book = createHandleBook();
+  await run({ handles: book });  // start it first, so this host knows what to address
+  const write = await run({ handles: book, control: control({ action: "input", body: "hello" }) });
+  assert.deepEqual(write.processes.calls.writes, [{ id: "proc-1", data: "hello" }]);
   assert.equal(write.api.reports[0].terminalStatus, "attached");
 
-  const resize = await run({ control: control({ action: "resize", cols: 120, rows: 40 }) });
-  assert.deepEqual(resize.processes.calls.resizes, [{ id: "term-1", cols: 120, rows: 40 }]);
+  const resize = await run({ handles: book, control: control({ action: "resize", cols: 120, rows: 40 }) });
+  assert.deepEqual(resize.processes.calls.resizes, [{ id: "proc-1", cols: 120, rows: 40 }]);
 
-  const stop = await run({ control: control({ action: "stop" }) });
-  assert.deepEqual(stop.processes.calls.stops, ["term-1"]);
+  const stop = await run({ handles: book, control: control({ action: "stop" }) });
+  assert.deepEqual(stop.processes.calls.stops, ["proc-1"]);
   assert.equal(stop.api.reports[0].terminalStatus, "stopped");
 });
 
@@ -224,6 +241,7 @@ test("a service that cannot be reached does not stop the next pass", async () =>
     withinRoots: workspaceWithinRoots,
     buildSpec,
     resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    handles: createHandleBook(),
   });
   assert.equal(result.outcome, "unreachable");
   assert.match(result.detail, /ECONNREFUSED/);
@@ -233,22 +251,26 @@ test("ONE BAD CONTROL DOES NOT HIDE THE ONES BEHIND IT", async () => {
   // The bridge learned this in a different loop: a single broken item stopped the pass and every
   // item behind it went unprocessed with nothing saying so.
   const api = fakeApi({
-    controls: [control({ id: "bad", action: "nope" }), control({ id: "good", action: "stop" })],
+    // The second is a START, which stands alone. A `stop` would now be refused for a terminal this
+    // host never started -- correct, and it would prove the wrong thing here.
+    controls: [control({ id: "bad", action: "nope" }), control({ id: "good", action: "start" })],
   });
   const processes = fakeProcesses();
   const result = await runTerminalControlPass({
     api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true,
     withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    handles: createHandleBook(),
   });
   assert.equal(result.handled, 2);
   assert.equal(result.failed, 1);
-  assert.deepEqual(processes.calls.stops, ["term-1"], "the control behind the bad one never ran");
+  assert.equal(processes.calls.starts.length, 1, "the control behind the bad one never ran");
 });
 
 test("an empty queue is IDLE, which is the usual case and must be cheap", async () => {
   const result = await runTerminalControlPass({
     api: fakeApi({ controls: [] }), processes: fakeProcesses(), environmentId: "e",
     withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    handles: createHandleBook(),
   });
   assert.equal(result.outcome, "idle");
   assert.equal(result.handled, 0);
@@ -263,10 +285,27 @@ test("an empty queue is IDLE, which is the usual case and must be cheap", async 
 // duplicated was the PROCESS, because starting one and then saying nothing about it is
 // indistinguishable from never starting it.
 
-test("a started terminal is SUBSCRIBED, or the service never learns it is alive", async () => {
-  const { processes } = await run();
-  assert.deepEqual(processes.calls.subscribed, ["term-1"],
-    "nothing carries this process's output, so the service will reconcile it as dead");
+test("a started terminal is subscribed BY THE RUNNER'S OWN ID, not the terminal id", async () => {
+  // THE DEFECT, measured 2026-09-03 on a live worker. The runner keys its streams by the id IT
+  // returns from `start` (`<instance>-p1`); the terminal id is the service's name for the same
+  // thing and the runner has never heard of it. Subscribing with it found no stream and `subscribe`
+  // answered `null` silently, so a perfectly healthy worker produced 1,630 bytes of output that
+  // nothing carried, and the operator watched an empty console in the dashboard.
+  const { result, processes } = await run();
+  assert.equal(result.outcome, "started");
+  assert.deepEqual(processes.calls.subscribed, ["proc-1"],
+    "subscribed by the wrong key, so nothing carries this process's output");
+});
+
+test("A SUBSCRIPTION THAT ATTACHED TO NOTHING FAILS THE CONTROL", async () => {
+  // Taking `null` as success is how the empty console shipped: the control reported `attached`, the
+  // service believed it, and no byte ever arrived — then the reconciler concluded the terminal was
+  // dead and asked for another worker. Reported now, rather than inferred three minutes later.
+  const processes = fakeProcesses();
+  processes.subscribe = (id) => { processes.calls.subscribed.push(id); return null; };
+  const { result, api } = await run({ processes });
+  assert.equal(result.outcome, "failed");
+  assert.match(api.reports[0].error, /could not subscribe to its output/);
 });
 
 test("output is CARRIED to the service, not merely listened for", async () => {
@@ -309,7 +348,7 @@ test("a failed OUTPUT post does not stop the next chunk", async () => {
   await runOneControl({
     control: control(), api, processes, cwdRoots: ROOTS, windows: true,
     withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
-    baseEnv: {}, log: (m) => logs.push(String(m)),
+    handles: createHandleBook(), baseEnv: {}, log: (m) => logs.push(String(m)),
   });
   processes.calls.emit("first");
   processes.calls.emit("second");
@@ -330,7 +369,47 @@ test("the subscription happens BEFORE the control is reported complete", async (
   await runOneControl({
     control: control(), api, processes, cwdRoots: ROOTS, windows: true,
     withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
-    baseEnv: {},
+    handles: createHandleBook(), baseEnv: {},
   });
   assert.deepEqual(order, ["subscribe", "report"]);
+});
+
+// ── the handle book: two tiers naming one thing ─────────────────────────────────────────────────
+//
+// The service addresses a terminal by ITS id; the runner answers only to the id it returned from
+// `start`. Only this host knows both, because it is the one that started the process. Getting that
+// wrong is not loud: `subscribe` answers `null` for an id it does not know, and a healthy worker's
+// console stayed empty in the dashboard while every status read fine.
+
+test("a control for a terminal this host never started is REFUSED with that reason", async () => {
+  // Not "no such process", which is what the runner would say and would send a reader looking for a
+  // dead worker. This host simply never started it — another environment did, or this daemon has
+  // restarted since — and those are different problems with different remedies.
+  const { result, api } = await run({ control: control({ action: "stop" }) });
+  assert.equal(result.outcome, "failed");
+  assert.match(api.reports[0].error, /no process for terminal "term-1"/);
+  assert.match(api.reports[0].error, /started elsewhere, or this daemon has restarted since/);
+});
+
+test("STOPPING FORGETS THE TERMINAL, so a stale handle cannot be reused", async () => {
+  // Runner ids are unique per instance and recycled per process. Keeping a stopped terminal's handle
+  // would let a later control address whatever now holds that id — the cross-kill this project has
+  // already paid for once, on a recycled pid.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  assert.equal(book.handleFor("term-1"), "proc-1");
+  await run({ handles: book, processes, control: control({ action: "stop" }) });
+  assert.equal(book.handleFor("term-1"), "", "a stopped terminal must leave no handle behind");
+});
+
+test("the book answers EMPTY for an unknown terminal, never the terminal id", async () => {
+  // The fallback looks harmless and is not: the runner would refuse an id it has never seen, and the
+  // action would be reported failed for the wrong reason.
+  const book = createHandleBook();
+  assert.equal(book.handleFor("term-unknown"), "");
+  book.remember("term-1", "proc-9");
+  assert.equal(book.handleFor("term-1"), "proc-9");
+  book.remember("term-2", "");
+  assert.equal(book.handleFor("term-2"), "", "a blank handle is not worth remembering");
 });
