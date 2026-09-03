@@ -18,23 +18,11 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { EXIT, summarise, unanswered } from "../lib/health.mjs";
-import {
-  environmentCheck,
-  looksLikeEnvironment,
-  advertiseCredentialCheck,
-  credentialStoreCheck,
-  ownedProcessesCheck,
-  registryCheck,
-  terminalCheck,
-  claimingCheck,
-} from "../lib/environment-checks.mjs";
-import {
-  probeService,
-  readServices,
-  registryVersion,
-  SUPPORTED_REGISTRY_VERSION,
-} from "../lib/services.mjs";
+import { EXIT, summarise } from "../lib/health.mjs";
+// THE COLLECTION LIVES IN A MODULE so something other than a terminal can have it -- the TUI asks
+// for exactly this (A3) and could not call a script. What stays here is the DISPLAY, which is the
+// seam this file's own header has always named.
+import { collectEnvironmentChecks } from "../lib/environment-report.mjs";
 import { credentialRoot, listCredentialStore } from "../lib/credential-fs.mjs";
 import { terminalSupport } from "../lib/runner.mjs";
 
@@ -72,64 +60,13 @@ async function knock(url) {
   }
 }
 
-const checks = [];
-checks.push(terminalCheck(terminalSupport()));
-
-const source = readRegistry();
-checks.push(registryCheck(source));
-
-// Is an environment running? We can tell, so both a silent port and a WRONG occupant are failures
-// rather than unanswered: nothing listening is a fact, and something-else listening is a fact.
-const envAnswer = await knock(`${ENV_ENDPOINT}/health`);
-checks.push(environmentCheck(ENV_ENDPOINT, envAnswer));
-
-if (looksLikeEnvironment(envAnswer)) {
-  const owned = Array.isArray(envAnswer.body?.processes) ? envAnswer.body.processes : [];
-  const unknown = Array.isArray(envAnswer.body?.unknown) ? envAnswer.body.unknown : [];
-  checks.push(ownedProcessesCheck({ owned, unknown }));
-  // Reads what the daemon reports about ITSELF. The credential lives in its process environment, and
-  // this doctor runs in a different process -- so asking our own environment would answer a question
-  // nobody has, and would answer it wrongly whenever the two shells differ.
-  checks.push(advertiseCredentialCheck({
-    answered: true,
-    enabled: envAnswer.body?.advertisingEnabled ?? null,
-    credentials: envAnswer.body?.advertiseCredentials ?? null,
-    attempts: envAnswer.body?.advertiseAttempts ?? null,
-  }));
-  // ADVERTISING AND CLAIMING ARE DIFFERENT CAPABILITIES, and this doctor only reported the first.
-  // On 2026-09-02 the advertiser was healthy while every claim heartbeat was discarded, `/spawn`
-  // refused six times, and a green `aify-env doctor` was part of what told the operator it was fine.
-  checks.push(claimingCheck({ answered: true, plugins: envAnswer.body?.plugins ?? null }));
-} else {
-  // Not a guess of zero, and the distinction is load-bearing: "0 processes owned" is what a healthy
-  // idle environment looks like, so reporting it when no environment answered turns an absent
-  // environment into a calm one.
-  checks.push(unanswered("processes", "no aify-env answered, so what it owns is unknown"));
-  checks.push(advertiseCredentialCheck({ answered: false }));
-  checks.push(claimingCheck({ answered: false }));
-}
-
-// Only when the registry announces a format we understand. Probing entries pulled out of one we do
-// not is acting on a guess the registry check has just announced it would not make -- the report would
-// carry a row saying the file cannot be read and further rows naming services read out of it.
-const declaredVersion = registryVersion(source.text ?? "");
-if (declaredVersion === null || declaredVersion === SUPPORTED_REGISTRY_VERSION) {
-  for (const service of readServices(source.text ?? "")) {
-    checks.push(probeService(service, await knock(`${service.endpoint}/health`)));
-  }
-}
-
-// THE CREDENTIAL STORE, compared against what the registry references. Reported, never deleted: a
-// file nobody references today may be referenced by a registry that is briefly unreadable, and
-// deleting a population on that reasoning is how a cleanup becomes an outage.
-const store = await listCredentialStore(credentialRoot());
-checks.push(credentialStoreCheck({
-  storeProblem: store.problem,
-  storeNames: store.problem ? null : store.names,
-  registryRefs: declaredVersion === null || declaredVersion === SUPPORTED_REGISTRY_VERSION
-    ? readServices(source.text ?? "").map((service) => service.credentialRef)
-    : null,
-}));
+const checks = await collectEnvironmentChecks({
+  endpoint: ENV_ENDPOINT,
+  knock,
+  readRegistry,
+  terminalSupport,
+  readCredentialStore: () => listCredentialStore(credentialRoot()),
+});
 
 const result = summarise(checks);
 
