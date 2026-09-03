@@ -43,6 +43,18 @@ const BINDS_A_LITERAL = [
   /["']--port["']\s*,\s*["']?[1-9]\d*["']?/,
 ];
 
+/**
+ * THE BLIND SPOT, named with the measurement rather than closed with a rule that would misfire.
+ * A port bound under a DIFFERENT identifier -- `const P = 8885; spawn(..., String(P))` -- passes
+ * both patterns. Widening to "any identifier assigned a number in 1024-65535" was measured against
+ * the tree first and rejected: the only numeric consts in that range are `LIMIT = 1000` (a line
+ * ceiling in the oversized-file gate) and `SELF = 4242` / `OTHER = 9999` in
+ * `a-live-instances-record-survives-another-boot.test.js`, which are PIDs passed as `owner:` and
+ * `self:`. A gate that fired on those would be switched off, and a gate switched off is worse than
+ * a narrow one. No test names a port under another identifier today; if one ever does, this
+ * paragraph is where to start.
+ */
+
 /** This file's own name: its controls are synthetic strings, not binds. */
 const SELF = "no-test-binds-a-hardcoded-port.test.js";
 
