@@ -378,6 +378,11 @@ const server = createServer(async (request, response) => {
         // The outcome of the last beat per target, so a reader can tell a refusal from an outage.
         // No response BODY travels -- a service's error text is its own, and could carry anything.
         advertiseAttempts: attemptsByService(advertisingTargets, lastAttempts),
+        // WHAT EACH PLUGIN IS ACTUALLY DOING, which is a different question from whether this host
+        // is advertising. Advertising DESCRIBES the machine; a plugin CLAIMS work on it, and on
+        // 2026-09-02 the first was healthy while the second was refused every time for hours with
+        // nothing anywhere able to say so. `/health` reported the half that was fine.
+        plugins: servicePlugins.report(),
         traffic,
       },
     );

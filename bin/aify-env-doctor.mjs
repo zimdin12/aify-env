@@ -27,6 +27,7 @@ import {
   ownedProcessesCheck,
   registryCheck,
   terminalCheck,
+  claimingCheck,
 } from "../lib/environment-checks.mjs";
 import {
   probeService,
@@ -95,12 +96,17 @@ if (looksLikeEnvironment(envAnswer)) {
     credentials: envAnswer.body?.advertiseCredentials ?? null,
     attempts: envAnswer.body?.advertiseAttempts ?? null,
   }));
+  // ADVERTISING AND CLAIMING ARE DIFFERENT CAPABILITIES, and this doctor only reported the first.
+  // On 2026-09-02 the advertiser was healthy while every claim heartbeat was discarded, `/spawn`
+  // refused six times, and a green `aify-env doctor` was part of what told the operator it was fine.
+  checks.push(claimingCheck({ answered: true, plugins: envAnswer.body?.plugins ?? null }));
 } else {
   // Not a guess of zero, and the distinction is load-bearing: "0 processes owned" is what a healthy
   // idle environment looks like, so reporting it when no environment answered turns an absent
   // environment into a calm one.
   checks.push(unanswered("processes", "no aify-env answered, so what it owns is unknown"));
   checks.push(advertiseCredentialCheck({ answered: false }));
+  checks.push(claimingCheck({ answered: false }));
 }
 
 // Only when the registry announces a format we understand. Probing entries pulled out of one we do
