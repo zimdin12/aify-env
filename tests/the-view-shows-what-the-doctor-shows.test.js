@@ -237,3 +237,59 @@ test("the checks arrive in READING order", async () => {
     `what an environment owns was reported before whether it exists: ${ids}`);
   assert.ok(ids.indexOf("terminal") < ids.indexOf("environment"), `unexpected order: ${ids}`);
 });
+
+// ── the SERVICES row does not repeat its own endpoint column ─────────────────────────────────
+//
+// From the operator's own screen, 2026-09-04:
+//
+//   ●  ok  aify-comms  http://127.0.0.1:8800  http://127.0.0.1:8800 reports healthy version 0.6.1 …
+//
+// `probeService` builds that sentence with the address in front, and is right to: `aify-env doctor`
+// prints the same string with no endpoint column. Here the row has already drawn it.
+//
+// IT COSTS INFORMATION, NOT DECORATION. `table` hands the LAST column the leftover width and clips
+// it, so the version and build -- what somebody checking a deploy is reading the row for -- are cut
+// first while the duplicate address survives ahead of them.
+
+test("THE DETAIL DROPS AN ENDPOINT THE ROW ALREADY SHOWS", () => {
+  const out = renderDashboard({
+    version: "0.6.2",
+    endpoint: "http://127.0.0.1:8802",
+    terminals: { available: true, reason: "" },
+    services: [{
+      name: "aify-comms",
+      endpoint: "http://127.0.0.1:8800",
+      state: "passed",
+      detail: "http://127.0.0.1:8800 reports healthy version 0.6.1 build b7d77fdf",
+    }],
+    processes: [],
+    traffic: { requests: 0, bytesOut: 0 },
+  }, { columns: 140, color: false }).join("\n");
+
+  assert.match(out, /reports healthy version 0\.6\.1 build b7d77fdf/, "the useful half was lost");
+  assert.equal(
+    (out.match(/http:\/\/127\.0\.0\.1:8800/g) || []).length, 1,
+    "the endpoint is still printed twice on one row",
+  );
+});
+
+test("an endpoint INSIDE a sentence is left alone, not mangled", () => {
+  // The unanswered wording is "no answer from <endpoint>: <error>". Cutting the address there would
+  // leave "no answer from : ECONNREFUSED" -- a duplicate traded for a mangling.
+  const out = renderDashboard({
+    version: "0.6.2",
+    endpoint: "http://127.0.0.1:8802",
+    terminals: { available: true, reason: "" },
+    services: [{
+      name: "other-svc",
+      endpoint: "http://127.0.0.1:9999",
+      state: "unanswered",
+      detail: "no answer from http://127.0.0.1:9999: ECONNREFUSED",
+    }],
+    processes: [],
+    traffic: { requests: 0, bytesOut: 0 },
+  }, { columns: 140, color: false }).join("\n");
+
+  assert.match(out, /no answer from http:\/\/127\.0\.0\.1:9999: ECONNREFUSED/,
+    "a sentence carrying the address mid-string was cut");
+});
