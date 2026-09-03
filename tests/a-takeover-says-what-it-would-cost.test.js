@@ -26,6 +26,7 @@ import { test } from "node:test";
 
 import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
 import { workLostToSupersession, showViewInsteadOfRefusing } from "../lib/environment-checks.mjs";
+import { freePort } from "./_free-port.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENTRY = path.join(ROOT, "bin", "aify-env.mjs");
@@ -116,7 +117,7 @@ test("a list that is not a list does not manufacture work", () => {
 // -- and the same decision reached by a real second start ------------------------------------------
 
 test("a second start REFUSES while the first is running agents, and touches nothing", async () => {
-  const PORT = 8878;
+  const PORT = await freePort();
   const box = sealed("refuse");
   const { daemon, workerPid } = await environmentWithWork(box, PORT);
   let second = null;
@@ -192,7 +193,7 @@ test("A PIPE KEEPS THE REFUSAL EXACTLY AS IT WAS — explanation, pointer, exit 
   // status must keep reading the same one. `start()` pipes stdio, so every assertion in the refusal
   // test above is this case; what is added here is that the POINTER survives, because a reader with
   // no view is the only one who needs to be told the command that looks without disturbing.
-  const PORT = 8884;
+  const PORT = await freePort();
   const box = sealed("piped");
   const { daemon, workerPid } = await environmentWithWork(box, PORT);
   let second = null;
@@ -212,7 +213,7 @@ test("A PIPE KEEPS THE REFUSAL EXACTLY AS IT WAS — explanation, pointer, exit 
 test("AIFY_NO_DASHBOARD=1 keeps the old shape even in a terminal", async () => {
   // The opt-out already exists for the daemon's own view; it has to mean the same thing here, or an
   // operator who turned the dashboard off gets one anyway at the least welcome moment.
-  const PORT = 8885;
+  const PORT = await freePort();
   const box = sealed("nodash");
   const { daemon, workerPid } = await environmentWithWork(box, PORT);
   let second = null;
@@ -234,7 +235,7 @@ test("AIFY_NO_DASHBOARD=1 keeps the old shape even in a terminal", async () => {
 test("--force takes over anyway, which is what makes refusing safe", async () => {
   // The escape hatch, proven rather than assumed. A guard with no way past it turns one bad afternoon
   // into a permanently unusable command.
-  const PORT = 8877;
+  const PORT = await freePort();
   const box = sealed("forced");
   const { daemon, workerPid } = await environmentWithWork(box, PORT);
   let second = null;
@@ -259,7 +260,7 @@ test("--force takes over anyway, which is what makes refusing safe", async () =>
 test("an idle environment is still superseded without ceremony", async () => {
   // THE CASE THAT MUST NOT REGRESS. Refusing whenever an environment exists would break every restart
   // of an idle one, which is the ordinary way this command is used.
-  const PORT = 8876;
+  const PORT = await freePort();
   const box = sealed("idle");
   const first = start(box.env, PORT);
   let second = null;

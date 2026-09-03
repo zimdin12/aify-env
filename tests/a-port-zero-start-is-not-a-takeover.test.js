@@ -29,6 +29,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { freePort } from "./_free-port.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENTRY = path.join(ROOT, "bin", "aify-env.mjs");
@@ -75,7 +76,7 @@ function waitFor(child, pattern, ms = 20000) {
 }
 
 test("a --port 0 start leaves a running instance's processes AND its record alone", async () => {
-  const PORT = 8886;
+  const PORT = await freePort();
   const box = sealed("portzero");
   const launcher = longLauncher(box.dir);
   const incumbent = start(box.env(box.record), PORT);
@@ -118,7 +119,7 @@ test("a --port 0 start leaves a running instance's processes AND its record alon
 test("the ephemeral instance says it left the process alone, and names the owner", async () => {
   // Silence would be indistinguishable from having found nothing. An operator debugging a leak needs
   // to know the reaper SAW the entry and declined it.
-  const PORT = 8887;
+  const PORT = await freePort();
   const box = sealed("portzero-says");
   const launcher = longLauncher(box.dir);
   const incumbent = start(box.env(box.record), PORT);

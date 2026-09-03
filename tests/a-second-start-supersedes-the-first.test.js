@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
+import { freePort } from "./_free-port.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENTRY = path.join(ROOT, "bin", "aify-env.mjs");
@@ -78,7 +79,7 @@ function waitFor(child, pattern, ms = 20000) {
 }
 
 test("a second start takes over, and the first stops serving", async () => {
-  const PORT = 8885;
+  const PORT = await freePort();
   const box = sealed("supersede");
   const first = start(box.env(box.record), PORT);
   let second = null;
@@ -103,7 +104,7 @@ test("a second start takes over, and the first stops serving", async () => {
 });
 
 test("the predecessor's processes are reaped by the replacement, not stranded", async () => {
-  const PORT = 8884;
+  const PORT = await freePort();
   const box = sealed("adopt");
   const launcher = longLauncher(box.dir);
   const first = start(box.env(box.record), PORT);
@@ -138,7 +139,7 @@ test("the predecessor's processes are reaped by the replacement, not stranded", 
 
 test("something that is not an aify-env is left alone, and named", async () => {
   // The whole reason the holder is asked rather than just killed.
-  const PORT = 8883;
+  const PORT = await freePort();
   const stranger = createServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/plain" });
     response.end("not an environment");
@@ -170,7 +171,7 @@ test("a stranger that serves a HEALTHY body with a pid is still left alone", asy
   //
   // THE STRANGER IS A SEPARATE PROCESS ON PURPOSE. Served from inside the test runner, proving the
   // bug would mean killTree taking down the suite that is proving it.
-  const PORT = 8882;
+  const PORT = await freePort();
   const script = "const http = require('node:http');"
     + "const s = http.createServer((_q, r) => {"
     + "  r.writeHead(200, { 'content-type': 'application/json' });"

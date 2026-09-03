@@ -15,47 +15,16 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { freePort } from "./_free-port.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENTRY = path.join(ROOT, "bin", "aify-env.mjs");
 const ESC = String.fromCharCode(27);
 const CLEAR = `${ESC}[2J`;
 
-/**
- * A port the OPERATING SYSTEM says is free, asked for fresh per test.
- *
- * THREE HARDCODED PORTS STOOD HERE (8894, 8893, 8891) and the comment on them guarded the wrong
- * thing: "a port nothing else in this SUITE uses". The suite was never the risk. On 2026-09-03 an
- * unrelated program of the operator's -- `sand_castle.exe` -- was listening on 127.0.0.1:8894, the
- * daemon could not bind, it printed nothing, and the test failed with `no banner:` and an empty
- * string. That reads exactly like a code regression, and it arrived in the middle of an unrelated
- * change; moving the number by 100 made all three pass.
- *
- * A fixed port asserts something about the whole machine that a test has no way to know. Asking the
- * OS closes the class rather than the instance -- the earlier "TTY_PORT + 1 collided with
- * PIPE_PORT" note is the same bug one address-space smaller.
- *
- * THE WINDOW BETWEEN CLOSE AND RE-BIND IS REAL and is not worth removing: the alternative is
- * handing the daemon a listening socket, which is not how it starts. A port the OS just called free
- * is enormously more likely to be free than one chosen in 2026-08.
- *
- * OTHER FILES HERE STILL HARDCODE PORTS (8876-8887) and were deliberately left alone rather than
- * swept: the supersession and takeover tests need TWO daemons to contend for ONE port, so a helper
- * that hands each a different free one would quietly stop them testing anything. Converting those
- * means giving the pair a single freshly-found port, which is a different change with its own
- * proof. They carry the same exposure until somebody does it.
- */
-async function freePort() {
-  const net = await import("node:net");
-  return await new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const { port } = probe.address();
-      probe.close(() => resolve(port));
-    });
-  });
-}
+// The free-port helper and the whole reason for it live in `_free-port.mjs`, shared with the
+// supersession and takeover tests, which hit the SAME defect from the other direction: they used
+// 8884 and 8885 in two files that `node --test` runs in parallel.
 
 function tempRecord(label) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `aify-${label}-`));
