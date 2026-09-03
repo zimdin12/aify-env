@@ -83,6 +83,7 @@ import {
   revokesAcceptance,
 } from "../lib/advertise.mjs";
 import { credentialRoot } from "../lib/credential-fs.mjs";
+import { createNotices } from "../lib/notices.mjs";
 import {
   credentialForTarget,
   credentialReadinessFor,
@@ -298,9 +299,37 @@ async function resolvePluginCredential() {
 }
 
 // An escape hatch for anyone who wants the daemon in a terminal without the view taking it over.
+// WHERE THE DAEMON'S OWN MESSAGES GO, decided ONCE and used by both the log sink and the view.
+//
+// The sink used to write to stderr unconditionally. When this process also owns a terminal, that
+// stderr line lands in the middle of a frame `frameUpdate` addresses by cursor position -- so the
+// row it shifts desyncs every repaint after it. The operator reported exactly that on 2026-09-04:
+// three `output not delivered: fetch failed` lines wedged into their view with the layout coming
+// apart. Kept and rendered as a NOTICES section instead; a pipe or a service manager keeps stderr,
+// which is where those readers expect it.
+const NOTICES = createNotices();
+
 const NO_DASHBOARD = ["1", "true", "yes"].includes(
   String(process.env.AIFY_NO_DASHBOARD ?? "").trim().toLowerCase(),
 );
+
+/**
+ * True only once the view is ACTUALLY drawing, not merely intended.
+ *
+ * The dashboard can fail to start (`startDashboard` throws and the daemon carries on serving), and
+ * a log line that vanished into a ring nobody is rendering would be worse than one printed over a
+ * frame. So this flips on success and stays false otherwise.
+ */
+let dashboardOwnsScreen = false;
+
+/** The daemon's own voice: into the view when it owns the screen, to stderr when it does not. */
+function logLine(message) {
+  if (dashboardOwnsScreen) {
+    NOTICES.add(message);
+    return;
+  }
+  process.stderr.write(`[aify-env] ${message}${chr10}`);
+}
 /** Set once the view is running, so shutdown can stop redrawing before it tears anything down. */
 let stopDashboard = () => {};
 
@@ -635,7 +664,7 @@ server.listen(port, HOST, async () => {
       // what this host advertises.
       environmentId: "",
       credential: async () => resolvePluginCredential(),
-      log: (message) => process.stderr.write(`[aify-env] ${message}${chr10}`),
+      log: (message) => logLine(message),
     });
     const outcome = await startServicePlugins({
       registry: servicePlugins,
@@ -688,11 +717,16 @@ server.listen(port, HOST, async () => {
         // convention every other tool honours and costs one condition to respect.
         columns: process.stdout.columns || 100,
         color: !process.env.NO_COLOR,
+        notices: NOTICES,
       });
       stopDashboard = view.stop;
+      // AFTER the first frame -- `startDashboard` resolves once a screen is visible -- so nothing
+      // written before that is held back from a terminal that was not yet being repainted.
+      dashboardOwnsScreen = true;
     } catch (failure) {
       // A view that cannot draw must never stop the environment from serving. It is the decoration;
       // the daemon is the product.
+      dashboardOwnsScreen = false;
       process.stderr.write(`[aify-env] dashboard unavailable: ${failure.message}${chr10}`);
     }
   }
