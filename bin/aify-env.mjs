@@ -14,6 +14,8 @@
 //   aify-env doctor          what this host can say about itself, and what each service said
 //   aify-env tui             the live view alone, against a daemon already running
 //   aify-env attach <agent>  give one process this whole terminal; Ctrl-] detaches, it keeps running
+//   aify-env run --service <s> --launcher <path> [--label <id>] -- <args...>
+//                            start a program HERE and attach to it, so it outlives this terminal
 //   aify-env --port 0        pick an ephemeral port (used by tests)
 //   aify-env --force         take the port even though the incumbent is running agents, ending them
 //   aify-env --version
@@ -140,6 +142,9 @@ const SUBCOMMANDS = {
   // this hands one process the whole terminal, which is what an operator wants when a single lane is
   // misbehaving -- and what makes a resident's PTY hostable here at all.
   attach: "./aify-env-attach.mjs",
+  // START AND ATTACH IN ONE STEP, for a launcher that wants its session to outlive the terminal
+  // that started it. `claude-aify --shared` is one line calling this.
+  run: "./aify-env-run.mjs",
   credential: "./aify-env-credential.mjs",
 };
 const firstArg = args[0];
