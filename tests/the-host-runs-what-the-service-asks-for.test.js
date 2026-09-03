@@ -61,8 +61,16 @@ function fakeApi({ controls = [], launch = LAUNCH, claimThrows = null, launchThr
 
 function fakeProcesses({ startThrows = null } = {}) {
   const calls = { starts: [], writes: [], resizes: [], stops: [], subscribed: [] };
+  //: EVERY attached listener, mirroring `lib/runner.mjs`'s `stream.listeners` / `stream.exitListeners`.
+  const listeners = new Set();
+  const exits = new Set();
+  //: HOW MANY LISTENERS ARE ATTACHED, which is the only honest way to see a leaked carrier. Asserting
+  //: on where OUTPUT lands cannot: each listener closes over the api that created it, so a leaked one
+  //: reports into a different fake and the test inspecting the current api sees nothing wrong.
+  const listenerCount = () => listeners.size;
   return {
     calls,
+    listenerCount,
     async start(spec) {
       calls.starts.push(spec);
       if (startThrows) throw new Error(startThrows);
@@ -75,11 +83,22 @@ function fakeProcesses({ startThrows = null } = {}) {
       // healthy worker's console stayed empty in production while this test passed. A fake that is
       // more permissive than the thing it stands for is a test that cannot fail.
       if (id !== "proc-1") return null;
+      // A SET, LIKE THE REAL RUNNER, and this is not a detail. The fake used to keep ONE listener --
+      // `calls.emit = onOutput` -- so a second subscribe silently replaced the first and a leaked
+      // listener was invisible. A mutation that never released the old carrier passed all 54 tests
+      // against that fake, while against `lib/runner.mjs` (which holds `stream.listeners` as a Set)
+      // it would report every byte twice: once into a terminal the service has already ended.
+      listeners.add(onOutput);
+      if (onExit) exits.add(onExit);
       // Handed back so a test can drive the process's own output and exit, which is the only way to
-      // prove this host CARRIES them rather than merely registering interest.
-      calls.emit = onOutput;
-      calls.exit = onExit;
-      return () => {};
+      // prove this host CARRIES them rather than merely registering interest. They fan out to every
+      // attached listener, so a test sees exactly what the service would.
+      calls.emit = (chunk) => { for (const fn of [...listeners]) fn(chunk); };
+      calls.exit = (code, signal) => { for (const fn of [...exits]) fn(code, signal); };
+      return () => {
+        listeners.delete(onOutput);
+        if (onExit) exits.delete(onExit);
+      };
     },
     write(id, data) { calls.writes.push({ id, data }); },
     resize(id, cols, rows) { calls.resizes.push({ id, cols, rows }); },
@@ -504,6 +523,156 @@ test("a failed liveness report does not stop the pass", async () => {
 // that this host already held a live process for that agent and started another anyway.
 //
 // Two claude instances in one working directory is also its own failure, independent of the count.
+
+// ── adopt, when the service has GIVEN UP on the terminal the worker is under ────────────────────
+//
+// THE DEADLOCK THIS ENDS, measured on the operator's fleet 2026-09-03. `sc-coder` was a running
+// claude worker whose terminal the service had written off. Its own output could never restore that
+// terminal -- ended does not go back to active, by design -- so the agent was unreachable; and every
+// restart asked this host for a second worker, which it correctly refused, so the agent was also
+// unrestartable. Two rules, each behaving correctly, producing a state neither could leave. It took
+// stopping the process by hand.
+//
+// The refusal always carried the answer: it names the terminal and the process. If the service has
+// GIVEN UP on that terminal, a start control is not a request for a second worker -- it is a request
+// for somewhere to put the one that exists.
+
+/** A start control for a SECOND terminal, with the api deciding what it says about the first. */
+async function secondStart(book, processes, api) {
+  return runOneControl({
+    control: control({ id: "ctl-2", terminalId: "term-2" }),
+    api, processes, handles: book, cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    baseEnv: {},
+  });
+}
+
+/** An api whose launch names term-2 and whose liveness answer for term-1 is `standing`. */
+function apiSaying(standing) {
+  const api = fakeApi({ launch: { ...LAUNCH, terminalId: "term-2" } });
+  api.terminalOutput = async (terminalId, body) => {
+    api.outputs.push({ terminalId, ...body });
+    if (standing === "gone") {
+      const error = new Error("404");
+      error.status = 404;
+      throw error;
+    }
+    if (standing === "unreadable") throw new Error("service down");
+    return { ok: true, terminal: { id: terminalId, status: standing } };
+  };
+  return api;
+}
+
+test("A GIVEN-UP TERMINAL IS ADOPTED, NOT DUPLICATED AND NOT KILLED", async () => {
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.calls.starts.length = 0;
+  processes.calls.stops.length = 0;
+
+  const result = await secondStart(book, processes, apiSaying("failed"));
+
+  assert.equal(result.outcome, "adopted");
+  assert.equal(result.from, "term-1");
+  assert.deepEqual(processes.calls.starts, [], "it started a second process instead of adopting");
+  assert.deepEqual(processes.calls.stops, [], "IT KILLED THE LIVE SESSION -- never acceptable");
+  assert.equal(book.handleFor("term-2"), "proc-1", "the running process was not re-pointed");
+  assert.equal(book.handleFor("term-1"), "", "the given-up terminal must be released");
+});
+
+test("a terminal the service NO LONGER HAS is adopted too", async () => {
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  const result = await secondStart(book, processes, apiSaying("gone"));
+  assert.equal(result.outcome, "adopted");
+  assert.equal(book.handleFor("term-2"), "proc-1");
+});
+
+test("A LIVE TERMINAL IS STILL REFUSED — adoption must not become a takeover", async () => {
+  // The direction that would undo the whole one-worker rule. If the service still considers the old
+  // terminal live, somebody may be watching it, and moving the process out from under them is the
+  // same harm as killing it by a slower route.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  const result = await secondStart(book, processes, apiSaying("attached"));
+  assert.equal(result.outcome, "refused");
+  assert.equal(book.handleFor("term-1"), "proc-1", "the live terminal lost its process");
+  assert.equal(book.handleFor("term-2"), "", "and the new terminal must hold nothing");
+});
+
+test("AN OUTAGE IS NOT PERMISSION — an unreadable answer refuses", async () => {
+  // No evidence is not a pass. A 500, a timeout or a service restart must not move a terminal, and
+  // refusing is the reversible mistake.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  const result = await secondStart(book, processes, apiSaying("unreadable"));
+  assert.equal(result.outcome, "refused");
+  assert.match(result.detail, /unreadable/);
+  assert.equal(book.handleFor("term-1"), "proc-1");
+});
+
+test("the adopted terminal CARRIES OUTPUT, and the given-up one no longer does", async () => {
+  // The half that makes adoption worth anything: a console the operator can read. And the half that
+  // makes it safe: the old listener is detached, or every byte is reported twice -- once into a
+  // terminal the service has ended.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  const api = apiSaying("failed");
+  await secondStart(book, processes, api);
+  api.outputs.length = 0;
+
+  processes.calls.emit("after the adoption" + String.fromCharCode(10));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const carried = api.outputs.filter((o) => o.output);
+  assert.deepEqual(carried.map((o) => o.terminalId), ["term-2"],
+    `output went to the wrong terminal(s): ${JSON.stringify(api.outputs)}`);
+
+  // AND EXACTLY ONE LISTENER IS ATTACHED. This is the assertion that catches a leaked carrier, and
+  // the one above cannot: each listener closes over the api that created it, so the leaked one
+  // reports into the FIRST fake and an assertion inspecting this one sees a clean single stream.
+  // Measured -- a mutation that never released the old carrier passed all 54 tests without it.
+  assert.equal(processes.listenerCount(), 1,
+    "the old carrier is still attached: every byte would be reported twice, once into a terminal "
+    + "the service has already ended");
+});
+
+test("an adoption reports the handle and the PID, so the host and the fleet can be matched", async () => {
+  // `aify-comms doctor`'s env-processes check matches terminals against processes by pid. A start
+  // knows the pid because it just created the process; an adoption has to ask the runner, and
+  // answering "" would make the adopted lane read as an unaccounted process for ever.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  processes.list = () => [{ id: "proc-1", pid: 4242 }];
+  await run({ handles: book, processes });
+  const api = apiSaying("failed");
+  await secondStart(book, processes, api);
+  // The fake FLATTENS the patch onto the record (`{ id, ...patch }`), which is worth knowing before
+  // writing an assertion against it: `r.patch` is undefined and `r.patch?.status === "completed"`
+  // is quietly false for every record, so the find returns nothing and the test fails describing a
+  // missing report rather than a wrong one.
+  const completed = api.reports.find((r) => r.status === "completed");
+  assert.ok(completed, `no completed report: ${JSON.stringify(api.reports)}`);
+  assert.equal(completed.handle, "proc-1");
+  assert.equal(completed.processId, "4242", "an adopted lane with no pid reads as unaccounted for ever");
+  assert.equal(completed.terminalStatus, "attached");
+});
+
+test("a runner that has forgotten the process FAILS the control rather than claiming success", async () => {
+  // The adoption equivalent of the null-subscription bug: reporting a terminal attached with nothing
+  // behind it is how an empty console shipped once already.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.subscribe = () => null;              // the process is gone as far as the runner knows
+  const result = await secondStart(book, processes, apiSaying("failed"));
+  assert.equal(result.outcome, "failed");
+  assert.equal(book.handleFor("term-2"), "", "a terminal nothing carries must not stay in the book");
+});
 
 test("A SECOND WORKER IS REFUSED — THE LIVE SESSION WINS", async () => {
   // THE REGRESSION THIS REVERSES, measured on the operator's fleet 2026-09-03. The first version
