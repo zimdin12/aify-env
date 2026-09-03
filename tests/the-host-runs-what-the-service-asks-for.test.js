@@ -48,17 +48,26 @@ function fakeApi({ controls = [], launch = LAUNCH, claimThrows = null, launchThr
       return { launch };
     },
     async reportControl(id, patch) { reports.push({ id, ...patch }); },
+    outputs: [],
+    async terminalOutput(terminalId, body) { this.outputs.push({ terminalId, ...body }); },
   };
 }
 
 function fakeProcesses({ startThrows = null } = {}) {
-  const calls = { starts: [], writes: [], resizes: [], stops: [] };
+  const calls = { starts: [], writes: [], resizes: [], stops: [], subscribed: [] };
   return {
     calls,
     async start(spec) {
       calls.starts.push(spec);
       if (startThrows) throw new Error(startThrows);
       return { id: "proc-1", pid: 4242 };
+    },
+    subscribe(id, onOutput, onExit) {
+      calls.subscribed.push(id);
+      // Handed back so a test can drive the process's own output and exit, which is the only way to
+      // prove this host CARRIES them rather than merely registering interest.
+      calls.emit = onOutput;
+      calls.exit = onExit;
     },
     write(id, data) { calls.writes.push({ id, data }); },
     resize(id, cols, rows) { calls.resizes.push({ id, cols, rows }); },
@@ -243,4 +252,85 @@ test("an empty queue is IDLE, which is the usual case and must be cheap", async 
   });
   assert.equal(result.outcome, "idle");
   assert.equal(result.handled, 0);
+});
+
+// ── the output stream, and the duplicate fleet it prevents ──────────────────────────────────────
+//
+// MEASURED 2026-09-03. Fourteen workers ran perfectly on this host and the service received not one
+// byte from any of them, so its reconciler correctly called each terminal a dead ghost, marked it
+// stopped, and issued a NEW start control — which this host obeyed, starting a second process
+// beside the first. Two `sc-lead`s, two `sc-coder`s. The agent ids were unique throughout; what
+// duplicated was the PROCESS, because starting one and then saying nothing about it is
+// indistinguishable from never starting it.
+
+test("a started terminal is SUBSCRIBED, or the service never learns it is alive", async () => {
+  const { processes } = await run();
+  assert.deepEqual(processes.calls.subscribed, ["term-1"],
+    "nothing carries this process's output, so the service will reconcile it as dead");
+});
+
+test("output is CARRIED to the service, not merely listened for", async () => {
+  const { api, processes } = await run();
+  processes.calls.emit("hello from the worker");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(api.outputs.map((o) => o.output), ["hello from the worker"]);
+  assert.equal(api.outputs[0].terminalId, "term-1");
+  assert.equal(api.outputs[0].status, "attached");
+});
+
+test("THE EXIT IS REPORTED, with its code and signal kept apart", async () => {
+  // An exit code alone cannot tell a crash from a kill on Windows, where an externally terminated
+  // process and a program returning 1 are the same number.
+  const { api, processes } = await run();
+  processes.calls.exit(0, null);
+  await new Promise((resolve) => setImmediate(resolve));
+  const exit = api.outputs.at(-1);
+  assert.equal(exit.status, "stopped");
+  assert.equal(exit.exitCode, 0, "0 is a CLEAN exit and the most common value — truthiness drops it");
+  assert.equal("exitSignal" in exit, false, "an absent field means nobody said, never zero");
+});
+
+test("a SIGNALLED exit keeps its signal and reports no code", async () => {
+  const { api, processes } = await run();
+  processes.calls.exit(null, "SIGKILL");
+  await new Promise((resolve) => setImmediate(resolve));
+  const exit = api.outputs.at(-1);
+  assert.equal(exit.exitSignal, "SIGKILL");
+  assert.equal("exitCode" in exit, false, '"killed by SIGKILL" and "exited 0" are different answers');
+});
+
+test("a failed OUTPUT post does not stop the next chunk", async () => {
+  // It is a listener, not a request: there is nobody above it to hand an error to, and one dropped
+  // POST must not silence a worker for the rest of its life.
+  const logs = [];
+  const api = fakeApi();
+  api.terminalOutput = async () => { throw new Error("service down"); };
+  const processes = fakeProcesses();
+  await runOneControl({
+    control: control(), api, processes, cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    baseEnv: {}, log: (m) => logs.push(String(m)),
+  });
+  processes.calls.emit("first");
+  processes.calls.emit("second");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(logs.some((l) => /output not delivered/.test(l)), "a dropped chunk must be said, not swallowed");
+});
+
+test("the subscription happens BEFORE the control is reported complete", async () => {
+  // Otherwise there is a window where the service believes a terminal is attached and nothing is
+  // carrying its output — which is the reconcile-as-dead race in miniature.
+  const order = [];
+  const api = fakeApi();
+  const realReport = api.reportControl.bind(api);
+  api.reportControl = async (id, patch) => { order.push("report"); return realReport(id, patch); };
+  const processes = fakeProcesses();
+  const realSubscribe = processes.subscribe.bind(processes);
+  processes.subscribe = (...args) => { order.push("subscribe"); return realSubscribe(...args); };
+  await runOneControl({
+    control: control(), api, processes, cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    baseEnv: {},
+  });
+  assert.deepEqual(order, ["subscribe", "report"]);
 });
