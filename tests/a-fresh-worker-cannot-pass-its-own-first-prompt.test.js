@@ -154,3 +154,68 @@ test("it says WHY it answered, because a silent keystroke is unattributable", ()
   assert.ok(logs.some((l) => /never claims a dispatch/.test(l)),
     "the log must name the consequence, or a reader cannot tell it from noise");
 });
+
+// ── the bytes a TUI actually sends ──────────────────────────────────────────────────────────────
+//
+// THE FIXTURE IS REAL. It was captured from aify-env's own replay buffer while a live worker sat at
+// this dialog on 2026-09-03, after the first version of this rule watched that screen for 100
+// seconds and did nothing. The reason is in the bytes: claude does not send spaces, it moves the
+// cursor.
+//
+//   I<ESC>[1Cam<ESC>[1Cusing<ESC>[1Cthis<ESC>[1Cfor<ESC>[1Clocal<ESC>[1Cdevelopment
+//
+// So the matcher was looking for a string that is never transmitted. The aify-comms bridge's rules
+// worked because they ran against a RENDERED screen; this stream is raw, and the difference is
+// invisible until you print the bytes. Hand-written fixtures would have hidden it exactly as the
+// hand-written ones above did — every test in this file passed while the thing did not work.
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { renderableText } from "../lib/plugins/aify-comms/console-prompts.mjs";
+
+const RAW = readFileSync(
+  fileURLToPath(new URL("./fixtures/claude-dev-channels-prompt.raw.txt", import.meta.url)),
+  "utf8",
+);
+
+test("THE REAL BYTES FROM A REAL WORKER ARE ANSWERED", () => {
+  // The assertion the hand-written fixtures could not make.
+  assert.equal(answerForConsole(RAW), ENTER);
+});
+
+test("the raw capture does NOT contain the phrase — which is the whole point", () => {
+  // The control. If this ever becomes true, claude changed how it renders and the normaliser below
+  // is no longer what makes this work — someone should find out why before trusting it.
+  assert.equal(RAW.includes("I am using this for local development"), false,
+    "the raw stream now contains the phrase; the reason this rule exists may have changed");
+  assert.ok(RAW.includes(String.fromCharCode(27) + "[1C"),
+    "the capture no longer contains cursor-forward, so it is not the stream this was written for");
+});
+
+test("cursor-forward becomes SPACES, not nothing", () => {
+  // Stripping it fuses the words into "Iamusingthis" and no phrase matcher can ever fire.
+  const ESC = String.fromCharCode(27);
+  assert.equal(renderableText(`I${ESC}[1Cam${ESC}[1Chere`), "I am here");
+  assert.equal(renderableText(`a${ESC}[3Cb`), "a   b", "the count must be honoured, not assumed to be 1");
+  assert.equal(renderableText(`a${ESC}[Cb`), "a b", "an omitted count means one");
+});
+
+test("cursor-positioning becomes a NEWLINE, so lines stay lines", () => {
+  // Removed instead, every line of the dialog joins into one and "the cursor is on the accepting
+  // line" stops meaning anything — the cursor gate would then pass on any screen containing both.
+  const ESC = String.fromCharCode(27);
+  const lines = renderableText(`${ESC}[3;3Hfirst${ESC}[4;3Hsecond`).split("\n");
+  assert.deepEqual(lines.filter(Boolean), ["first", "second"]);
+});
+
+test("colour and mode escapes are removed without eating the text", () => {
+  const ESC = String.fromCharCode(27);
+  assert.equal(renderableText(`${ESC}[38;2;177;185;249m1.${ESC}[m Exit`), "1. Exit");
+});
+
+test("the normaliser is safe on ordinary text and on nothing", () => {
+  assert.equal(renderableText("plain output"), "plain output");
+  assert.equal(renderableText(""), "");
+  assert.equal(renderableText(null), "");
+});
