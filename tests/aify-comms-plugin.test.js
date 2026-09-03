@@ -135,13 +135,22 @@ test("a REFUSED heartbeat is named with its status, not collapsed into unreachab
   await plugin.stop();
 });
 
-test("a claimed request is started through the HOST, not by the plugin itself", async () => {
+test("a claimed request REGISTERS a warm agent and starts NOTHING", async () => {
+  // THE MODEL CORRECTED 2026-09-03, after the first real spawn. Six requests were claimed within
+  // seconds and all six failed with "a start request must name a launcher to run": the pass built a
+  // start spec from `request.launcher`, a field the wire has never carried. The bridge code this
+  // replaced -- `mcp/stdio/spawn-loop.mjs` -- contains ZERO process starts and reports `running`
+  // with its own pid; the worker is started later by the terminal control path, when the service
+  // asks for it. That is `managed-warm`, and every spawn this system issues uses it.
+  //
+  // ASSERTING THE RUNNER IS UNTOUCHED is the whole point: a process started here is one nothing has
+  // work for, and it would put runtime launch composition -- model flags, session handles,
+  // AIFY_AGENT_ID -- inside the general host.
   const api = fakeApi({
     requests: [{
       id: "req-1",
       agentId: "sc-lead",
       workspace: "C:/Users/Administrator/sand_castle",
-      launcher: "claude-aify",
     }],
   });
   const { plugin } = makePlugin(api);
@@ -150,10 +159,10 @@ test("a claimed request is started through the HOST, not by the plugin itself", 
   await new Promise((resolve) => setImmediate(resolve));
   await plugin.stop();
 
-  assert.equal(runner.starts.length, 1, "the request must reach the host's runner");
-  assert.equal(runner.starts[0].cwd, "C:/Users/Administrator/sand_castle");
+  assert.equal(runner.starts.length, 0, "a claim must start no process");
   assert.deepEqual(api.reports.map((r) => r.status), ["starting", "running"]);
   assert.equal(plugin.state().claimedTotal, 1);
+  assert.equal(plugin.state().lastClaim, "registered");
 });
 
 test("stopping tells the service it is no longer a claimer", async () => {

@@ -28,7 +28,7 @@ const LAUNCHER_TEXT = "#!/usr/bin/env bash" + NEWLINE + 'HARNESS_WRAPPER_VERSION
 const FS = { readFile: () => LAUNCHER_TEXT, platform: "win32" };
 
 /** An api stand-in that records every report, which is what most assertions read. */
-function fakeApi({ request = null, claimThrows = null } = {}) {
+function fakeApi({ request = null, claimThrows = null, reportThrowsOn = null } = {}) {
   const reports = [];
   return {
     reports,
@@ -36,7 +36,12 @@ function fakeApi({ request = null, claimThrows = null } = {}) {
       if (claimThrows) throw new Error(claimThrows);
       return request ? { spawnRequest: request } : {};
     },
-    async report(id, patch) { reports.push({ id, ...patch }); },
+    async report(id, patch) {
+      reports.push({ id, ...patch });
+      // A service that ACCEPTS `starting` and refuses `running` is the shape that strands a request:
+      // it is claimed, the dashboard shows it moving, and nothing ever settles it.
+      if (reportThrowsOn && patch.status === reportThrowsOn) throw new Error("refused by the service");
+    },
   };
 }
 
@@ -124,41 +129,62 @@ test("a claimed request outside the roots is REPORTED failed, not silently dropp
   assert.match(api.reports[0].error, /outside this environment/);
 });
 
-test("a launcher that will not start is reported with the HOST's own reason", async () => {
-  // "The agent did not start" is what this looked like from the dashboard, minutes later, with the
-  // cause discarded here.
+test("A CLAIM REGISTERS A WARM AGENT AND STARTS NOTHING", async () => {
+  // THE MODEL THIS FILE GOT WRONG, and the first real spawn found it: six requests were claimed
+  // within seconds on 2026-09-03 and all six failed with "a start request must name a launcher to
+  // run", because the pass built a start spec from `request.launcher` -- a field the wire has never
+  // carried. The spec carries `runtime`; nothing needed a launcher at claim time.
+  //
+  // MEASURED against the code this replaced: `mcp/stdio/spawn-loop.mjs`, the bridge's claim
+  // consumer, contains ZERO process starts. It reports `running` with its own pid and the worker is
+  // started later, by the terminal control path, when the service asks. That is `managed-warm`, and
+  // every spawn this system issues uses it.
   const api = fakeApi({ request: REQUEST });
-  const processes = fakeProcesses({ startThrows: "spawn claude-aify ENOENT" });
-  const result = await runClaimPass({ api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true, ...FS });
-  assert.equal(result.outcome, "failed");
-  const statuses = api.reports.map((r) => r.status);
-  assert.deepEqual(statuses, [CLAIM_STARTING, CLAIM_FAILED], "starting must be reported before the failure");
-  assert.match(api.reports[1].error, /ENOENT/);
+  const result = await runClaimPass({ api, environmentId: "e", cwdRoots: ROOTS, windows: true, pid: 4242 });
+  assert.equal(result.outcome, "registered");
+  assert.deepEqual(api.reports.map((r) => r.status), [CLAIM_STARTING, CLAIM_RUNNING]);
 });
 
-test("a good request starts and is reported running, with a handle the service can reach", async () => {
+test("the report carries THIS DAEMON'S pid, not a worker's", async () => {
+  // The worker does not exist yet. Reporting anything else would put a pid in the row that nothing
+  // is running -- and the bridge reported its own pid here for exactly the same reason.
   const api = fakeApi({ request: REQUEST });
-  const processes = fakeProcesses();
-  const result = await runClaimPass({ api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true, ...FS });
-  assert.equal(result.outcome, "started");
-  assert.deepEqual(api.reports.map((r) => r.status), [CLAIM_STARTING, CLAIM_RUNNING]);
-  // WITHOUT THE HANDLE the service knows a spawn is running and has no way to write to it or stop it.
-  assert.equal(api.reports[1].handle, "proc-1");
+  await runClaimPass({ api, environmentId: "e", cwdRoots: ROOTS, windows: true, pid: 4242 });
   assert.equal(api.reports[1].processId, "4242");
-  assert.equal(processes.starts[0].cwd, REQUEST.workspace);
-  assert.equal(processes.starts[0].launcher, "claude-aify");
+});
+
+test("the report names the environment and request, and invents nothing else", async () => {
+  // Reporting `running` is what the service calls "convert a spawn request into a live agent": it
+  // writes the agents and sessions rows and derives the runtime's capabilities ITSELF. So this
+  // sends only the facts this host knows. A capability table here would be a second copy of one the
+  // service already owns, agreeing until one of them is fixed.
+  const api = fakeApi({ request: REQUEST });
+  await runClaimPass({ api, environmentId: "windows:h:default", cwdRoots: ROOTS, windows: true });
+  const running = api.reports[1];
+  assert.equal(running.runtimeState.environmentId, "windows:h:default");
+  assert.equal(running.runtimeState.spawnRequestId, REQUEST.id);
+  assert.equal(running.runtimeState.mode, "managed-warm");
+  assert.equal(running.capabilities, undefined, "capabilities are the service's to derive");
+});
+
+test("a service that refuses the running report leaves the outcome FAILED, not silently registered", async () => {
+  // A claimed request the service never hears about again is one it hands to nobody else: the agent
+  // waits for ever and the dashboard shows a spawn that is neither running nor failed.
+  const api = fakeApi({ request: REQUEST, reportThrowsOn: CLAIM_RUNNING });
+  const result = await runClaimPass({ api, environmentId: "e", cwdRoots: ROOTS, windows: true });
+  assert.equal(result.outcome, "failed");
+  assert.match(result.detail, /refused/i);
 });
 
 test("every path that claims a request also reports it", async () => {
   // The property, asserted over all three outcomes at once rather than trusted per test: a claimed
   // request with no report is one the service will hand to nobody else.
   const cases = [
-    { name: "refused", api: fakeApi({ request: { ...REQUEST, workspace: "C:/nope" } }), processes: fakeProcesses() },
-    { name: "failed", api: fakeApi({ request: REQUEST }), processes: fakeProcesses({ startThrows: "ENOENT" }) },
-    { name: "started", api: fakeApi({ request: REQUEST }), processes: fakeProcesses() },
+    { name: "refused", api: fakeApi({ request: { ...REQUEST, workspace: "C:/nope" } }) },
+    { name: "registered", api: fakeApi({ request: REQUEST }) },
   ];
   for (const c of cases) {
-    await runClaimPass({ api: c.api, processes: c.processes, environmentId: "e", cwdRoots: ROOTS, windows: true, ...FS });
+    await runClaimPass({ api: c.api, environmentId: "e", cwdRoots: ROOTS, windows: true });
     assert.ok(c.api.reports.length > 0, `the ${c.name} path claimed a request and reported nothing`);
     assert.ok(c.api.reports.every((r) => r.id === REQUEST.id), `${c.name} reported against the wrong request`);
   }

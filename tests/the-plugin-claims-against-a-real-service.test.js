@@ -70,7 +70,7 @@ async function listen(server) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-test("a spawn request becomes a running process, with only aify-env involved", async () => {
+test("a spawn request becomes a REGISTERED WARM AGENT, with only aify-env involved", async () => {
   const workspace = mkdtempSync(join(tmpdir(), "aify-env-e2e-"));
   const ownedFile = join(workspace, "owned.json");
   // A REAL LAUNCHER, because the allowlist judges a launcher by its CONTENTS: a shebang declaring
@@ -78,13 +78,18 @@ test("a spawn request becomes a running process, with only aify-env involved", a
   // contract rather than by being named in a list. The first version of this test used node.exe and
   // got "starting, failed" -- the allowlist correctly refusing a binary, which is precisely the
   // join a fake runner cannot show.
-  const launcher = writeLauncher(workspace);
+  // NO `launcher` FIELD, because the wire has never carried one -- and this test asserting one was
+  // how the wrong model survived an end-to-end proof. It ran a real socket, a real Runner and a real
+  // process, and proved the seam worked for a request shape the service does not send. The first
+  // real spawn found it: six claimed, six failed with "a start request must name a launcher to run".
+  // A launcher is still written to disk below so the workspace is realistic, and nothing runs it.
+  writeLauncher(workspace);
   const request = {
     id: "req-e2e-1",
     agentId: "e2e-agent",
+    runtime: "claude-code",
     workspace,
-    launcher,
-    args: [],
+    mode: "managed-warm",
   };
   const { server, seen } = stubService({ request });
   const endpoint = await listen(server);
@@ -121,14 +126,20 @@ test("a spawn request becomes a running process, with only aify-env involved", a
     assert.ok(seen.heartbeats[0].payload.bridgeId, "the heartbeat carried no bridgeId");
     assert.equal(seen.heartbeats[0].apiKey, "e2e-key", "the credential did not reach the wire");
 
-    // AND THE CLAIM BECAME A PROCESS.
+    // AND THE CLAIM REGISTERED A WARM AGENT. Reporting `running` is what the service calls
+    // "convert a spawn request into a live agent" -- it writes the agents and sessions rows from the
+    // spawn spec. The worker process comes later, when work arrives.
     const statuses = seen.reports.map((r) => r.status);
     assert.ok(statuses.includes("starting"), `never reported starting: ${JSON.stringify(statuses)}`);
     assert.ok(statuses.includes("running"), `never reported running: ${JSON.stringify(statuses)}`);
     const running = seen.reports.find((r) => r.status === "running");
-    assert.ok(running.handle, "the service was given no handle, so it can never write to or stop this agent");
     assert.ok(running.processId, "no pid was reported");
     assert.ok(running.bridgeId, "the report did not say which claimer owns the work");
+    assert.equal(running.runtimeState.spawnRequestId, "req-e2e-1");
+
+    // AND STARTED NOTHING. The strongest assertion in this file: the real `Runner` is right here,
+    // and a process at claim time is one nothing has work for yet.
+    assert.equal(runner.list().length, 0, "a claim started a process");
   } finally {
     await plugin.stop().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
