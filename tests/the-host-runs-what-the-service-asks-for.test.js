@@ -19,6 +19,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ORPHAN_QUIET_MS,
   TERMINAL_ENDED,
   createHandleBook,
   runOneControl,
@@ -639,13 +640,21 @@ function apiWithMissingTerminal() {
   return api;
 }
 
-async function passWith(api, { handles, processes, log = () => {} }) {
+async function passWith(api, { handles, processes, log = () => {}, quietFor = null }) {
+  // `quietFor` moves the CLOCK, never the window: a test that shortened `quietMs` to zero would
+  // prove the rule fires and say nothing about the veto, which is the half that protects a working
+  // agent. Default null leaves real time, so a freshly started worker is genuinely recent.
+  const at = Date.now();
   return runTerminalControlPass({
     api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true,
     withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
     handles, log,
+    ...(quietFor === null ? {} : { now: () => at + quietFor }),
   });
 }
+
+/** Comfortably past ORPHAN_QUIET_MS, expressed in terms of it so the two cannot drift apart. */
+const LONG_SILENCE = ORPHAN_QUIET_MS + 60_000;
 
 test("A TERMINAL THE SERVICE NO LONGER HAS GETS ITS WORKER STOPPED", async () => {
   const book = createHandleBook();
@@ -699,7 +708,7 @@ test("A TERMINAL THE SERVICE REPORTS STOPPED GETS ITS WORKER STOPPED", async () 
   await run({ handles: book, processes });
   processes.calls.stops.length = 0;
 
-  await passWith(apiReporting("stopped"), { handles: book, processes });
+  await passWith(apiReporting("stopped"), { handles: book, processes, quietFor: LONG_SILENCE });
   assert.deepEqual(processes.calls.stops, ["proc-1"],
     "a worker for a terminal the service considers over was left running");
   assert.equal(book.handleFor("term-1"), "", "and it must be forgotten, or it is retried for ever");
@@ -712,7 +721,7 @@ test("every END status the service uses is acted on, not just the one that was m
     await run({ handles: book, processes });
     processes.calls.stops.length = 0;
 
-    await passWith(apiReporting(status), { handles: book, processes });
+    await passWith(apiReporting(status), { handles: book, processes, quietFor: LONG_SILENCE });
     assert.deepEqual(processes.calls.stops, ["proc-1"], `a terminal reported ${status} kept its worker`);
   }
 });
@@ -727,7 +736,7 @@ test("A LIVE STATUS IS LEFT ALONE — this is the direction that kills working s
     await run({ handles: book, processes });
     processes.calls.stops.length = 0;
 
-    await passWith(apiReporting(status), { handles: book, processes });
+    await passWith(apiReporting(status), { handles: book, processes, quietFor: LONG_SILENCE });
     assert.deepEqual(processes.calls.stops, [], `a live worker was reaped on status ${status || "(none)"}`);
     assert.equal(book.handleFor("term-1"), "proc-1", `and it must still be held on ${status || "(none)"}`);
   }
@@ -744,9 +753,86 @@ test("an answer with NO terminal at all changes nothing", async () => {
 
   const api = fakeApi({ controls: [] });
   api.terminalOutput = async () => ({ ok: true });
-  await passWith(api, { handles: book, processes });
+  await passWith(api, { handles: book, processes, quietFor: LONG_SILENCE });
   assert.deepEqual(processes.calls.stops, []);
   assert.equal(book.handleFor("term-1"), "proc-1");
+});
+
+test("A WORKER THAT IS STILL PRODUCING IS NEVER STOPPED, whatever the service says", async () => {
+  // THE MOST IMPORTANT ASSERTION IN THIS FILE, and it is here because the rule above nearly cost the
+  // operator an agent. Measured 2026-09-03: `sc-coder`'s terminal read `failed` at 06:47:45 while
+  // that same second carried a claude session mid-task -- a live worker the control plane had
+  // written off. The end-status rule alone would have stopped it on the next pass.
+  //
+  // "Refusing is recoverable, killing a live session is not." A terminal the service calls finished
+  // while its process is writing is a CONTRADICTION, and the answer to a contradiction is to say so.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.calls.emit("still working on it\n");   // the process speaks, right now
+  processes.calls.stops.length = 0;
+
+  const logs = [];
+  await passWith(apiReporting("failed"), { handles: book, processes, log: (m) => logs.push(String(m)) });
+  assert.deepEqual(processes.calls.stops, [],
+    "a worker that was producing output was stopped because the service called its terminal failed");
+  assert.equal(book.handleFor("term-1"), "proc-1", "and it must still be held");
+  assert.ok(logs.some((l) => /leaving it alone/.test(l)),
+    `the contradiction must be reported, not swallowed; logs were ${JSON.stringify(logs)}`);
+});
+
+test("OUTPUT RESETS THE CLOCK, and the stream is what resets it", async () => {
+  // THE WIRING, ASSERTED DIRECTLY, because the obvious test of it is vacuous. `remember` stamps the
+  // START, so a freshly run worker is already recent and a test that merely checks "quiet is small
+  // after output" passes with the notification removed. Measured: deleting `handles.noteOutput` from
+  // the output callback left all 47 tests green, which is a rule protected by nothing.
+  //
+  // So the book is watched. If the stream stops telling it, a worker that came back after an hour of
+  // thinking is stopped by the very next pass -- the window would be "since it started", not "since
+  // it last spoke", and every long-running agent would eventually qualify.
+  const book = createHandleBook();
+  const noted = [];
+  const watched = { ...book, noteOutput(id, at) { noted.push(id); return book.noteOutput(id, at); } };
+  const processes = fakeProcesses();
+  await run({ handles: watched, processes });
+  noted.length = 0;
+
+  processes.calls.emit("back with an answer" + String.fromCharCode(10));
+  assert.deepEqual(noted, ["term-1"], "the output stream did not reset the terminal's quiet clock");
+
+  // AND THE CLOCK IT KEEPS IS REAL: a stamp in the future is not quiet, one in the past is.
+  const at = Date.now();
+  assert.ok(book.quietFor("term-1", at + LONG_SILENCE) >= ORPHAN_QUIET_MS);
+  book.noteOutput("term-1", at + LONG_SILENCE);
+  assert.ok(book.quietFor("term-1", at + LONG_SILENCE) < 1000);
+});
+
+test("a FRESH worker is never a candidate, even reported failed", async () => {
+  // A spawn that has not spoken yet looks exactly like a worker parked at its first prompt, which is
+  // the case this whole file exists to keep alive. `remember` stamps the start for that reason.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.calls.stops.length = 0;
+
+  await passWith(apiReporting("stopped"), { handles: book, processes });
+  assert.deepEqual(processes.calls.stops, [], "a worker that had only just started was stopped");
+});
+
+test("A DELETED TERMINAL IS STOPPED REGARDLESS OF HOW RECENTLY IT SPOKE", async () => {
+  // The veto is scoped to the END-STATUS rule and must not weaken the 404 one. They answer different
+  // questions: "the service thinks this ended" can be wrong about a live worker, but "the service
+  // does not have this terminal" cannot -- there is nothing left to address it with, whatever it is
+  // printing.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.calls.emit("still talking\n");
+  processes.calls.stops.length = 0;
+
+  await passWith(apiWithMissingTerminal(), { handles: book, processes });
+  assert.deepEqual(processes.calls.stops, ["proc-1"],
+    "a worker whose terminal no longer exists was kept because it was noisy");
 });
 
 test("it says WHY it stopped one on an end status too", async () => {
@@ -754,7 +840,7 @@ test("it says WHY it stopped one on an end status too", async () => {
   const processes = fakeProcesses();
   await run({ handles: book, processes });
   const logs = [];
-  await passWith(apiReporting("failed"), { handles: book, processes, log: (m) => logs.push(String(m)) });
+  await passWith(apiReporting("failed"), { handles: book, processes, log: (m) => logs.push(String(m)), quietFor: LONG_SILENCE });
   assert.ok(logs.some((l) => /the service reports it failed/.test(l)),
     `an unexplained kill is worse than a leak; logs were ${JSON.stringify(logs)}`);
 });
