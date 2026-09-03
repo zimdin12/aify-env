@@ -13,6 +13,7 @@
 //                            when one is already running WITH AGENTS, opens the view against it
 //   aify-env doctor          what this host can say about itself, and what each service said
 //   aify-env tui             the live view alone, against a daemon already running
+//   aify-env attach <agent>  give one process this whole terminal; Ctrl-] detaches, it keeps running
 //   aify-env --port 0        pick an ephemeral port (used by tests)
 //   aify-env --force         take the port even though the incumbent is running agents, ending them
 //   aify-env --version
@@ -135,6 +136,10 @@ if (args.includes("--version")) {
 const SUBCOMMANDS = {
   doctor: "./aify-env-doctor.mjs",
   tui: "./aify-env-tui.mjs",
+  // ATTACH IS A CLIENT, not a second view. `tui` shows every process at once and owns a dashboard;
+  // this hands one process the whole terminal, which is what an operator wants when a single lane is
+  // misbehaving -- and what makes a resident's PTY hostable here at all.
+  attach: "./aify-env-attach.mjs",
   credential: "./aify-env-credential.mjs",
 };
 const firstArg = args[0];
