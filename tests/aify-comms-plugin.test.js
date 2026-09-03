@@ -231,9 +231,69 @@ test("state is reported so silence can be explained", async () => {
   const { plugin } = makePlugin(api);
   const { host } = makeHost();
   const before = plugin.state();
+  // `claimer` joined on 2026-09-03: whether the service RECOGNISES this host as the claimer, which
+  // a 200 does not answer. It starts null -- unknown, never yes -- because "nothing has beaten yet"
+  // and "the service is too old to say" are the same state from here and neither is acceptance.
   assert.deepEqual(Object.keys(before).sort(),
-    ["claimedTotal", "lastClaim", "lastHeartbeat", "lastHeartbeatError"]);
+    ["claimedTotal", "claimer", "lastClaim", "lastHeartbeat", "lastHeartbeatError"]);
+  assert.equal(before.claimer, null);
   await plugin.start(host);
   assert.ok(plugin.state().lastHeartbeat, "a successful beat must be visible");
   await plugin.stop();
+});
+
+// A HEARTBEAT THE SERVICE KEPT vs ONE IT DISCARDED. Added 2026-09-03.
+//
+// `/environments/heartbeat` arbitrates supersession and may throw a beat away while answering
+// `ok: true` -- so a 200 says the request was well-formed, never that this host is the claimer.
+// Measured 2026-09-02: this plugin sent its start time in the wrong place, every beat landed on
+// that branch, and it kept beating for hours believing it was the claimer while `/spawn` refused
+// every request and both sides reported healthy. The service now says which it did; these pin that
+// the plugin READS it, because a field nobody reads changes nothing.
+
+/** A fake API whose heartbeat answers with whatever the service would have said. */
+function apiAnswering(answer) {
+  return {
+    beats: [],
+    async heartbeat(body) { this.beats.push(body); return answer; },
+    async claim() { return {}; },
+    async report() {},
+  };
+}
+
+test("a beat the service DISCARDED is reported, not counted as success", async () => {
+  const { host, logs } = makeHost();
+  const { plugin } = makePlugin(apiAnswering({
+    ok: true,
+    claimer: { accepted: false, bridgeId: "someone-else", reason: "an existing bridge started later" },
+  }));
+  await plugin.start(host);
+
+  const said = logs.join(String.fromCharCode(10));
+  assert.match(said, /did NOT accept this host as the claimer/);
+  assert.match(said, /someone-else/, "the message must name who DOES hold it");
+  assert.match(said, /Spawns here will be refused/, "and what it means for the operator");
+  assert.equal(plugin.state().claimer?.accepted, false);
+  assert.match(plugin.state().lastHeartbeatError, /not the claimer/,
+    "a discarded beat must not leave the error field reading clean");
+});
+
+test("an ACCEPTED beat says nothing, because a line every 30s trains an operator to skim", async () => {
+  const { host, logs } = makeHost();
+  const { plugin } = makePlugin(apiAnswering({ ok: true, claimer: { accepted: true, bridgeId: "me", reason: "" } }));
+  await plugin.start(host);
+  assert.equal(logs.filter((l) => /claimer/.test(String(l))).length, 0);
+  assert.equal(plugin.state().claimer?.accepted, true);
+  assert.equal(plugin.state().lastHeartbeatError, "");
+});
+
+test("a service too old to answer is UNKNOWN, never a refusal", async () => {
+  // Every host on a service one version back would otherwise log a fault it does not have, which is
+  // the fastest way to make a real warning unreadable.
+  const { host, logs } = makeHost();
+  const { plugin } = makePlugin(apiAnswering({ ok: true, environment: {} }));
+  await plugin.start(host);
+  assert.equal(logs.filter((l) => /claimer/.test(String(l))).length, 0);
+  assert.equal(plugin.state().claimer, null, "absent must read as unknown, not as accepted");
+  assert.equal(plugin.state().lastHeartbeatError, "");
 });
