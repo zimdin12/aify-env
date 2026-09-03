@@ -139,6 +139,41 @@ test("an UNKNOWN size is omitted, so the opener's own default still applies", as
   assert.ok(!("rows" in opened), "a zero height was forwarded, so the opener cannot default");
 });
 
+test("START HANDS BACK THE SIZE THE PTY ACTUALLY HAS, read off the pty", async () => {
+  // THE OTHER END OF THE SAME FIELD, and it was missing: the tests above prove what reaches the
+  // opener, which says nothing about what `start` hands back to its caller. Measured -- deleting
+  // `cols` from the returned handle left every one of them green. A field with no reader is the
+  // same defect as a field with no writer, seen from the other side.
+  //
+  // READ OFF THE PTY, not echoed from the request. A caller that asks for nothing gets the opener's
+  // own default, and the only way to learn that number without keeping a second copy of it is to
+  // ask the thing that owns it. Here the fake reports 157 while the request said 100, so an
+  // implementation that echoed the request would be caught.
+  const runner = new Runner({
+    openTerminal: () => ({
+      pid: 11, cols: 157, rows: 48,
+      onData: () => {}, onExit: () => {}, write: () => {}, kill: () => {}, resize: () => {},
+    }),
+  });
+  const handle = await runner.start({ ...echoSpec(), cols: 100, rows: 20 });
+  assert.equal(handle.cols, 157, "the handle carries the requested width, not the pty's own");
+  assert.equal(handle.rows, 48, "the handle carries the requested height, not the pty's own");
+});
+
+test("a PIPED process hands back no size, because it has no terminal", async () => {
+  // Zero is the honest answer here and a positive number would be a lie: there is no terminal to
+  // have a width. The caller relies on this to decide whether to report a size at all.
+  const runner = new Runner({ openTerminal: null });
+  const handle = await runner.start(echoSpec());
+  assert.equal(handle.cols, 0);
+  assert.equal(handle.rows, 0);
+  // DRIVEN TO EXIT, not merely awaited. `echoSpec` blocks on stdin, so awaiting `exited` without
+  // writing hangs until the runner's 60s timeout and the whole FILE is reported cancelled -- a
+  // failure that names the file rather than the test, which is how it hides.
+  runner.write(handle.id, "done\n");
+  await handle.exited;
+});
+
 test("the opener still receives cwd and env, which this change must not have displaced", async () => {
   // The spread that adds the size sits beside them, and a mistake there would be invisible to both
   // assertions above while breaking every spawn's environment.

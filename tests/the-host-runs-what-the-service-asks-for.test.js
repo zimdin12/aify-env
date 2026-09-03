@@ -59,7 +59,12 @@ function fakeApi({ controls = [], launch = LAUNCH, claimThrows = null, launchThr
   };
 }
 
-function fakeProcesses({ startThrows = null } = {}) {
+//: `size` MIRRORS WHAT THE REAL RUNNER RETURNS. `Runner.start` reports the size the pty actually
+//: opened at, read off the pty itself; a terminal-backed start therefore has a positive one and a
+//: piped start has zero. This fake returned NEITHER, which would have made the reporting of it
+//: untestable in the direction that matters -- the same "fake less capable than the thing it stands
+//: for" failure the subscribe() note below records, from the other side.
+function fakeProcesses({ startThrows = null, size = { cols: 120, rows: 30 } } = {}) {
   const calls = { starts: [], writes: [], resizes: [], stops: [], subscribed: [] };
   //: EVERY attached listener, mirroring `lib/runner.mjs`'s `stream.listeners` / `stream.exitListeners`.
   const listeners = new Set();
@@ -74,7 +79,7 @@ function fakeProcesses({ startThrows = null } = {}) {
     async start(spec) {
       calls.starts.push(spec);
       if (startThrows) throw new Error(startThrows);
-      return { id: "proc-1", pid: 4242 };
+      return { id: "proc-1", pid: 4242, cols: size?.cols ?? 0, rows: size?.rows ?? 0 };
     },
     subscribe(id, onOutput, onExit) {
       calls.subscribed.push(id);
@@ -143,6 +148,40 @@ test("a start control RUNS what the service asked for, with its argv", async () 
   assert.deepEqual(spec.args, ["--aify-agent", "sc-lead"]);
   assert.equal(spec.cwd, "C:/work");
   assert.equal(spec.id, "term-1");
+});
+
+test("THE SIZE THE PTY OPENED AT IS REPORTED BACK, beside the pid", async () => {
+  // The service asks for a start WITHOUT a size -- measured on a live host, every start control
+  // carries cols 0 -- so this report is the only way it can ever learn one. Without it a terminal
+  // has no recorded width until somebody opens its console and a resize round-trips, and until then
+  // the snapshot has to guess the width from drawn cells. A screen rendered at a width it was not
+  // drawn at re-wraps every line, which is the "scrambled console" complaint.
+  const { api } = await run();
+  const completed = api.reports.find((r) => r.status === "completed");
+  assert.ok(completed, "the start was never reported completed");
+  assert.equal(completed.cols, 120, "the pty's width never reached the service");
+  assert.equal(completed.rows, 30, "the pty's height never reached the service");
+});
+
+test("a process with NO terminal reports no size at all", async () => {
+  // A piped process has no terminal and therefore no size. Reporting a zero would be worse than
+  // reporting nothing: the reader's own fallback needs the field absent, and a zero-width terminal
+  // is not a thing that exists. Asserted as key ABSENCE, because `cols: 0` would satisfy any
+  // assertion written about the value.
+  const { api } = await run({ processes: fakeProcesses({ size: { cols: 0, rows: 0 } }) });
+  const completed = api.reports.find((r) => r.status === "completed");
+  assert.ok(completed, "the start was never reported completed");
+  assert.ok(!("cols" in completed), "a zero width was reported as if it were a size");
+  assert.ok(!("rows" in completed), "a zero height was reported as if it were a size");
+});
+
+test("reporting the size did not displace the handle or the pid beside it", async () => {
+  // The spread that adds the size sits next to them, and a mistake there would be invisible to both
+  // assertions above while breaking the two facts the service cannot work without.
+  const { api } = await run();
+  const completed = api.reports.find((r) => r.status === "completed");
+  assert.equal(completed.handle, "proc-1");
+  assert.equal(completed.processId, "4242");
 });
 
 test("THE SERVICE'S ENVIRONMENT WINS OVER AN INHERITED ONE", async () => {
