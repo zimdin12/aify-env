@@ -21,11 +21,41 @@ const ENTRY = path.join(ROOT, "bin", "aify-env.mjs");
 const ESC = String.fromCharCode(27);
 const CLEAR = `${ESC}[2J`;
 
-/** A port nothing else in this suite uses, so a parallel run cannot make this look broken. */
-const PIPE_PORT = 8894;
-const TTY_PORT = 8893;
-/** Its own port: TTY_PORT + 1 collided with PIPE_PORT, which would have masked a real failure. */
-const OPT_OUT_PORT = 8891;
+/**
+ * A port the OPERATING SYSTEM says is free, asked for fresh per test.
+ *
+ * THREE HARDCODED PORTS STOOD HERE (8894, 8893, 8891) and the comment on them guarded the wrong
+ * thing: "a port nothing else in this SUITE uses". The suite was never the risk. On 2026-09-03 an
+ * unrelated program of the operator's -- `sand_castle.exe` -- was listening on 127.0.0.1:8894, the
+ * daemon could not bind, it printed nothing, and the test failed with `no banner:` and an empty
+ * string. That reads exactly like a code regression, and it arrived in the middle of an unrelated
+ * change; moving the number by 100 made all three pass.
+ *
+ * A fixed port asserts something about the whole machine that a test has no way to know. Asking the
+ * OS closes the class rather than the instance -- the earlier "TTY_PORT + 1 collided with
+ * PIPE_PORT" note is the same bug one address-space smaller.
+ *
+ * THE WINDOW BETWEEN CLOSE AND RE-BIND IS REAL and is not worth removing: the alternative is
+ * handing the daemon a listening socket, which is not how it starts. A port the OS just called free
+ * is enormously more likely to be free than one chosen in 2026-08.
+ *
+ * OTHER FILES HERE STILL HARDCODE PORTS (8876-8887) and were deliberately left alone rather than
+ * swept: the supersession and takeover tests need TWO daemons to contend for ONE port, so a helper
+ * that hands each a different free one would quietly stop them testing anything. Converting those
+ * means giving the pair a single freshly-found port, which is a different change with its own
+ * proof. They carry the same exposure until somebody does it.
+ */
+async function freePort() {
+  const net = await import("node:net");
+  return await new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
 
 function tempRecord(label) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `aify-${label}-`));
@@ -56,8 +86,9 @@ async function collect(child, ms) {
 
 test("piped output keeps the plain banner and prints no escapes", async () => {
   const record = tempRecord("pipe");
-  const child = spawn(process.execPath, [ENTRY, "--port", String(PIPE_PORT)], {
-    env: sealedEnv(record, PIPE_PORT), stdio: ["ignore", "pipe", "pipe"],
+  const port = await freePort();
+  const child = spawn(process.execPath, [ENTRY, "--port", String(port)], {
+    env: sealedEnv(record, port), stdio: ["ignore", "pipe", "pipe"],
   });
   try {
     const out = await collect(child, 2500);
@@ -79,8 +110,9 @@ test("a terminal gets the view", async (t) => {
     return;
   }
   const record = tempRecord("tty");
-  const child = pty.spawn(process.execPath, [ENTRY, "--port", String(TTY_PORT)], {
-    name: "xterm-color", cols: 120, rows: 40, cwd: ROOT, env: sealedEnv(record, TTY_PORT),
+  const port = await freePort();
+  const child = pty.spawn(process.execPath, [ENTRY, "--port", String(port)], {
+    name: "xterm-color", cols: 120, rows: 40, cwd: ROOT, env: sealedEnv(record, port),
   });
   let out = "";
   child.onData((data) => { out += data; });
@@ -109,9 +141,10 @@ test("AIFY_NO_DASHBOARD keeps a terminal on the plain banner", async (t) => {
     return;
   }
   const record = tempRecord("nodash");
-  const child = pty.spawn(process.execPath, [ENTRY, "--port", String(OPT_OUT_PORT)], {
+  const port = await freePort();
+  const child = pty.spawn(process.execPath, [ENTRY, "--port", String(port)], {
     name: "xterm-color", cols: 120, rows: 40, cwd: ROOT,
-    env: { ...sealedEnv(record, OPT_OUT_PORT), AIFY_NO_DASHBOARD: "1" },
+    env: { ...sealedEnv(record, port), AIFY_NO_DASHBOARD: "1" },
   });
   let out = "";
   child.onData((data) => { out += data; });
