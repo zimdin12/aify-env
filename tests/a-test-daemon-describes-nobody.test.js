@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
+import { sealedDaemonEnv, NO_REGISTRY } from "./_sealed-daemon-env.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -58,9 +58,15 @@ test("the seal turns advertising OFF and names no real registry", () => {
   const sealed = sealedDaemonEnv();
   assert.equal(sealed.AIFY_ADVERTISE, "0", "the seal does not actually stop the advertiser");
   assert.equal(sealed.AIFY_NO_DASHBOARD, "1");
-  // "" rather than the operator's path: if a test re-enables advertising without saying where, it
-  // must find nothing rather than find them.
-  assert.equal(sealed.AIFY_SERVICE_REGISTRY, process.env.AIFY_SERVICE_REGISTRY ?? "");
+  // A PATH THAT DOES NOT EXIST, never "". This asserted the empty string and thereby FROZE the bug
+  // it was written to prevent: `bin/aify-env.mjs` reads
+  // `process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json")`, and `""` is
+  // falsy -- so the seal selected the operator's own registry. Measured 2026-09-03: test daemons
+  // read it, found the live aify-comms and claimed against production, and the operator's aify-env
+  // spent minutes answering "not the claimer". The intent in the old comment was right; the
+  // mechanism was its opposite.
+  assert.ok(sealed.AIFY_SERVICE_REGISTRY, "an empty seal IS the operator's registry, spelled differently");
+  assert.equal(sealed.AIFY_SERVICE_REGISTRY, process.env.AIFY_SERVICE_REGISTRY || NO_REGISTRY);
 });
 
 test("a test can still opt back in deliberately", () => {

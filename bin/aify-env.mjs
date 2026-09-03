@@ -9,7 +9,8 @@
 // on request; reachable from another machine it is a remote shell with a JSON interface. The host is
 // fixed rather than configurable for the same reason a guard that can be turned off is decoration.
 //
-//   aify-env                 run in the foreground on 127.0.0.1:8802, showing the live view
+//   aify-env                 run in the foreground on 127.0.0.1:8802, showing the live view;
+//                            when one is already running WITH AGENTS, opens the view against it
 //   aify-env doctor          what this host can say about itself, and what each service said
 //   aify-env tui             the live view alone, against a daemon already running
 //   aify-env --port 0        pick an ephemeral port (used by tests)
@@ -18,8 +19,17 @@
 //
 // STARTING WHEN ONE IS ALREADY RUNNING TAKES OVER, and the incumbent's agents die with it -- they
 // cannot be adopted, because a PTY-backed child is bound to a ConPTY its parent owns. So a takeover
-// REFUSES by default when the incumbent reports running processes, names them, and points at
-// `aify-env tui` for watching one without disturbing it. `--force` is how you say you meant it.
+// REFUSES by default when the incumbent reports running processes and names them. `--force` is how
+// you say you meant it.
+//
+// AND THEN IT SHOWS YOU THE ENVIRONMENT IT REFUSED TO REPLACE, in a terminal. The operator's reason
+// for starting a second one was *"i had to start because i needed to see what is going on"*, so
+// naming a second command to type is one step short of the answer. A pipe or a service manager keeps
+// the explanation and exit 69 unchanged; `AIFY_NO_DASHBOARD=1` opts a terminal out.
+//
+// An IDLE environment is still superseded by a bare run, deliberately: "restart aify-env to pick up
+// new code" has to keep working, and attaching whenever anything answered would make that a silent
+// no-op.
 //
 // ONE command on PATH, with subcommands. Three sibling binaries is what collided with aify-comms'
 // own `aify-doctor`; a collision is only the loud version of the problem.
@@ -46,7 +56,11 @@ import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-processes.mjs";
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
 import { killTree } from "../lib/kill-tree.mjs";
-import { looksLikeEnvironment, workLostToSupersession } from "../lib/environment-checks.mjs";
+import {
+  looksLikeEnvironment,
+  showViewInsteadOfRefusing,
+  workLostToSupersession,
+} from "../lib/environment-checks.mjs";
 import { defaultIsAlive } from "../lib/reaper.mjs";
 import { homedir, hostname } from "node:os";
 import { buildIdentity, sourceFiles } from "../lib/build-identity.mjs";
@@ -514,15 +528,53 @@ server.on("error", async (failure) => {
       const named = atRisk
         .map((entry) => `    ${entry.label || entry.service || "(unnamed)"}  pid ${entry.pid ?? "?"}`)
         .join(chr10);
+      // ONE WRITE, THEN THE BRANCH. A second `process.stderr.write` before `process.exit` is
+      // DISCARDED when stderr is a pipe -- this file already documents that hazard for stdout, and
+      // the first version of this change lost its closing line to it. The existing refusal test
+      // pipes stderr, which is why it caught it and a terminal never would have.
+      const wantsView = showViewInsteadOfRefusing({
+        isTty: process.stdout.isTTY === true,
+        noDashboard: process.env.AIFY_NO_DASHBOARD,
+      });
       process.stderr.write(
         `aify-env: the environment on ${HOST}:${port} (pid ${holder.pid}) is running ${atRisk.length} `
         + `process${atRisk.length === 1 ? "" : "es"}. Taking over would END ${atRisk.length === 1 ? "it" : "them"}:${chr10}`
         + `${named}${chr10}`
-        + `  Nothing has been touched. To watch this environment without disturbing it, run `
-        + `\`aify-env tui\`.${chr10}`
-        + `  To take over anyway and end the work above, re-run with --force.${chr10}`,
+        + `  Nothing has been touched.${chr10}`
+        + `  To take over anyway and end the work above, re-run with --force.${chr10}`
+        // THE POINTER IS FOR EXACTLY ONE READER. A terminal is about to be SHOWN this environment
+        // and needs no instructions; a log, a script or a service manager gets no view, so the
+        // command that looks without disturbing has to be named for them or the refusal is a dead
+        // end.
+        + (wantsView
+          ? `  Showing it instead. Press q to leave; nothing here writes.${chr10}`
+          : `  To watch this environment without disturbing it, run \`aify-env tui\`.${chr10}`),
       );
-      process.exit(69);
+
+      // A4: OPEN THE VIEW INSTEAD OF DESCRIBING IT. The operator asked for this on 2026-08-24 --
+      // "bare `aify-env` opens the tui" -- and their reason for starting one in the first place was
+      // *"i had to start because i needed to see what is going on"*. Refusing and then naming a
+      // second command they must type is one step short of the thing they wanted, and the step is
+      // taken at the exact moment they are already frustrated.
+      //
+      // ONLY WHERE A VIEW BELONGS. A pipe, a redirect or a service manager keeps today's behaviour
+      // exactly: the explanation above, exit 69. Escapes in a log are noise, and anything reading
+      // this exit status must keep reading the same one. `AIFY_NO_DASHBOARD=1` opts out for a
+      // terminal that wants the old shape.
+      //
+      // THE CONDITION IS UNCHANGED, and that is deliberate. This fires only where a takeover was
+      // ALREADY refused -- an incumbent with running agents. An IDLE environment is still superseded
+      // by a bare run, so "restart aify-env to pick up new code" keeps working exactly as it does
+      // today. Attaching whenever anything answered would have turned that restart into a silent
+      // no-op, which is the failure shape this project has spent a night removing.
+      if (!wantsView) process.exit(69);
+      process.argv = [
+        process.argv[0],
+        fileURLToPath(new URL("./aify-env-tui.mjs", import.meta.url)),
+      ];
+      await import("./aify-env-tui.mjs");
+      // The view owns the rest of this process's life: it exits on `q`. Reached only if it returns.
+      process.exit(0);
     }
     superseding = true;
     process.stderr.write(
