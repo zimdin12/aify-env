@@ -61,8 +61,25 @@ test("a plugin that has NOT been told yet is UNANSWERED, never a quiet pass", ()
 test("a daemon too old to report plugins is UNANSWERED, not broken", () => {
   // It may be claiming perfectly well and simply cannot say. Calling that a failure would fire on
   // every host mid-upgrade and train the reader to ignore this row.
-  assert.equal(claimingCheck({ answered: true, plugins: undefined }).state, STATE.UNANSWERED);
-  assert.equal(claimingCheck({ answered: true, plugins: "yes" }).state, STATE.UNANSWERED);
+  for (const plugins of [undefined, "yes", null]) {
+    assert.equal(claimingCheck({ answered: true, plugins }).state, STATE.UNANSWERED);
+  }
+});
+
+test("RUNNING-BUT-SILENT and NOTHING-RUNNING do not print the same sentence", () => {
+  // Found in this doctor's own output while diagnosing the very problem it exists to report: it
+  // said "no aify-env answered" one line under a row saying an environment was running at
+  // 127.0.0.1:8802. Both arrived as `null` and the message picked the wrong one. Two rows of one
+  // report contradicting each other is worse than either row alone, and the remedies differ --
+  // restart it, versus start one.
+  const nothingRunning = claimingCheck({ answered: false });
+  const runningButOld = claimingCheck({ answered: true, plugins: null });
+  assert.equal(nothingRunning.state, STATE.UNANSWERED);
+  assert.equal(runningButOld.state, STATE.UNANSWERED);
+  assert.notEqual(nothingRunning.detail, runningButOld.detail);
+  assert.match(nothingRunning.detail, /no aify-env answered/);
+  assert.match(runningButOld.detail, /running but does not report/);
+  assert.match(runningButOld.detail, /restart it/, "and it must name the remedy that differs");
 });
 
 test("no aify-env answering is UNANSWERED, and says so", () => {
