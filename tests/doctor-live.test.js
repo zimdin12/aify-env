@@ -18,6 +18,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON = path.join(HERE, "..", "bin", "aify-env.mjs");
 const DOCTOR = path.join(HERE, "..", "bin", "aify-env-doctor.mjs");
@@ -27,9 +29,20 @@ function startDaemon() {
     // SEALED, like daemon.test.js: the daemon records what it owns and REAPS from that record at
     // startup. Pointed at the real ~/.aify path, a test could kill a process it never started.
     const record = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aify-env-rec-")), "owned.json");
+    // AND SEALED AGAINST THE REGISTRY, which this spawn was NOT until 2026-09-03 -- it spread
+    // `process.env` and overrode only the record. So the daemon resolved the operator's real
+    // `~/.aify/services.json`, found the live aify-comms, loaded its plugin and CLAIMED A SPAWN.
+    //
+    // THAT IS THE CLAIM LEAK, and it explains every symptom the hunt for it recorded: transient,
+    // because this daemon is killed seconds later and the service self-heals in about two minutes;
+    // unfindable by bisect, because it is a race between the claim pass firing and `stopDaemon`;
+    // and it only ever showed up on a FULL suite run, because that is when this file runs at all.
+    // Sealing the process record but not the registry is the exact shape already written down as
+    // "sealing an env var is not sealing an INPUT" -- a child sealed of every carrier still found
+    // the fleet through a FILE.
     const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, AIFY_ENV_PROCESS_RECORD: record },
+      env: sealedDaemonEnv({ AIFY_ENV_PROCESS_RECORD: record }),
     });
     let output = "";
     const timer = setTimeout(() => reject(new Error(`daemon did not start:\n${output}`)), 20_000);

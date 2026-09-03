@@ -17,6 +17,8 @@ import { test } from "node:test";
 import { shortHandle } from "../lib/tui.mjs";
 import { fileURLToPath } from "node:url";
 
+import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON = path.join(HERE, "..", "bin", "aify-env.mjs");
 const TUI = path.join(HERE, "..", "bin", "aify-env-tui.mjs");
@@ -28,7 +30,11 @@ function startDaemon() {
     const record = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aify-env-rec-")), "owned.json");
     const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, AIFY_ENV_PROCESS_RECORD: record },
+      // SEALED AGAINST THE REGISTRY TOO. This block was copied from doctor-live.test.js and carried
+      // its omission with it: sealing the process record while spreading `process.env` leaves the
+      // daemon resolving the operator's real `~/.aify/services.json`, where it finds the live
+      // aify-comms and claims a spawn. Two files, one leak, found by the gate rather than by hand.
+      env: sealedDaemonEnv({ AIFY_ENV_PROCESS_RECORD: record }),
     });
     let output = "";
     const timer = setTimeout(() => reject(new Error(`daemon did not start:\n${output}`)), 20_000);
