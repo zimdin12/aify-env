@@ -126,6 +126,17 @@ test("cwd and env are passed only when they are the right shape", () => {
   assert.deepEqual(withGood.spec.env, { A: "1" });
 });
 
+test("UNDEFINED KEEPS MEANING INHERIT, even though a toolchain may now be added", () => {
+  // The interpreter's coreutils directories are prepended to the child's PATH (see
+  // shell-toolchain.mjs, added after a wrapper died on `mktemp: command not found`). The obvious
+  // implementation builds `{...process.env}` every time and looks equivalent — it is not. It turns
+  // an INHERITED environment into a snapshot taken at spec time, on every platform, including the
+  // ones where the fix adds nothing at all. The test above caught exactly that, which is why this
+  // one now states the rule instead of leaving it to be rediscovered.
+  const inherited = buildStartSpec({ ...ASK }, { ...fs(GOOD_LAUNCHER), platform: "linux" });
+  assert.equal(inherited.spec.env, undefined, "nothing to add must leave the environment inherited");
+});
+
 test("the label is the caller's own name for the work, and nothing reads meaning into it", () => {
   const { spec } = buildStartSpec({ ...ASK, label: "sc-lead" }, fs(GOOD_LAUNCHER));
   assert.equal(spec.label, "sc-lead");
