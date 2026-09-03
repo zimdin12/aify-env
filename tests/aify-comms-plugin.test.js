@@ -271,6 +271,9 @@ test("state is reported so silence can be explained", async () => {
 function apiAnswering(answer) {
   return {
     beats: [],
+    //: The real client exposes this; a double that omits it is how a diagnostic field came to break
+    //: the beat it was describing.
+    identity: { bridgeId: "our-own-id" },
     async heartbeat(body) { this.beats.push(body); return answer; },
     async claim() { return {}; },
     async report() {},
@@ -290,6 +293,12 @@ test("a beat the service DISCARDED is reported, not counted as success", async (
   assert.match(said, /someone-else/, "the message must name who DOES hold it");
   assert.match(said, /Spawns here will be refused/, "and what it means for the operator");
   assert.equal(plugin.state().claimer?.accepted, false);
+  // BOTH IDS, NAMED. `claimer.bridgeId` is the HOLDER's, which is the useful value and is also easy
+  // to read as our own -- it cost ten minutes on 2026-09-03, staring at a `/health` whose id matched
+  // the row and concluding arbitration was refusing us over ourselves.
+  assert.equal(plugin.state().claimer?.holderBridgeId, "someone-else");
+  assert.equal(plugin.state().claimer?.ourBridgeId, "our-own-id",
+    "our own id must be visible beside the holder's");
   assert.match(plugin.state().lastHeartbeatError, /not the claimer/,
     "a discarded beat must not leave the error field reading clean");
 });

@@ -413,3 +413,179 @@ test("the book answers EMPTY for an unknown terminal, never the terminal id", as
   book.remember("term-2", "");
   assert.equal(book.handleFor("term-2"), "", "a blank handle is not worth remembering");
 });
+
+// ── quiet is not dead ───────────────────────────────────────────────────────────────────────────
+//
+// MEASURED 2026-09-03. A worker started, its console attached, it carried the first-run prompt to
+// the dashboard — and then went quiet, because it was WAITING at that prompt. Ninety seconds later
+// the service's reconciler declared the terminal a dead ghost, and `comms_console_input` refused to
+// send the Enter that would have freed it, because the terminal was "not live". The process was
+// alive the whole time.
+//
+// The reconciler was not wrong. It reaps only when ALL of its signals are absent — no claimer
+// sidecar, no wrapper child, no output in 90 seconds — and for a worker parked at its first prompt
+// all three are absent. Nothing had told it the process was there, and this host is the only thing
+// that knows.
+
+test("EVERY PASS REPORTS THE TERMINALS THIS HOST IS RUNNING", async () => {
+  const book = createHandleBook();
+  const api = fakeApi({ controls: [] });
+  await run({ handles: book });                 // start one, so the host holds it
+  api.outputs.length = 0;
+
+  await runTerminalControlPass({
+    api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    handles: book,
+  });
+  assert.deepEqual(api.outputs.map((o) => o.terminalId), ["term-1"],
+    "a quiet worker is reaped in 90s unless this host says it is alive");
+});
+
+test("the liveness frame is EMPTY and carries NO status", async () => {
+  // Empty because a non-empty chunk appends a console event and feeds the screen — a heartbeat must
+  // not write into the operator's console. No status, because sending one would let this frame
+  // REOPEN a terminal an operator or a reconciler had deliberately closed.
+  const book = createHandleBook();
+  const api = fakeApi({ controls: [] });
+  await run({ handles: book });
+  api.outputs.length = 0;
+
+  await runTerminalControlPass({
+    api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    handles: book,
+  });
+  assert.equal(api.outputs[0].output, "");
+  assert.equal("status" in api.outputs[0], false, "a liveness frame must not transition status");
+});
+
+test("AN EXITED TERMINAL IS NOT REPORTED ALIVE", async () => {
+  // The failure that would be worse than the one being fixed: a host insisting a dead worker lives
+  // keeps a ghost console open for ever, and nothing else in the system can contradict it.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.calls.exit(0, null);                // the worker ends
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const api = fakeApi({ controls: [] });
+  await runTerminalControlPass({
+    api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    handles: book,
+  });
+  assert.deepEqual(api.outputs, [], "a terminal that exited was still reported as running");
+});
+
+test("a failed liveness report does not stop the pass", async () => {
+  // It would trade a reaped console for a host that stops running anything at all.
+  const book = createHandleBook();
+  await run({ handles: book });
+  const logs = [];
+  const api = fakeApi({ controls: [] });
+  api.terminalOutput = async () => { throw new Error("service down"); };
+  const result = await runTerminalControlPass({
+    api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    handles: book, log: (m) => logs.push(String(m)),
+  });
+  assert.equal(result.outcome, "idle");
+  assert.ok(logs.some((l) => /could not report terminal .* alive/.test(l)));
+});
+
+// ── one agent, one worker ───────────────────────────────────────────────────────────────────────
+//
+// MEASURED TWICE on 2026-09-03: two `sc-lead`s, two `sc-coder`s, and the operator asked where the
+// uniqueness check was. There wasn't one. The service asked for the second and was RIGHT to — it
+// believed the first was dead, and replacing a dead worker is what it should do. What was missing is
+// that this host already held a live process for that agent and started another anyway.
+//
+// Two claude instances in one working directory is also its own failure, independent of the count.
+
+test("STARTING A SECOND WORKER FOR AN AGENT REPLACES THE FIRST", async () => {
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });                       // first worker for sc-lead
+  processes.calls.stops.length = 0;
+
+  // A second start control for the SAME agent, on a new terminal id — exactly what the service
+  // issues after it concludes the first is a ghost.
+  const api = fakeApi({ launch: { ...LAUNCH, terminalId: "term-2" } });
+  const second = await runOneControl({
+    control: control({ id: "ctl-2", terminalId: "term-2" }),
+    api, processes, handles: book, cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    baseEnv: {},
+  });
+
+  assert.equal(second.outcome, "started");
+  assert.deepEqual(processes.calls.stops, ["proc-1"], "the predecessor was left running");
+  assert.deepEqual(book.otherTerminalsFor("sc-lead", "term-2"), [],
+    "the replaced terminal is still on the books, so it will be reported alive for ever");
+});
+
+test("REPLACE, NOT REFUSE — a restart must still work", async () => {
+  // Refusing would satisfy "never two" and block the case the service is usually right about.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  const api = fakeApi({ launch: { ...LAUNCH, terminalId: "term-2" } });
+  const second = await runOneControl({
+    control: control({ id: "ctl-2", terminalId: "term-2" }),
+    api, processes, handles: book, cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    baseEnv: {},
+  });
+  assert.equal(second.outcome, "started", "a legitimate restart was refused");
+  assert.equal(processes.calls.starts.length, 2);
+});
+
+test("a DIFFERENT agent's worker is never touched", async () => {
+  // The guard must be per agent. Stopping somebody else's worker because a new one started is a
+  // far worse failure than the duplication it is preventing.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });                       // sc-lead on term-1
+  processes.calls.stops.length = 0;
+
+  const api = fakeApi({ launch: { ...LAUNCH, terminalId: "term-2", agentId: "sc-coder" } });
+  await runOneControl({
+    control: control({ id: "ctl-2", terminalId: "term-2" }),
+    api, processes, handles: book, cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    baseEnv: {},
+  });
+  assert.deepEqual(processes.calls.stops, [], "another agent's worker was stopped");
+  assert.equal(book.otherTerminalsFor("sc-lead").length, 1, "sc-lead's worker must survive");
+});
+
+test("a failure to stop the predecessor does not block the replacement", async () => {
+  // Leaving the caller with neither worker is worse than leaving one behind, which the reaper and
+  // the doctor's managed-orphans row can both see.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.stop = async () => { throw new Error("already gone"); };
+  const logs = [];
+  const api = fakeApi({ launch: { ...LAUNCH, terminalId: "term-2" } });
+  const second = await runOneControl({
+    control: control({ id: "ctl-2", terminalId: "term-2" }),
+    api, processes, handles: book, cwdRoots: ROOTS, windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
+    baseEnv: {}, log: (m) => logs.push(String(m)),
+  });
+  assert.equal(second.outcome, "started");
+  assert.ok(logs.some((l) => /could not stop the previous worker/.test(l)));
+});
+
+test("the same terminal restarting is NOT treated as a duplicate of itself", async () => {
+  // The control carries the same terminal id when a terminal is simply re-started, and stopping
+  // "the other worker for this agent" must not mean stopping the one being replaced in place.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.calls.stops.length = 0;
+  await run({ handles: book, processes });                       // same terminal id, same agent
+  assert.deepEqual(processes.calls.stops, []);
+});
