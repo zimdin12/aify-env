@@ -83,23 +83,82 @@ test("the build is short enough to compare by eye and long enough to mean someth
   assert.match(id, /^[0-9a-f]+$/, "a build somebody reads off a screen must be plain hex");
 });
 
-test("the file list is DERIVED from the directory, so a new module counts", () => {
-  // A hardcoded list would be a second place to remember. A module added to lib/ and forgotten there
-  // would be LOADED by the daemon and absent from its build, so changing it would report no change --
-  // this module's own failure mode, one directory down.
-  const listed = sourceFiles("/pkg", (dir) => {
-    assert.equal(dir, "/pkg/lib");
-    return ["a.mjs", "b.js", "notes.md", "c.mjs"];
-  }, (...parts) => parts.join("/"));
-  assert.deepEqual(listed, ["/pkg/bin/aify-env.mjs", "/pkg/lib/a.mjs", "/pkg/lib/b.js", "/pkg/lib/c.mjs"]);
+/** A dirent stand-in, so a fake tree can say what is a directory without a second stat. */
+const file = (name) => ({ name, isDirectory: () => false });
+const dir = (name) => ({ name, isDirectory: () => true });
+
+test("the file list is DERIVED from the tree, so a new module counts", () => {
+  // A hardcoded list would be a second place to remember. A module added and forgotten there would
+  // be LOADED by the daemon and absent from its build, so changing it would report no change.
+  const tree = {
+    "/pkg/lib": [file("a.mjs"), file("b.js"), file("notes.md"), file("c.mjs")],
+    "/pkg/bin": [file("aify-env.mjs")],
+  };
+  const listed = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
+  assert.deepEqual(listed.sort(), [
+    "/pkg/bin/aify-env.mjs", "/pkg/lib/a.mjs", "/pkg/lib/b.js", "/pkg/lib/c.mjs",
+  ]);
 });
 
-test("the entry point counts as source", () => {
-  // It holds the wiring, the routes' dependency bag and the signal handlers. A change there is a
-  // change to the program even when every module under lib/ is untouched -- and the shutdown fix that
-  // started all this was one import away from being exactly that.
-  const listed = sourceFiles("/pkg", () => [], (...parts) => parts.join("/"));
+test("IT RECURSES, because the failure it warns about happened one directory down", () => {
+  // MEASURED 2026-09-03. This listed `lib/*` non-recursively, so the whole of `lib/plugins/` -- the
+  // aify-comms plugin, its API client, its claim pass and its terminal-control pass -- was invisible
+  // to the build id. FOUR commits changed the running program and the number did not move once.
+  //
+  // The operator restarts and compares that number to decide whether the restart took, so the one
+  // instrument on the critical path was answering about a subset of the program. This module's own
+  // docstring predicted it in those words, which is why the rule is now "walk", not "walk and also
+  // remember these".
+  const tree = {
+    "/pkg/lib": [file("a.mjs"), dir("plugins")],
+    "/pkg/lib/plugins": [dir("aify-comms"), file("index.mjs")],
+    "/pkg/lib/plugins/aify-comms": [file("api.mjs"), file("claim.mjs")],
+    "/pkg/bin": [file("aify-env.mjs")],
+  };
+  const listed = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
+  assert.ok(listed.includes("/pkg/lib/plugins/aify-comms/api.mjs"), "a plugin module is part of the program");
+  assert.ok(listed.includes("/pkg/lib/plugins/index.mjs"));
+  assert.equal(listed.length, 5);
+});
+
+test("EVERY bin entry point counts, not just the daemon", () => {
+  // The doctor, the TUI and the credential command are each code an operator runs, and each is a
+  // thing they would want to know the version of. Naming one of them was the same class of omission
+  // as not recursing: a rule somebody has to remember when they add a file.
+  const tree = {
+    "/pkg/lib": [],
+    "/pkg/bin": [file("aify-env.mjs"), file("aify-env-doctor.mjs"), file("aify-env-tui.mjs")],
+  };
+  const listed = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
+  assert.equal(listed.length, 3);
+});
+
+test("node_modules is NOT part of this program's identity", () => {
+  // A dependency tree is thousands of files and changes on an unrelated schedule; hashing it would
+  // make the build id move for reasons that have nothing to do with the code being restarted.
+  const tree = {
+    "/pkg/lib": [file("a.mjs"), dir("node_modules")],
+    "/pkg/lib/node_modules": [file("huge.js")],
+    "/pkg/bin": [],
+  };
+  const listed = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
+  assert.deepEqual(listed, ["/pkg/lib/a.mjs"]);
+});
+
+test("a directory that cannot be read contributes nothing rather than throwing", () => {
+  // A build id that cannot be computed would take the daemon down at BOOT, which is a far worse
+  // failure than one computed over slightly less than everything.
+  const listed = sourceFiles("/pkg", (d) => {
+    if (d === "/pkg/lib") throw new Error("EACCES");
+    return [file("aify-env.mjs")];
+  }, (...parts) => parts.join("/"));
   assert.deepEqual(listed, ["/pkg/bin/aify-env.mjs"]);
+});
+
+test("an empty tree yields an empty list rather than an invented entry", () => {
+  // It used to return `bin/aify-env.mjs` unconditionally, whether or not it was there. A path that
+  // is hashed without being read is a build id that describes a file that may not exist.
+  assert.deepEqual(sourceFiles("/pkg", () => [], (...parts) => parts.join("/")), []);
 });
 
 test("/health reports the build, so the banner describes the PROCESS and not the disk", async () => {

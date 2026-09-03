@@ -90,7 +90,9 @@ const VERSION = readFileSync(join(ROOT, "VERSION"), "utf8").trim();
 // Read at BOOT, deliberately. A build computed on demand would report whatever is on disk NOW,
 // which is the one answer that cannot tell you whether this process needs restarting.
 const BUILD = buildIdentity(
-  sourceFiles(ROOT, (dir) => readdirSync(dir), join),
+  // DIRENTS, so the walk can tell a directory from a file. Names alone made it non-recursive,
+  // which left the whole of `lib/plugins/` out of the build id for four commits.
+  sourceFiles(ROOT, (dir) => readdirSync(dir, { withFileTypes: true }), join),
   (path) => readFileSync(path, "utf8"),
   // Hashed under its path RELATIVE to the package, so the same code installed in two places
   // reports the same build. An absolute path would make every install look different.
