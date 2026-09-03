@@ -243,9 +243,16 @@ test("state is reported so silence can be explained", async () => {
   // `claimer` joined on 2026-09-03: whether the service RECOGNISES this host as the claimer, which
   // a 200 does not answer. It starts null -- unknown, never yes -- because "nothing has beaten yet"
   // and "the service is too old to say" are the same state from here and neither is acceptance.
-  assert.deepEqual(Object.keys(before).sort(),
-    ["claimedTotal", "claimer", "lastClaim", "lastHeartbeat", "lastHeartbeatError"]);
+  // `lastControl` and `controlsHandled` joined on 2026-09-03 with the loop that RUNS things. They
+  // are separate from the claim's counters on purpose: a host whose claim loop is healthy and whose
+  // control loop has died claims agents it can never start, and one pair of numbers would report
+  // that as working. It is the exact state six spawns were in — claimed, never run.
+  assert.deepEqual(Object.keys(before).sort(), [
+    "claimedTotal", "claimer", "controlsHandled", "lastClaim", "lastControl",
+    "lastHeartbeat", "lastHeartbeatError",
+  ]);
   assert.equal(before.claimer, null);
+  assert.equal(before.controlsHandled, 0);
   await plugin.start(host);
   assert.ok(plugin.state().lastHeartbeat, "a successful beat must be visible");
   await plugin.stop();
