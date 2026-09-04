@@ -22,6 +22,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
+import { HOST_ONLY_ENV, forwardableEnv, startRequestFrom } from "../bin/aify-env-run.mjs";
+
 const RUN = fileURLToPath(new URL("../bin/aify-env-run.mjs", import.meta.url));
 const DISPATCHER = fileURLToPath(new URL("../bin/aify-env.mjs", import.meta.url));
 
@@ -84,4 +86,69 @@ test("THE SAME REFUSAL THROUGH THE DISPATCHER, which is the path a wrapper takes
   const out = runIt(DISPATCHER, ["run"]);
   assert.equal(out.status, 69, "the dispatcher does not relay the refusal status");
   assert.match(`${out.stdout}${out.stderr}`, /no environment answered/);
+});
+
+// ── the caller's environment reaches the host ────────────────────────────────────────────────────
+//
+// EXTERNAL REVIEW, Round 8 H5. `startRequestFrom` built the POST with no `env`, and
+// `lib/start-spec.mjs` reads `undefined` as "inherit" -- so a `--shared` session inherited the
+// DAEMON's environment rather than the shell that asked for it, and ran ANONYMOUS. Worse than the
+// loss: a daemon started from a shell exporting an agent id handed THAT id to every id-less shared
+// session, which is the duplicate-handle shape nobody could explain.
+
+test("the start request CARRIES the caller's environment", () => {
+  const { body } = startRequestFrom({
+    service: "aify-comms",
+    launcher: "/usr/bin/claude-aify",
+    env: { AIFY_AGENT_ID: "sc-lead", AIFY_COMMS_URL: "http://127.0.0.1:8800" },
+  });
+  assert.equal(body.env?.AIFY_AGENT_ID, "sc-lead",
+    "the session's identity did not travel, so the host starts it as nobody");
+  assert.equal(body.env?.AIFY_COMMS_URL, "http://127.0.0.1:8800");
+});
+
+test("it forwards names it has never heard of, because it knows no service", () => {
+  // The file's own rule -- "IT KNOWS NO SERVICE AND NO RUNTIME" -- so this cannot be a keep-list.
+  // aify-dashboard's launchers must work unchanged, and a list of what to KEEP would have to name
+  // their variables.
+  const { body } = startRequestFrom({
+    service: "some-future-service",
+    launcher: "/usr/bin/whatever",
+    env: { SOME_FUTURE_SERVICE_TOKEN: "abc", HARNESS_SESSION: "s1" },
+  });
+  assert.equal(body.env?.SOME_FUTURE_SERVICE_TOKEN, "abc");
+  assert.equal(body.env?.HARNESS_SESSION, "s1");
+});
+
+test("it does NOT forward what addresses the daemon itself", () => {
+  // A caller's shell must not be able to point the host at another endpoint, registry or process
+  // record. Those describe the HOST, not the process being started, and the daemon is already
+  // running with the ones it chose.
+  const env = forwardableEnv({
+    AIFY_AGENT_ID: "sc-lead",
+    AIFY_ENV_ENDPOINT: "http://evil:9999",
+    AIFY_SERVICE_REGISTRY: "/tmp/other.json",
+    AIFY_ENV_PROCESS_RECORD: "/tmp/other-record.json",
+  });
+  assert.equal(env.AIFY_AGENT_ID, "sc-lead", "the identity must still travel");
+  for (const name of ["AIFY_ENV_ENDPOINT", "AIFY_SERVICE_REGISTRY", "AIFY_ENV_PROCESS_RECORD"]) {
+    assert.equal(env[name], undefined, `${name} addresses the daemon and must not be forwarded`);
+  }
+});
+
+test("EVERY host-only name is actually dropped, derived from the list rather than sampled", () => {
+  // A three-name spot check passes while a fourth name sits in the list unenforced. The population
+  // is the list itself.
+  const source = Object.fromEntries(HOST_ONLY_ENV.map((name) => [name, "leaked"]));
+  source.KEEP_ME = "yes";
+  const env = forwardableEnv(source);
+  assert.deepEqual(Object.keys(env), ["KEEP_ME"],
+    `these host-only names were forwarded: ${Object.keys(env).filter((k) => k !== "KEEP_ME")}`);
+});
+
+test("an EMPTY environment is omitted, because {} would mean something else entirely", () => {
+  // `undefined` means inherit; `{}` means run with NO environment. A caller with nothing to say must
+  // send the first, or a shared session starts with an empty environment and fails obscurely.
+  const { body } = startRequestFrom({ service: "s", launcher: "/l", env: {} });
+  assert.equal("env" in body, false, "an empty env was sent as `{}`, which reads as 'no environment'");
 });

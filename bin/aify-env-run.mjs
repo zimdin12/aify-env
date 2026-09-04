@@ -56,7 +56,38 @@ export function parseRunArgs(argv = []) {
  * time, so an empty one means the launcher was rendered wrong -- and without this the failure
  * arrives as a 400 from the host, which reads like the host is the broken thing.
  */
-export function startRequestFrom({ service, launcher, label = "", cwd = "", args = [] } = {}) {
+/**
+ * Variables that address or configure THIS DAEMON, and are therefore never forwarded to it.
+ *
+ * The test for membership is one question, not a judgement per name: does this variable describe the
+ * HOST, or the process being started? A caller's shell must not be able to point the daemon at
+ * another endpoint, another service registry, or another process record -- the daemon is already
+ * running with the ones it chose, and a forwarded copy would either be ignored or, worse, obeyed.
+ *
+ * Everything else travels, including variables this file has never heard of. That is deliberate: it
+ * knows no service and no runtime, and a list of what to KEEP would have to name them.
+ */
+export const HOST_ONLY_ENV = Object.freeze([
+  "AIFY_ENV_ENDPOINT",
+  "AIFY_ENV_PROCESS_RECORD",
+  "AIFY_SERVICE_REGISTRY",
+  "AIFY_ADVERTISE",
+  "AIFY_NO_DASHBOARD",
+  "AIFY_TUI_REFRESH_MS",
+]);
+
+/** The caller's environment as the host should reproduce it: everything except the host's own. */
+export function forwardableEnv(source = process.env) {
+  const out = {};
+  for (const [key, value] of Object.entries(source || {})) {
+    if (HOST_ONLY_ENV.includes(key)) continue;
+    if (value === undefined) continue;
+    out[key] = String(value);
+  }
+  return out;
+}
+
+export function startRequestFrom({ service, launcher, label = "", cwd = "", args = [], env = null } = {}) {
   const owner = String(service ?? "").trim();
   const path = String(launcher ?? "").trim();
   if (!path) return { error: "run needs --launcher, the program to start" };
@@ -67,6 +98,23 @@ export function startRequestFrom({ service, launcher, label = "", cwd = "", args
     args: (Array.isArray(args) ? args : []).map(String),
     cwd: String(cwd || ""),
   };
+  // THE CALLER'S ENVIRONMENT TRAVELS, since 2026-09-04 (external review, Round 8 H5).
+  //
+  // This body carried no `env`, and `lib/start-spec.mjs` reads `undefined` as "inherit" -- so a
+  // shared session inherited the DAEMON's environment instead of the shell that asked for it. Every
+  // fact that identifies the session was lost: the agent id, the endpoint, the credential, the
+  // harness carriers. A `--shared` session therefore ran ANONYMOUS, which is the launch-identity gap
+  // this project already keeps a doctor row for.
+  //
+  // AND THE LOSS WAS NOT THE WORST OF IT. A daemon started from a shell that exports an agent id
+  // handed THAT identity to every id-less shared session, so two sessions claimed one id -- the
+  // duplicate-handle shape `session-handles` reports and nobody could explain.
+  //
+  // Omitted when empty, so "inherit" stays expressible and a caller with nothing to say does not
+  // send `{}` -- which start-spec would read as "run with an EMPTY environment", a different and
+  // much worse instruction.
+  const forwarded = env && typeof env === "object" && !Array.isArray(env) ? env : null;
+  if (forwarded && Object.keys(forwarded).length > 0) body.env = forwarded;
   // OMITTED RATHER THAN EMPTY: the host renders this in its AGENT column, and a blank string there
   // reads as a process nobody owns rather than one not yet named.
   const named = String(label ?? "").trim();
@@ -77,7 +125,12 @@ export function startRequestFrom({ service, launcher, label = "", cwd = "", args
 // Reached only when run as a command; importing this for its parsers must not start anything.
 if (process.argv[1] && process.argv[1].endsWith("aify-env-run.mjs")) {
   const parsed = parseRunArgs(process.argv.slice(2));
-  const built = startRequestFrom({ ...parsed, cwd: parsed.cwd || process.cwd() });
+  const built = startRequestFrom({
+    ...parsed,
+    cwd: parsed.cwd || process.cwd(),
+    // The shell that ran this command, minus what belongs to the daemon. See `forwardableEnv`.
+    env: forwardableEnv(process.env),
+  });
   if (built.error) {
     say(`aify-env run: ${built.error}`);
     process.exit(64);

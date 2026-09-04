@@ -76,6 +76,31 @@ if (!once) {
       process.exit(0);
     });
   }
+  // AND THE MODULE DOES NOT FINISH UNTIL THE VIEW DOES. External review, Round 8 H7.
+  //
+  // `startDashboard` resolves once the FIRST FRAME is painted -- it returns a handle, it does not
+  // wait for the screen to be done with. So this module's top-level await completed immediately, and
+  // both callers took that as the view having finished: the dispatcher does
+  // `await import(target); process.exit(...)`, and the refused-takeover branch does the same and
+  // even says "reached only if it returns". `aify-env tui` therefore painted one frame and exited 0
+  // in well under a second, while running the file DIRECTLY kept going -- which is why it looked
+  // fine to anyone testing it the obvious way.
+  //
+  // AND SOMETHING MUST HOLD THE EVENT LOOP, which a promise alone does not.
+  //
+  // `lib/dashboard.mjs` UNREFS its refresh timer, deliberately and correctly: inside the daemon the
+  // view is a passenger and "a daemon exits when its own work says so". In THIS process the view is
+  // the work, and that difference lives here, which is why the keepalive is here and not there.
+  //
+  // MEASURED, and it is why this is not just `await new Promise(() => {})`: with only the unref'd
+  // timer, node found an empty loop with a pending top-level await and exited 13 -- a DIFFERENT
+  // silent early exit from the one being fixed, reached in under a second. The first version of this
+  // fix had exactly that bug.
+  const keepAlive = setInterval(() => {}, 1 << 30);
+  // The exits are `onQuit`, the two signal handlers above, and the daemon's death. There is no
+  // fourth way for a view that owns nothing to be finished, so nothing resolves this.
+  await new Promise(() => {});
+  clearInterval(keepAlive);
 } else {
   stop();
 }

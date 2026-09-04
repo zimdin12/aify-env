@@ -536,6 +536,18 @@ async function incumbent() {
 }
 
 let superseding = false;
+/**
+ * Set when this process REFUSED a takeover and became a read-only view.
+ *
+ * A view describes nothing: it runs no processes and can deliver no capability, so it must not tell
+ * the service what this host can do. The service stands its own bridge down when aify-env
+ * advertises -- exactly one tier per host, decided from that advertisement -- so an advertisement
+ * from here claims capabilities nobody will deliver, and the spawn that follows fails with no cause
+ * attached. External review, Round 8 M15.
+ */
+let viewOnly = false;
+/** Cleared by the refusal path when the advertise timer has already been armed. See `viewOnly`. */
+let stopAdvertising = null;
 server.on("error", async (failure) => {
   if (failure?.code === "EADDRINUSE") {
     // TAKE OVER, rather than refuse. Operator ruling: starting the environment means this one serves.
@@ -607,6 +619,12 @@ server.on("error", async (failure) => {
       // today. Attaching whenever anything answered would have turned that restart into a silent
       // no-op, which is the failure shape this project has spent a night removing.
       if (!wantsView) process.exit(69);
+      // THIS PROCESS DESCRIBES NOTHING FROM HERE ON. Both halves are required and the order is why:
+      // module evaluation does not wait for this handler, so the advertise block may not have run
+      // yet (the flag stops it arming) or may already have (the clear stops it continuing). One
+      // without the other is a race that presents as "sometimes it keeps advertising".
+      viewOnly = true;
+      if (stopAdvertising) { stopAdvertising(); stopAdvertising = null; }
       process.argv = [
         process.argv[0],
         fileURLToPath(new URL("./aify-env-tui.mjs", import.meta.url)),
@@ -950,7 +968,12 @@ async function advertiseOnce() {
 }
 
 if (ADVERTISE) {
-  void advertiseOnce();
-  const advertiseTimer = setInterval(() => { void advertiseOnce(); }, ADVERTISE_MS);
-  advertiseTimer.unref();
+  // NOT FROM A VIEW. See `viewOnly`: a process that refused a takeover runs nothing, so describing
+  // this host from it hands the service capabilities nobody will deliver.
+  if (!viewOnly) {
+    void advertiseOnce();
+    const advertiseTimer = setInterval(() => { void advertiseOnce(); }, ADVERTISE_MS);
+    advertiseTimer.unref();
+    stopAdvertising = () => clearInterval(advertiseTimer);
+  }
 }
