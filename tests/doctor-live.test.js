@@ -146,3 +146,81 @@ test("a live environment plus an unreachable SERVICE gives passed AND unanswered
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("PROVEN ON A REAL DAEMON: code-current passes, and the two identities it compares AGREE", async () => {
+  // The `code-current` row has only ever been observed in unit tests, against hand-written pairs.
+  // This file's own header says why that is half a probe -- and here the risk is specific rather than
+  // philosophical. The row's whole guarantee is that the boot build and the disk build are computed
+  // the SAME WAY, and a divergence between the two recipes would not fail any unit test: it would
+  // simply make every real host read `stale` forever, and the remedy that badge names is a restart
+  // that reaps the managed workers. Nothing but a real daemon hashing its own real package can catch
+  // that, so this asserts on one that has just booted from an unmodified checkout.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doc-live-"));
+  const registry = path.join(dir, "services.json");
+  const { child, base } = await startDaemon();
+  try {
+    const report = JSON.parse(runDoctor(base, registry).stdout);
+    const check = report.checks.find((c) => c.id === "code-current");
+    assert.ok(check, "the report carried no code-current row");
+    assert.equal(check.state, "passed",
+      `a daemon that just booted from this checkout did not read as current: ${check.detail}. `
+      + "If this says `stale`, the two recipes have diverged and every host will read stale forever.");
+
+    // AND THE RAW PAIR, from /health, because the row above could pass on two values that are equal
+    // and both wrong -- two empty strings would not, since the row treats a missing half as
+    // unanswered, but two copies of a constant would. This asserts they are real build identities.
+    const health = await fetch(`${base}/health`).then((r) => r.json());
+    assert.equal(health.build, health.codeOnDisk,
+      "a live daemon's boot build and disk build disagree on an unmodified checkout");
+    assert.match(String(health.build), /^[0-9a-f]{8}$/,
+      `the build identity is not a hash: ${JSON.stringify(health.build)}`);
+  } finally {
+    await stopDaemon(child);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("NEGATIVE CONTROL, ON THE SAME REAL DAEMON: change the disk and the row goes FAILED", async () => {
+  // Without this, the probe above has only ever been observed saying PASSED -- and a check that
+  // cannot be watched go red is a rumour. It is also the cheapest way to prove the disk half is
+  // genuinely re-read rather than being the boot value under a second name, which would pass the
+  // positive test perfectly and make the whole feature inert.
+  //
+  // IT WRITES INTO THE REAL PACKAGE TREE, because that is the only thing this daemon hashes, and
+  // removes it in `finally`. The name is unmistakable and unique so a crashed run leaves something
+  // obviously disposable rather than something that looks like source.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doc-live-"));
+  const registry = path.join(dir, "services.json");
+  const scratch = path.join(HERE, "..", "lib", `__disk-build-negative-control-${process.pid}.mjs`);
+  const { child, base } = await startDaemon();
+  try {
+    const before = await fetch(`${base}/health`).then((r) => r.json());
+    fs.writeFileSync(scratch, "// a file that exists only for the length of this test\n");
+
+    // Past the cache window, which is what makes this a wait rather than a poll: `onDisk` is
+    // deliberately answered from a cache so a heartbeat every 30 seconds does not re-hash the
+    // package, and a reading taken sooner would be the cached one and prove nothing.
+    let after = before;
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline && after.codeOnDisk === before.codeOnDisk) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      after = await fetch(`${base}/health`).then((r) => r.json());
+    }
+
+    assert.notEqual(after.codeOnDisk, before.codeOnDisk,
+      "a file was added to the package and the disk build never moved, so `onDisk` is not re-reading");
+    assert.equal(after.build, before.build,
+      "the BOOT build moved. It is the identity of what this process loaded and must not change while "
+      + "it runs, or `did my restart take?` becomes unanswerable");
+
+    const report = JSON.parse(runDoctor(base, registry).stdout);
+    const check = report.checks.find((c) => c.id === "code-current");
+    assert.equal(check.state, "failed", `the disk changed and the row still read ${check.state}`);
+    assert.match(check.fix, /reaps the managed workers/,
+      "the row sent an operator to restart without naming what the restart costs them");
+  } finally {
+    fs.rmSync(scratch, { force: true });
+    await stopDaemon(child);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
