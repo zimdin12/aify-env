@@ -44,6 +44,7 @@
 // `AIFY_NO_DASHBOARD=1` opts out. What the view shows about AGENTS is relayed from each service and
 // attributed to it -- this environment knows which processes it started, and alive is not working.
 
+import { DEFAULT_PORT, portFromArgs } from "../lib/port-argument.mjs";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 
@@ -119,7 +120,6 @@ const BUILD = buildIdentity(
 
 /** Never configurable. See above. */
 const HOST = "127.0.0.1";
-const DEFAULT_PORT = 8802;
 
 const args = process.argv.slice(2);
 if (args.includes("--version")) {
@@ -189,30 +189,15 @@ if (firstArg && !firstArg.startsWith("-")) {
 // The operator saying they meant it. Without this a takeover REFUSES when the incumbent is running
 // anything, because superseding ends that work and nothing can rescue it.
 const force = args.includes("--force");
-const portFlag = args.indexOf("--port");
-// `--port` WITH NOTHING AFTER IT used to reach `listen()` as NaN and die with an uncaught
-// ERR_SOCKET_BAD_PORT -- a stack trace for a typo, from a daemon whose whole job is to be running.
-// External review, Round 8. The same refusal covers a non-numeric or out-of-range value, which took
-// the identical path.
-const port = (() => {
-  if (portFlag === -1) return DEFAULT_PORT;
-  const raw = String(args[portFlag + 1] ?? "").trim();
-  const parsed = Number(raw);
-  // `--port 0` IS LEGAL and is what every test uses: it asks the OS for a free one. So the guard is
-  // on the shape of the value, never on truthiness -- `!parsed` would refuse exactly the case the
-  // suite depends on.
-  if (!raw || !Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
-    // `String.fromCharCode(10)` INLINE, not the `chr10` constant: that is declared further down the
-    // module and this runs during evaluation, so naming it here is a temporal dead zone -- the guard
-    // would throw a ReferenceError instead of printing its message, which is the crash it exists to
-    // replace, wearing a different hat. Caught by running it rather than by reading it.
-    process.stderr.write(
-      `aify-env: --port needs a number from 0 to 65535${raw ? ` (got "${raw}")` : " and was given none"}.`
-      + String.fromCharCode(10));
-    process.exit(2);
-  }
-  return parsed;
-})();
+// PARSED AND JUDGED IN `lib/port-argument.mjs`, which is where it can be tested: importing this
+// file starts a daemon. `--port` with nothing after it used to reach `listen()` as NaN and die
+// with an uncaught ERR_SOCKET_BAD_PORT -- a stack trace for a typo (external review, Round 8).
+const parsedPort = portFromArgs(args, DEFAULT_PORT);
+if (parsedPort.error) {
+  process.stderr.write(`aify-env: ${parsedPort.error}` + String.fromCharCode(10));
+  process.exit(2);
+}
+const port = parsedPort.port;
 
 const chr10 = String.fromCharCode(10);
 /** SSE frames end with a BLANK line: two newlines. Named so nothing has to escape them. */

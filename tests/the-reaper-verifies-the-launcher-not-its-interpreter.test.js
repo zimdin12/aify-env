@@ -34,7 +34,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { defaultVerify } from "../lib/orphan-reap.mjs";
+import { START_TIME_TOLERANCE_MS, defaultVerify } from "../lib/orphan-reap.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
 import { readOwned } from "../lib/owned-processes.mjs";
 import { Runner } from "../lib/runner.mjs";
@@ -256,4 +256,19 @@ test("a record with NO start time is never reaped either", () => {
     },
   );
   assert.equal(verdict, false, "a record with no start anchor was reaped on the launcher alone");
+});
+
+test("the tolerance is a real number, and it is what the sibling test turns on", () => {
+  // `no export is named by no test` caught this constant, and the gate is right: a tolerance nobody
+  // asserts is one that can be edited to 0 or to a day without a single test noticing -- and either
+  // end breaks the rule above. Zero refuses our own process, because the record is stamped just after
+  // spawn while the OS reports the child's own creation; a day accepts a sibling agent.
+  assert.ok(Number.isFinite(START_TIME_TOLERANCE_MS) && START_TIME_TOLERANCE_MS > 0,
+    "the start-time tolerance is not a positive number");
+  assert.ok(START_TIME_TOLERANCE_MS >= 1000,
+    "a tolerance under a second refuses our OWN process: the record is written just after spawn and "
+    + "the OS reports the child's creation, so the two never agree exactly");
+  assert.ok(START_TIME_TOLERANCE_MS <= 5 * 60 * 1000,
+    "a tolerance of minutes accepts a pid the OS recycled onto a sibling agent, which is the case "
+    + "this whole check exists to refuse");
 });

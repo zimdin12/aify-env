@@ -67,9 +67,14 @@ function testFiles() {
 
 /** Lines that bind a hand-picked port, ignoring comments. */
 function offendingLines(text) {
+  // A PURE PARSER CALL BINDS NOTHING. `portFromArgs` reads an array and returns a number; a test of
+  // it must name a port, because the port is its subject. Excluded by the CALL, so a genuine bind on
+  // another line of the same file is still caught -- only a spawn or a listen opens a socket.
+  const PURE_PORT_READERS = /\bportFromArgs\s*\(/;
   return text
     .split("\n")
     .map((line, i) => ({ line, n: i + 1 }))
+    .filter(({ line }) => !PURE_PORT_READERS.test(line))
     .filter(({ line }) => !/^\s*(\/\/|\*|\/\*)/.test(line))
     .filter(({ line }) => BINDS_A_LITERAL.some((re) => re.test(line)));
 }
@@ -96,6 +101,13 @@ test("AND IT DOES NOT FIRE ON A PORT THAT IS ONLY NAMED, OR ON PORT 0", () => {
   // control string tripped both of them. A fixture that looks like the thing another gate polices is
   // a fixture that breaks it.
   assert.deepEqual(offendingLines('  spawn(node, [BIN, "--port", "0"], {}); '), []);
+  // A PURE PARSER CALL IS NOT A BIND, and this gate flagged one the day `port-argument.mjs` was
+  // extracted. `portFromArgs(["--port", "9001"])` opens no socket -- it is a function reading an
+  // array -- and a test of the parser cannot avoid naming a port, because the port IS its subject.
+  //
+  // Discriminated by the CALL rather than by the file, so a real bind in that same file is still
+  // caught. What this gate is about is a socket, and only a spawn or a listen can open one.
+  assert.deepEqual(offendingLines('  assert.deepEqual(portFromArgs(["--port", "9001"]), { port: 9001 });'), []);
 });
 
 test("NO TEST BINDS A HARDCODED PORT", () => {
