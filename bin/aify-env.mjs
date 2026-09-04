@@ -67,7 +67,7 @@ import {
 } from "../lib/environment-checks.mjs";
 import { defaultIsAlive } from "../lib/reaper.mjs";
 import { homedir, hostname } from "node:os";
-import { buildIdentity, sourceFiles } from "../lib/build-identity.mjs";
+import { PackageBuild } from "../lib/build-identity.mjs";
 import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
 import { readServices } from "../lib/services.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
@@ -106,17 +106,19 @@ const VERSION = readFileSync(join(ROOT, "VERSION"), "utf8").trim();
 // the question an operator restarting to pick up a fix is actually asking. See
 // lib/build-identity.mjs for why it is a content hash rather than a git sha.
 //
-// Read at BOOT, deliberately. A build computed on demand would report whatever is on disk NOW,
-// which is the one answer that cannot tell you whether this process needs restarting.
-const BUILD = buildIdentity(
+// BOTH HALVES FROM ONE RECIPE. `boot` is read once, here, and is the identity of the files this
+// process actually loaded; `onDisk()` answers the same question about the files that are there NOW.
+// They are only comparable because `PackageBuild` computes them the same way, which is why the pair
+// lives in the module that owns the concept rather than being written out twice at this call site.
+const PACKAGE_BUILD = new PackageBuild({
+  root: ROOT,
   // DIRENTS, so the walk can tell a directory from a file. Names alone made it non-recursive,
   // which left the whole of `lib/plugins/` out of the build id for four commits.
-  sourceFiles(ROOT, (dir) => readdirSync(dir, { withFileTypes: true }), join),
-  (path) => readFileSync(path, "utf8"),
-  // Hashed under its path RELATIVE to the package, so the same code installed in two places
-  // reports the same build. An absolute path would make every install look different.
-  (path) => path.slice(ROOT.length).split(String.fromCharCode(92)).join("/"),
-);
+  list: (dir) => readdirSync(dir, { withFileTypes: true }),
+  read: (path) => readFileSync(path, "utf8"),
+  join,
+});
+const BUILD = PACKAGE_BUILD.boot;
 
 /** Never configurable. See above. */
 const HOST = "127.0.0.1";
@@ -423,6 +425,7 @@ const server = createServer(async (request, response) => {
         readFile: (path) => readFileSync(path, "utf8"),
         version: VERSION,
         build: BUILD,
+        codeOnDisk: PACKAGE_BUILD.onDisk(),
         unknown,
         terminals: terminalSupport(),
         advertising: advertisingHealthNow().advertising,
@@ -921,6 +924,9 @@ async function advertiseOnce() {
     terminalReason: support.reason,
     version: VERSION,
     instance: BUILD,
+    // WHAT IS ON DISK NOW, beside what this process loaded at boot. Cached, so a beat every
+    // 30 seconds does not re-hash the package continuously.
+    codeOnDisk: PACKAGE_BUILD.onDisk(),
   });
 
   // WHAT CHANGED, said once rather than every beat. The fingerprint covers exactly the fields a
