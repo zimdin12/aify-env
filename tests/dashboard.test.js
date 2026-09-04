@@ -148,22 +148,47 @@ test("it registers no signal handler of its own", async () => {
 });
 
 test("a frame that throws does not kill the loop", async () => {
-  // The usual reason to have this open is watching for the moment something comes back.
-  let calls = 0;
-  const flaky = async (url) => {
-    calls += 1;
-    if (calls === 2) throw new Error("transient");
-    return { json: async () => ENV_HEALTH };
-  };
+  // A FRAME THAT ACTUALLY THROWS, which the previous version of this test did not have.
+  //
+  // It threw from the FETCH -- and `knock` catches a failed fetch BY DESIGN and turns it into an
+  // "unreachable" panel, because "asked and got nothing" is a fact worth painting. So `draw()`
+  // resolved every time, the `.catch` this test is named for never ran, and the only thing left
+  // being measured was how many timer ticks fit in a 60ms sleep. Mutating the loop to die on a
+  // thrown frame left the test GREEN, which is how this was found: a test that cannot fail for its
+  // stated reason manufactures confidence rather than providing it.
+  //
+  // Throwing from `write` is the real thing: it is called at the END of draw and nothing wraps it,
+  // so the rejection reaches the loop exactly as a genuine paint failure would.
   const written = [];
-  const { stop } = await startDashboard(drawOptions(flaky, {
-    intervalMs: 10, write: (text) => written.push(text), readFile: () => "",
-  }));
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  stop();
-  assert.ok(written.length > 1, "one bad frame stopped the view for good");
-});
+  let frames = 0;
+  const write = (text) => {
+    frames += 1;
+    // NOT THE FIRST. `startDashboard` awaits one draw before it returns, so a first-frame throw
+    // would reject the constructor and test something else entirely.
+    if (frames === 2) throw new Error("this frame could not be painted");
+    written.push(text);
+  };
+  const { stop } = await startDashboard(drawOptions(
+    fakeFetch({ "8802/health": ENV_HEALTH }),
+    { intervalMs: 10, write, readFile: () => "" },
+  ));
 
+  // WAIT FOR THE CONDITION, NOT FOR A DURATION. The previous 60ms sleep was a measured flake: the
+  // assertion needed three timer firings, Windows floors a timer at ~15ms, and eleven runs put the
+  // real count at 4 or 5 with at least one at 2. A budget a third above its own cost is not a
+  // budget. Polling returns as soon as the loop has proven it survived, so a healthy run is faster
+  // than the old sleep and a genuinely dead loop costs the ceiling once rather than reddening the
+  // suite at random.
+  const deadline = Date.now() + 5_000;
+  while (written.length <= 1 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  stop();
+
+  assert.ok(frames > 2, `the loop stopped ticking after the failed frame (${frames} frame(s))`);
+  assert.ok(written.length > 1,
+    `a frame that threw stopped the view for good: ${written.length} painted of ${frames} attempted`);
+});
 const ESC = String.fromCharCode(27);
 
 test("the FIRST frame clears, because the screen's contents are unknown", async () => {
