@@ -1,6 +1,6 @@
 {
   "name": "aify-env",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "description": "The environment tier: owns processes and PTYs on one host, so more than one service can start agents without two spawners fighting over the same terminals.",
   "license": "MIT",
   "type": "module",
