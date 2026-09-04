@@ -16,6 +16,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+//: A FIXED START INSTANT for the tests below, which are about the COMMAND LINE.
+//: `defaultVerify` also requires the process's real start time to match the one the record
+//: holds -- the half that stops a pid recycled onto a SIBLING agent from verifying, since
+//: every Claude agent on a host shares one launcher path. These tests supply an agreeing
+//: pair so they keep asking their own question; the start-time rule has its own tests.
+const RECORDED_AT = Date.parse("2026-09-04T09:00:00.000Z");
+
 import { planOrphanReap } from "../lib/orphan-reap.mjs";
 
 const entry = (over = {}) => ({ id: "p1", pid: 4242, service: "aify-comms", startedAt: 1000, ...over });
@@ -76,7 +83,7 @@ import { defaultVerify } from "../lib/orphan-reap.mjs";
 
 test("a record with no launcher is never confirmed — there is nothing to match", () => {
   // Records written before launchers were tracked. We genuinely cannot tell, so we do not kill.
-  assert.equal(defaultVerify({ pid: 1, launcher: "" }, { platform: "win32", run: () => ({ stdout: "anything" }) }), false);
+  assert.equal(defaultVerify({ pid: 1, launcher: "", startedAt: RECORDED_AT }, { platform: "win32", run: () => ({ stdout: "anything", startedAtOf: () => RECORDED_AT }) }), false);
 });
 
 test("windows: a command line containing the launcher confirms it", () => {
@@ -84,23 +91,23 @@ test("windows: a command line containing the launcher confirms it", () => {
   // a silently de-escaped string made this test pass for the wrong reason once already.
   const BS = String.fromCharCode(92);
   const run = () => ({ stdout: `C:${BS}Windows${BS}system32${BS}cmd.exe /c "C:${BS}launchers${BS}claude-aify"` });
-  assert.equal(defaultVerify({ pid: 1, launcher: "C:/launchers/claude-aify" }, { platform: "win32", run }), true);
+  assert.equal(defaultVerify({ pid: 1, launcher: "C:/launchers/claude-aify", startedAt: RECORDED_AT }, { platform: "win32", run, startedAtOf: () => RECORDED_AT }), true);
 });
 
 test("windows: a DIFFERENT command line is refused — the pid was recycled", () => {
   const run = () => ({ stdout: "C:\Windows\explorer.exe" });
-  assert.equal(defaultVerify({ pid: 1, launcher: "C:/launchers/claude-aify" }, { platform: "win32", run }), false);
+  assert.equal(defaultVerify({ pid: 1, launcher: "C:/launchers/claude-aify", startedAt: RECORDED_AT }, { platform: "win32", run, startedAtOf: () => RECORDED_AT }), false);
 });
 
 test("an empty command line is refused rather than treated as a match", () => {
-  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x" }, { platform: "win32", run: () => ({ stdout: "   " }) }), false);
+  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x", startedAt: RECORDED_AT }, { platform: "win32", run: () => ({ stdout: "   ", startedAtOf: () => RECORDED_AT }) }), false);
 });
 
 test("a probe that throws is refused", () => {
   const run = () => { throw new Error("access denied"); };
-  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x" }, { platform: "win32", run }), false);
+  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x", startedAt: RECORDED_AT }, { platform: "win32", run, startedAtOf: () => RECORDED_AT }), false);
 });
 
 test("an unsupported platform confirms nothing, so nothing is killed there", () => {
-  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x" }, { platform: "darwin", run: () => ({ stdout: "/l/x" }) }), false);
+  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x", startedAt: RECORDED_AT }, { platform: "darwin", run: () => ({ stdout: "/l/x", startedAtOf: () => RECORDED_AT }) }), false);
 });

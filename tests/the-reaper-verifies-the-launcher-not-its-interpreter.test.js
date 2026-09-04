@@ -23,6 +23,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+//: A FIXED START INSTANT for the tests below, which are about the COMMAND LINE.
+//: `defaultVerify` also requires the process's real start time to match the one the record
+//: holds -- the half that stops a pid recycled onto a SIBLING agent from verifying, since
+//: every Claude agent on a host shares one launcher path. These tests supply an agreeing
+//: pair so they keep asking their own question; the start-time rule has its own tests.
+const RECORDED_AT = Date.parse("2026-09-04T09:00:00.000Z");
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -129,8 +136,8 @@ test("a caller that names no launcher still gets a record, and the old value", a
 
 /** `defaultVerify` with a stubbed process probe, so this is decidable without spawning anything. */
 const verifyAgainst = (launcher, commandLine) => defaultVerify(
-  { pid: 4242, launcher },
-  { platform: "win32", run: () => ({ stdout: commandLine }) },
+  { pid: 4242, launcher, startedAt: RECORDED_AT },
+  { platform: "win32", run: () => ({ stdout: commandLine }), startedAtOf: () => RECORDED_AT },
 );
 
 // Someone else's bash. Nothing to do with us; it just happens to be bash, on a pid we once used.
@@ -174,5 +181,79 @@ test("an entry with no launcher is never reaped", () => {
   // NEGATIVE CONTROL on the probe itself, and the documented trade: a record written before launchers
   // were tracked cannot be verified, so it is left alone rather than guessed about.
   assert.equal(verifyAgainst("", OUR_OWN), false);
-  assert.equal(defaultVerify({ pid: 1 }, { platform: "win32", run: () => ({ stdout: OUR_OWN }) }), false);
+  assert.equal(defaultVerify({ pid: 1, startedAt: RECORDED_AT }, { platform: "win32", run: () => ({ stdout: OUR_OWN, startedAtOf: () => RECORDED_AT }) }), false);
+});
+
+// ── the launcher alone cannot tell a SIBLING agent from our own orphan ────────────────────────────
+//
+// EXTERNAL REVIEW, Round 8, on what Round 7's fix left open. Recording the launcher closed the case
+// that was killing strangers -- `spec.command` is `bash.exe` on Windows, shared by every bash-launched
+// process on the host. It did NOT close the case that matters most here: every Claude agent on a host
+// shares ONE launcher path, so a pid recycled onto a SIBLING agent matches it perfectly, and the
+// reaper kills a working agent believing it is collecting its own orphan.
+//
+// `startedAt` is the discriminating fact and was already in the record: a pid the OS handed to
+// something else necessarily started AFTER we wrote ours down.
+
+test("A SIBLING AGENT on a recycled pid is REFUSED, though its launcher matches exactly", () => {
+  const ours = Date.parse("2026-09-04T09:00:00.000Z");
+  const theirs = ours + 45 * 60 * 1000;   // started three quarters of an hour later
+  const verdict = defaultVerify(
+    { pid: 4242, launcher: "C:/launchers/claude-aify", startedAt: ours },
+    {
+      platform: "win32",
+      // The SAME launcher, because every claude agent on this host runs it.
+      run: () => ({ stdout: 'C:/Program Files/Git/bin/bash.exe "C:/launchers/claude-aify"' }),
+      startedAtOf: () => theirs,
+    },
+  );
+  assert.equal(verdict, false,
+    "a process started 45 minutes after our record was accepted as ours, because it runs the same "
+    + "launcher. That is a working sibling agent, and reaping it is unrecoverable.");
+});
+
+test("and OUR OWN process still verifies, so this narrows rather than disables the reaper", () => {
+  // THE CONTROL. A rule that refused everything would also pass the test above, and would leak every
+  // orphan while looking correct.
+  const ours = Date.parse("2026-09-04T09:00:00.000Z");
+  const verdict = defaultVerify(
+    { pid: 4242, launcher: "C:/launchers/claude-aify", startedAt: ours },
+    {
+      platform: "win32",
+      run: () => ({ stdout: 'C:/Program Files/Git/bin/bash.exe "C:/launchers/claude-aify"' }),
+      // A second or two later: the record is stamped just after spawn, the OS reports the child's own
+      // creation, and the gap between them is however long the spawn took.
+      startedAtOf: () => ours + 1500,
+    },
+  );
+  assert.equal(verdict, true, "our own process was refused, so nothing is ever reaped");
+});
+
+test("a start time that cannot be read means NO KILL", () => {
+  // This function's existing rule for a platform with no probe -- "no permission to kill" -- applied
+  // one level down. On a kill path an unanswerable question is not a yes: refusing leaks an orphan
+  // the doctor reports, and being wrong the other way costs a working agent that nothing recovers.
+  const verdict = defaultVerify(
+    { pid: 4242, launcher: "C:/launchers/claude-aify", startedAt: Date.parse("2026-09-04T09:00:00.000Z") },
+    {
+      platform: "win32",
+      run: () => ({ stdout: 'bash.exe "C:/launchers/claude-aify"' }),
+      startedAtOf: () => null,
+    },
+  );
+  assert.equal(verdict, false, "an unanswerable start time was treated as agreement");
+});
+
+test("a record with NO start time is never reaped either", () => {
+  // A record written before start times were kept cannot be placed in time at all. Same trade as the
+  // launcher-less record this file already refuses: the one case where we genuinely cannot tell.
+  const verdict = defaultVerify(
+    { pid: 4242, launcher: "C:/launchers/claude-aify" },
+    {
+      platform: "win32",
+      run: () => ({ stdout: 'bash.exe "C:/launchers/claude-aify"' }),
+      startedAtOf: () => Date.now(),
+    },
+  );
+  assert.equal(verdict, false, "a record with no start anchor was reaped on the launcher alone");
 });
