@@ -282,6 +282,72 @@ test("a pass that threw is REPORTED, not swallowed", async () => {
     `the throw was swallowed with no log; logs were ${JSON.stringify(logs)}`);
 });
 
+test("A REFUSED CLAIMER BACKS OFF INSTEAD OF ASKING FOUR TIMES A SECOND", async () => {
+  // EXTERNAL REVIEW, Round 8 M4. The heartbeat already learned `claimer.accepted === false` and only
+  // LOGGED it. `runClaimPass` reads just `spawnRequest`, so a refusal reads as `idle`, and `idle`
+  // takes the SHORT floor -- so a host the service had refused asked four times a second for ever,
+  // each ask costing the service a BEGIN IMMEDIATE.
+  const pauses = [];
+  const api = fakeApi();
+  api.heartbeat = async () => ({ claimer: { accepted: false, bridgeId: "someone-else", reason: "bridge_not_current" } });
+  const { plugin } = makePlugin(api, {
+    setTimeoutImpl: (fn, ms) => { pauses.push(ms); return setImmediate(fn); },
+    clearTimeoutImpl: (h) => clearImmediate(h),
+  });
+  const { host } = makeHost();
+  await plugin.start(host);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await plugin.stop();
+
+  const claimPauses = pauses.filter((ms) => ms !== HEARTBEAT_INTERVAL_MS);
+  assert.ok(claimPauses.length > 0, "the loop ran no passes, so this proves nothing");
+  assert.ok(claimPauses.every((ms) => ms === RETRY_AFTER_ERROR_MS),
+    `a refused claimer waited ${Math.min(...claimPauses)}ms between passes. The service has said `
+    + "another host owns this environment; asking anyway at the idle floor hammers it.");
+});
+
+test("a refused claimer RESUMES on its own when the service accepts it again", async () => {
+  // A back-off, not a stop. If standing down needed a restart it would be a worse failure than the
+  // one it fixes -- an operator would have to notice, and noticing is the thing that was missing.
+  let beats = 0;
+  const api = fakeApi();
+  api.heartbeat = async () => {
+    beats += 1;
+    return beats === 1
+      ? { claimer: { accepted: false, bridgeId: "someone-else", reason: "bridge_not_current" } }
+      : { claimer: { accepted: true, bridgeId: "us" } };
+  };
+  const { plugin, state } = makePlugin(api, {
+    setTimeoutImpl: (fn) => setImmediate(fn),
+    clearTimeoutImpl: (h) => clearImmediate(h),
+  });
+  const { host, logs } = makeHost();
+  await plugin.start(host);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  await plugin.stop();
+  assert.ok(logs.some((l) => /Standing down from claiming/.test(String(l))),
+    `the stand-down was silent; logs were ${JSON.stringify(logs)}`);
+});
+
+test("standing down does NOT stop the workers this host is running", async () => {
+  // The one thing it must not do. A refused claimer may still be hosting live sessions, and this
+  // project has repeatedly proven that killing on an inference is the unrecoverable direction.
+  const api = fakeApi();
+  api.heartbeat = async () => ({ claimer: { accepted: false, bridgeId: "someone-else", reason: "refused" } });
+  const runner = fakeRunner();
+  const { plugin } = makePlugin(api, {
+    setTimeoutImpl: (fn) => setImmediate(fn),
+    clearTimeoutImpl: (h) => clearImmediate(h),
+  });
+  const { host } = makeHost(runner);
+  await plugin.start(host);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await plugin.stop();
+  assert.deepEqual(runner.stops ?? [], [],
+    "standing down from CLAIMING stopped running workers. Losing the claim says nothing about "
+    + "whether the sessions this host is already hosting should die.");
+});
+
 test("an unreachable service backs off further than an idle one", async () => {
   // Idle already waited on the service's own long-poll; unreachable means retrying into a hole.
   const pauses = [];
