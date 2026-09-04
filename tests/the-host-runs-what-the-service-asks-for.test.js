@@ -870,7 +870,9 @@ test("A TERMINAL THE SERVICE NO LONGER HAS GETS ITS WORKER STOPPED", async () =>
   await run({ handles: book, processes });
   processes.calls.stops.length = 0;
 
-  await passWith(apiWithMissingTerminal(), { handles: book, processes });
+  // QUIET, because since 2026-09-04 the 404 route carries the same veto as the end-status route:
+  // a process still writing is live whatever the service says about its row.
+  await passWith(apiWithMissingTerminal(), { handles: book, processes, quietFor: LONG_SILENCE });
   assert.deepEqual(processes.calls.stops, ["proc-1"],
     "a worker nothing can address any more was left running");
   assert.equal(book.handleFor("term-1"), "", "and it must be forgotten, or it is reported alive for ever");
@@ -881,7 +883,7 @@ test("it says WHY it stopped one, because an unexplained kill is worse than a le
   const processes = fakeProcesses();
   await run({ handles: book, processes });
   const logs = [];
-  await passWith(apiWithMissingTerminal(), { handles: book, processes, log: (m) => logs.push(String(m)) });
+  await passWith(apiWithMissingTerminal(), { handles: book, processes, log: (m) => logs.push(String(m)), quietFor: LONG_SILENCE });
   assert.ok(logs.some((l) => /the service no longer has that terminal/.test(l)));
 });
 
@@ -1027,20 +1029,57 @@ test("a FRESH worker is never a candidate, even reported failed", async () => {
   assert.deepEqual(processes.calls.stops, [], "a worker that had only just started was stopped");
 });
 
-test("A DELETED TERMINAL IS STOPPED REGARDLESS OF HOW RECENTLY IT SPOKE", async () => {
-  // The veto is scoped to the END-STATUS rule and must not weaken the 404 one. They answer different
-  // questions: "the service thinks this ended" can be wrong about a live worker, but "the service
-  // does not have this terminal" cannot -- there is nothing left to address it with, whatever it is
-  // printing.
+test("A DELETED TERMINAL IS STOPPED ONCE IT HAS GONE QUIET", async () => {
+  // The orphan this rule was written for: the row is gone AND the process has stopped producing.
+  // Every case the 404 branch actually fixed still reaps on the first pass past the window -- the one
+  // measured on the operator's host had been silent for two hours.
+  const book = createHandleBook();
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
+  processes.calls.stops.length = 0;
+
+  await passWith(apiWithMissingTerminal(), { handles: book, processes, quietFor: LONG_SILENCE });
+  assert.deepEqual(processes.calls.stops, ["proc-1"],
+    "a worker whose terminal no longer exists, and which has produced nothing for the whole quiet "
+    + "window, was left running");
+});
+
+test("A DELETED TERMINAL THAT IS STILL WRITING IS LEFT ALONE", async () => {
+  // THIS TEST IS THE REVERSE OF THE ONE IT REPLACES, and the reversal is the point.
+  //
+  // It used to assert "A DELETED TERMINAL IS STOPPED REGARDLESS OF HOW RECENTLY IT SPOKE", reasoning
+  // that "the service thinks this ended" can be wrong about a live worker but "the service does not
+  // have this terminal" cannot -- there is nothing left to address it with, whatever it is printing.
+  //
+  // THAT IS TRUE FOR THE CASE IT WAS WRITTEN FROM and false for cases the branch's own comment also
+  // claims: a database restored from backup, a service pointed at a reset database, a proxy
+  // answering 404. There the rows are gone and the processes are mid-task, and one pass kills every
+  // live session on the host. External review, Round 8 H3.
+  //
+  // THE ASYMMETRY DECIDES IT. An orphan is recoverable and the doctor already reports it; a coding
+  // agent's context is not recoverable by anyone. This file says so one branch over -- "refusing is
+  // recoverable, killing a live session is not" -- and the 404 branch was the one place that rule
+  // was not applied.
+  //
+  // The reap is DELAYED, not removed: an unaddressable worker cannot be sent input, so it finishes
+  // its turn, falls quiet, and the test above takes it. Residual, named rather than hidden: a worker
+  // looping on output forever is never quiet and so is never reaped here. That is a reported leak
+  // instead of a silent kill.
   const book = createHandleBook();
   const processes = fakeProcesses();
   await run({ handles: book, processes });
   processes.calls.emit("still talking\n");
   processes.calls.stops.length = 0;
 
-  await passWith(apiWithMissingTerminal(), { handles: book, processes });
-  assert.deepEqual(processes.calls.stops, ["proc-1"],
-    "a worker whose terminal no longer exists was kept because it was noisy");
+  const logs = [];
+  await passWith(apiWithMissingTerminal(), { handles: book, processes, log: (m) => logs.push(String(m)) });
+  assert.deepEqual(processes.calls.stops, [],
+    "a worker that was writing THIS SECOND was killed because the service 404'd its row. A restored "
+    + "or reset database answers 404 for every terminal at once.");
+  assert.ok(
+    logs.some((l) => /GONE from the service \(404\)/.test(l)),
+    `an unexplained refusal is as bad as an unexplained kill; logs were ${JSON.stringify(logs)}`,
+  );
 });
 
 test("it says WHY it stopped one on an end status too", async () => {
@@ -1081,7 +1120,7 @@ test("a failure to stop the orphan still forgets it, so the pass cannot loop on 
   await run({ handles: book, processes });
   processes.stop = async () => { throw new Error("already gone"); };
   const logs = [];
-  await passWith(apiWithMissingTerminal(), { handles: book, processes, log: (m) => logs.push(String(m)) });
+  await passWith(apiWithMissingTerminal(), { handles: book, processes, log: (m) => logs.push(String(m)), quietFor: LONG_SILENCE });
   assert.equal(book.handleFor("term-1"), "");
   assert.ok(logs.some((l) => /could not stop the orphaned worker/.test(l)));
 });

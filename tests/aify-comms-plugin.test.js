@@ -216,6 +216,72 @@ test("the claim loop never spins, however fast the service answers", async () =>
     `${MIN_PASS_INTERVAL_MS}ms or an instant-answering service becomes a hot loop`);
 });
 
+test("A THROWING PASS COSTS ONE INTERVAL, NEVER THE LOOP", async () => {
+  // EXTERNAL REVIEW, Round 8 H2. `claimForever` was `try { while ... } finally {}` with NO catch,
+  // and its caller is a one-shot `.catch(log)`. So a single throw anywhere inside a pass ended
+  // claiming for the life of the process -- and invisibly, because the heartbeat is a SEPARATE loop
+  // that kept `bridgeLastSeen` fresh: the doctor's `claimer.accepted` passed, `/spawn` accepted, and
+  // the queue simply never drained.
+  //
+  // WHERE THE THROW GOES, AND WHAT IS COUNTED, ARE BOTH THE TEST. Two earlier versions of this
+  // passed while proving nothing, and each was green for a different wrong reason:
+  //
+  //   - Thrown from `advertisement()`: `beat()` calls it and `start()` awaits `beat()` first, so the
+  //     heartbeat's own try/catch ate the throw and the claim loop never saw one.
+  //   - Counting `cwdRoots()` calls: the TERMINAL CONTROL loop calls `cwdRoots` too, so the count
+  //     stayed above one with the claim loop already dead.
+  //
+  // So: throw from `cwdRoots` (which the claim pass awaits before `runClaimPass` is entered) and
+  // count `api.claim`, which ONLY a live claim loop reaches. `api.claim` would be the wrong place to
+  // throw from -- it has its own try/catch, so a throw there proves the catch that already existed.
+  let roots = 0;
+  let claims = 0;
+  const api = fakeApi();
+  const claimImpl = api.claim;
+  api.claim = async (...args) => { claims += 1; return claimImpl(...args); };
+  const { plugin } = makePlugin(api, {
+    cwdRoots: async () => {
+      roots += 1;
+      if (roots === 1) throw new Error("cwd roots unavailable");
+      return ["C:/Users/Administrator"];
+    },
+    setTimeoutImpl: (fn) => setImmediate(fn),
+    clearTimeoutImpl: (h) => clearImmediate(h),
+  });
+  const { host } = makeHost();
+  await plugin.start(host);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await plugin.stop();
+
+  assert.ok(roots >= 1, "the claim loop never ran a pass, so this proves nothing");
+  assert.ok(claims > 0,
+    `the claim loop reached the service ${claims} time(s): it stopped at the first throw. One `
+    + "cancelled spawn request then leaves this host claiming nothing until it is restarted, with "
+    + "every instrument green.");
+});
+
+test("a pass that threw is REPORTED, not swallowed", async () => {
+  // An instrument that stops moving is worse than one that reports trouble: this failure stayed
+  // invisible precisely because nothing said anything.
+  let roots = 0;
+  const api = fakeApi();
+  const { plugin } = makePlugin(api, {
+    cwdRoots: async () => {
+      roots += 1;
+      if (roots === 1) throw new Error("cwd roots unavailable");
+      return ["C:/Users/Administrator"];
+    },
+    setTimeoutImpl: (fn) => setImmediate(fn),
+    clearTimeoutImpl: (h) => clearImmediate(h),
+  });
+  const { host, logs } = makeHost();
+  await plugin.start(host);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await plugin.stop();
+  assert.ok(logs.some((l) => /claim pass failed/.test(String(l))),
+    `the throw was swallowed with no log; logs were ${JSON.stringify(logs)}`);
+});
+
 test("an unreachable service backs off further than an idle one", async () => {
   // Idle already waited on the service's own long-poll; unreachable means retrying into a hole.
   const pauses = [];

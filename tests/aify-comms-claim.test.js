@@ -189,3 +189,55 @@ test("every path that claims a request also reports it", async () => {
     assert.ok(c.api.reports.every((r) => r.id === REQUEST.id), `${c.name} reported against the wrong request`);
   }
 });
+
+// ── a refused REPORT must not escape the pass ────────────────────────────────────────────────────
+//
+// EXTERNAL REVIEW, Round 8 H2. `api.claim` was wrapped; the two `api.report` calls were bare awaits.
+// A throw from either escaped `runClaimPass`, escaped `claimForever` (try/finally, no catch), and
+// landed in a one-shot `.catch` -- so this host stopped claiming until it was restarted, while the
+// SEPARATE heartbeat loop kept `bridgeLastSeen` fresh and every instrument read healthy.
+//
+// The `running` report was already covered. These are the two that were not, and the trigger is
+// ordinary: `PATCH /spawn-requests/{id}` answers 409 when the operator cancels between claim and
+// report.
+
+test("a refused STARTING report ends the pass, not the loop", async () => {
+  const api = fakeApi({ request: REQUEST, reportThrowsOn: CLAIM_STARTING });
+  const result = await runClaimPass({ api, environmentId: "e", cwdRoots: ROOTS, windows: true });
+  assert.equal(result.outcome, "report-refused",
+    "a 409 on `starting` threw out of the pass; one cancelled spawn request then stops this host "
+    + "claiming anything for the life of the process");
+  assert.equal(result.spawnRequestId, REQUEST.id);
+});
+
+test("a refused STARTING report does NOT go on to register the agent", async () => {
+  // The request is no longer ours to act on: a 409 means the service took the claim back. Carrying
+  // on would register a warm agent for a request somebody cancelled.
+  const api = fakeApi({ request: REQUEST, reportThrowsOn: CLAIM_STARTING });
+  await runClaimPass({ api, environmentId: "e", cwdRoots: ROOTS, windows: true });
+  assert.deepEqual(api.reports.map((r) => r.status), [CLAIM_STARTING],
+    "the pass carried on past a refused claim and reported again");
+});
+
+test("a refused FAILED report still returns the refusal", async () => {
+  // The out-of-roots path. Its report was the other bare await, and this is the case where the
+  // service is already unhappy -- exactly when a second failure is most likely.
+  const api = fakeApi({ request: { ...REQUEST, workspace: "C:/nope" }, reportThrowsOn: CLAIM_FAILED });
+  const result = await runClaimPass({ api, environmentId: "e", cwdRoots: ROOTS, windows: true });
+  assert.equal(result.outcome, "refused",
+    "a refused `failed` report threw out of the pass instead of leaving the refusal standing");
+});
+
+test("NO report failure can throw out of a pass, over every status the pass sends", async () => {
+  // THE PROPERTY, over a DERIVED population rather than the three cases above: whichever status a
+  // future pass learns to send, refusing it must cost that pass and never the loop. A test per
+  // status is a list somebody has to remember to extend.
+  for (const status of [CLAIM_STARTING, CLAIM_RUNNING, CLAIM_FAILED]) {
+    const api = fakeApi({ request: REQUEST, reportThrowsOn: status });
+    await assert.doesNotReject(
+      () => runClaimPass({ api, environmentId: "e", cwdRoots: ROOTS, windows: true }),
+      `a refused ${status} report threw out of the pass`,
+    );
+  }
+});
+
