@@ -42,32 +42,25 @@ test("the scan finds the files that start a daemon", () => {
     `only ${found.length} daemon-spawning test file(s) found; the scan is not reaching them`);
 });
 
-test("EVERY ONE OF THEM SEALS THE REGISTRY, which is what claiming is found through", () => {
-  // THE RULE TIGHTENED 2026-09-03, after this gate passed a file that took the operator's spawn
-  // claim. It accepted a test that merely MENTIONED `AIFY_ADVERTISE` -- and
-  // `a-page-cannot-start-a-process.test.js` set it to the empty string, inherited `...process.env`,
-  // and sealed no registry at all. Its own comment said "posting to the real registry's services is
-  // not something a test may do", which was the intent and not the effect.
-  //
-  // ADVERTISING OFF IS NOT CLAIMING OFF. The doctor documents that distinction in its own words --
-  // "ADVERTISING AND CLAIMING ARE DIFFERENT CAPABILITIES" -- and a plugin loaded out of a registry
-  // claims whether or not it describes the host. So the REGISTRY is the seal that has to hold, and
-  // naming `AIFY_ADVERTISE` no longer satisfies this rule.
-  //
-  // WHY IT WAS INTERMITTENT and therefore survived a bisect: such a daemon lives for seconds, so
-  // whether it lands a claim heartbeat before it is killed is a race. The same file ran clean and
-  // dirty on consecutive attempts, which is exactly what made "run it and see" the wrong instrument
-  // and this scan the right one.
-  const unsealed = daemonSpawningTests()
-    .filter(({ text }) => !text.includes("sealedDaemonEnv")
-      && !text.includes("AIFY_SERVICE_REGISTRY"))
-    .map((entry) => entry.name);
-  assert.deepEqual(unsealed, [],
-    "these spawn a real daemon that reads the machine's REAL ~/.aify/services.json, finds the live "
-    + "aify-comms in it, and claims against production -- taking the operator's spawn claim. "
-    + "Use `sealedDaemonEnv()` from ./_sealed-daemon-env.mjs, or point AIFY_SERVICE_REGISTRY at a "
-    + "fake service if the test is about advertising.");
-});
+// THE REGISTRY-SEAL RULE LIVES IN `no-test-daemon-inherits-the-real-registry.test.js`, and a rule
+// that stood here was RETIRED on 2026-09-04 rather than repaired.
+//
+// External review found it judging whole-file TEXT while the leak is per-SPAWN: a file that sealed
+// one daemon spawn excused every other spawn in it. Proven reachable -- removing every
+// `sealedDaemonEnv` from `tui-live.test.js` still passed it, because line 62 mentions
+// `AIFY_SERVICE_REGISTRY` on an unrelated TUI child spawn.
+//
+// It was a DUPLICATE, which is why the repair is a deletion. The sibling already enforces the same
+// property per spawn, with a positive control, across a wider population. Measured before removing
+// anything: the same mutation -- an unsealed daemon spawn beside a sealed one -- is caught by the
+// sibling with this file left exactly as the review found it. So no hole was open; two gates
+// disagreed about one property, and the weaker one was the wrong place to learn that from.
+//
+// Making this a second CORRECT implementation was the tempting repair and the wrong one: two scans
+// of one property agree only until somebody changes one.
+//
+// What remains below is what only this file asserts -- that the seal turns ADVERTISING off, which is
+// a different capability from claiming, and the distinction this file was written for.
 
 test("the seal turns advertising OFF and names no real registry", () => {
   const sealed = sealedDaemonEnv();

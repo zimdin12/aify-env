@@ -66,8 +66,15 @@ test("THE DAEMON READS IT WITH `||`, which is what makes empty dangerous", () =>
   // would otherwise look at. If it ever becomes `??`, empty stops being a trap and this test should
   // be the thing that says so.
   const entry = readFileSync(join(ROOT, "bin", "aify-env.mjs"), "utf8");
-  const line = entry.split("\n").find((l) => l.includes("AIFY_SERVICE_REGISTRY"));
-  assert.ok(line, "the daemon no longer reads AIFY_SERVICE_REGISTRY; this seal may be pointless");
+  // THE DECLARATION, not the first MENTION. This took the first line containing the name and broke
+  // the day a COMMENT above it quoted the variable -- prose read as code, which is the same defect
+  // this suite keeps finding in its own scanners. A comment cannot be a declaration, so match one.
+  const line = entry.split("\n").find((l) => /const REGISTRY_FILE\s*=/.test(l));
+  assert.ok(line, "the daemon no longer declares REGISTRY_FILE; this seal may be pointless");
+  assert.ok(
+    line.includes("AIFY_SERVICE_REGISTRY"),
+    "REGISTRY_FILE no longer reads AIFY_SERVICE_REGISTRY, so sealing that variable seals nothing",
+  );
   assert.match(line, /\|\|/,
     "the daemon's default changed. If it now uses ??, an empty seal is safe and this file can relax; "
     + "if it uses something else, work out what empty means before trusting the seal");
@@ -80,4 +87,25 @@ test("advertising off does not imply claiming off", () => {
   assert.equal(env.AIFY_ADVERTISE, "0");
   assert.ok(env.AIFY_SERVICE_REGISTRY,
     "claiming is not gated by AIFY_ADVERTISE, so the registry seal is what has to hold");
+});
+
+test("the daemon resolves the registry in exactly ONE place", () => {
+  // FOUND BY EXTERNAL REVIEW, Round 8 H1, second channel. `bin/aify-env.mjs` joined `homedir()` with
+  // "services.json" a SECOND time for the in-daemon dashboard, so a daemon whose
+  // `AIFY_SERVICE_REGISTRY` was sealed still read the operator's real registry there.
+  //
+  // Read-only -- that view displays and never claims -- so this is not the claim leak. It is the
+  // condition that makes claim leaks possible: every seal in this suite is written against the
+  // assumption that one constant decides this path, and a second resolver is how the sealed one
+  // stops being the one that runs. There was no ordering excuse for the literal, either: the same
+  // function already reads `REGISTRY_FILE` a few lines above it.
+  //
+  // COUNTED, not pinned to a line, so a third resolver is caught the day it lands.
+  const entry = readFileSync(join(ROOT, "bin", "aify-env.mjs"), "utf8");
+  const joins = entry.match(/join\(\s*homedir\(\)\s*,\s*"\.aify"\s*,\s*"services\.json"\s*\)/g) || [];
+  assert.equal(
+    joins.length, 1,
+    `${joins.length} place(s) resolve the registry path. Exactly one may -- the REGISTRY_FILE `
+    + "constant, which honours AIFY_SERVICE_REGISTRY. Every other reader takes that constant.",
+  );
 });

@@ -711,7 +711,13 @@ server.listen(port, HOST, async () => {
     try {
       const view = await startDashboard({
         endpoint: `http://${HOST}:${bound.port}`,
-        registryPath: join(homedir(), ".aify", "services.json"),
+        // `REGISTRY_FILE`, NOT a second `homedir()` join. This resolved the operator's real
+        // registry even in a daemon whose `AIFY_SERVICE_REGISTRY` was sealed -- read-only, since
+        // the view only displays, but one path with two resolvers is how the sealed one stops
+        // being the one that runs. Found by external review, Round 8 H1. The constant is
+        // declared below and this code runs after module evaluation, so there was never an
+        // ordering reason for the literal: line 672 already reads `REGISTRY_FILE`.
+        registryPath: REGISTRY_FILE,
         intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),
         // Decided HERE, where the screen is, and passed to a pure renderer. NO_COLOR is the
         // convention every other tool honours and costs one condition to respect.
