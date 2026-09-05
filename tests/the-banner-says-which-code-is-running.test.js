@@ -94,7 +94,7 @@ test("the file list is DERIVED from the tree, so a new module counts", () => {
     "/pkg/lib": [file("a.mjs"), file("b.js"), file("notes.md"), file("c.mjs")],
     "/pkg/bin": [file("aify-env.mjs")],
   };
-  const listed = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
+  const { files: listed } = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
   assert.deepEqual(listed.sort(), [
     "/pkg/bin/aify-env.mjs", "/pkg/lib/a.mjs", "/pkg/lib/b.js", "/pkg/lib/c.mjs",
   ]);
@@ -115,7 +115,7 @@ test("IT RECURSES, because the failure it warns about happened one directory dow
     "/pkg/lib/plugins/aify-comms": [file("api.mjs"), file("claim.mjs")],
     "/pkg/bin": [file("aify-env.mjs")],
   };
-  const listed = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
+  const { files: listed } = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
   assert.ok(listed.includes("/pkg/lib/plugins/aify-comms/api.mjs"), "a plugin module is part of the program");
   assert.ok(listed.includes("/pkg/lib/plugins/index.mjs"));
   assert.equal(listed.length, 5);
@@ -129,7 +129,7 @@ test("EVERY bin entry point counts, not just the daemon", () => {
     "/pkg/lib": [],
     "/pkg/bin": [file("aify-env.mjs"), file("aify-env-doctor.mjs"), file("aify-env-tui.mjs")],
   };
-  const listed = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
+  const { files: listed } = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
   assert.equal(listed.length, 3);
 });
 
@@ -141,24 +141,39 @@ test("node_modules is NOT part of this program's identity", () => {
     "/pkg/lib/node_modules": [file("huge.js")],
     "/pkg/bin": [],
   };
-  const listed = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
+  const { files: listed } = sourceFiles("/pkg", (d) => tree[d] || [], (...parts) => parts.join("/"));
   assert.deepEqual(listed, ["/pkg/lib/a.mjs"]);
 });
 
-test("a directory that cannot be read contributes nothing rather than throwing", () => {
+test("a directory that cannot be read contributes nothing, AND THE WALK SAYS SO", () => {
   // A build id that cannot be computed would take the daemon down at BOOT, which is a far worse
-  // failure than one computed over slightly less than everything.
-  const listed = sourceFiles("/pkg", (d) => {
-    if (d === "/pkg/lib") throw new Error("EACCES");
+  // failure than one computed over slightly less than everything -- so the walk still returns what
+  // it found. But it must also REPORT that it was incomplete: a hash over a subset is a well-formed
+  // digest that DIFFERS from the real one, so the service reads `stale`, the badge says restart, and
+  // restarting reaps that host's managed workers. Returning the subset silently was the defect.
+  const scan = sourceFiles("/pkg", (d) => {
+    if (d === "/pkg/lib") throw Object.assign(new Error("EACCES"), { code: "EACCES" });
     return [file("aify-env.mjs")];
   }, (...parts) => parts.join("/"));
-  assert.deepEqual(listed, ["/pkg/bin/aify-env.mjs"]);
+  assert.deepEqual(scan.files, ["/pkg/bin/aify-env.mjs"]);
+  assert.equal(scan.complete, false, "an unreadable directory was reported as a complete answer");
+});
+
+test("an ABSENT directory is complete, because a smaller program is not an unmeasured one", () => {
+  // `readdirSync` throws ENOENT for a directory that is not there and EACCES for one it may not
+  // read. Conflating them would make every package without a `bin/` unidentifiable for ever.
+  const scan = sourceFiles("/pkg", (d) => {
+    if (d === "/pkg/bin") throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    return [file("a.mjs")];
+  }, (...parts) => parts.join("/"));
+  assert.deepEqual(scan.files, ["/pkg/lib/a.mjs"]);
+  assert.equal(scan.complete, true, "a missing directory was treated as a failure to measure");
 });
 
 test("an empty tree yields an empty list rather than an invented entry", () => {
   // It used to return `bin/aify-env.mjs` unconditionally, whether or not it was there. A path that
   // is hashed without being read is a build id that describes a file that may not exist.
-  assert.deepEqual(sourceFiles("/pkg", () => [], (...parts) => parts.join("/")), []);
+  assert.deepEqual(sourceFiles("/pkg", () => [], (...parts) => parts.join("/")).files, []);
 });
 
 test("/health reports the build, so the banner describes the PROCESS and not the disk", async () => {

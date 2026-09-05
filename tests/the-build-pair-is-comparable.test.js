@@ -30,7 +30,9 @@ function fakeTree(files) {
       const cut = rest.indexOf("/");
       names.add(cut === -1 ? rest : rest.slice(0, cut));
     }
-    if (names.size === 0) throw new Error(`ENOENT: ${dir}`);
+    // FAITHFUL TO `readdirSync`: a missing directory throws with `code: "ENOENT"`, and the walk
+    // uses that code to tell "absent" (a complete answer) from "unreadable" (an unanswered one).
+    if (names.size === 0) throw Object.assign(new Error(`ENOENT: ${dir}`), { code: "ENOENT" });
     return [...names].map((name) => ({
       name,
       isDirectory: () => !Object.hasOwn(tree, `${prefix}${name}`),
@@ -201,4 +203,72 @@ test("the advertisement CARRIES the pair, which is the half an operator never se
   });
   assert.ok(!("codeOnDisk" in older.metadata),
     "an advertiser that cannot compute the disk build must omit the field, not send an empty one");
+});
+
+test('A PARTIAL walk is an absence, not a smaller program', () => {
+  // The defect an independent review found, and it is the COMMONER case: the `lib` and `bin` walks
+  // are independent and every subdirectory is its own chance to fail. One transient EACCES on
+  // `lib/plugins/` -- an npm install in flight, an antivirus lock, an editor holding a handle --
+  // yields a well-formed eight-hex digest over a SUBSET, which DIFFERS from the real build. The
+  // service then reads `stale`, the badge says restart, and restarting reaps that host's managed
+  // workers. The rarer zero-file case was defended from the first line; this one was not.
+  const clock = fakeClock();
+  const { root, list, read, join } = fakeTree({
+    '/pkg/lib/a.mjs': 'one',
+    '/pkg/lib/plugins/b.mjs': 'two',
+    '/pkg/bin/c.mjs': 'three',
+  });
+  let denyPlugins = false;
+  const build = new PackageBuild({
+    root,
+    list: (dir) => {
+      if (denyPlugins && dir.endsWith('/plugins')) {
+        throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      }
+      return list(dir);
+    },
+    read,
+    join,
+    now: clock.now,
+  });
+
+  denyPlugins = true;
+  clock.advance(60_000);
+  assert.equal(build.onDisk(), build.boot,
+    'one unreadable subdirectory produced a hash over a subset, which reads as `stale` and sends the '
+    + 'operator to a restart that reaps the workers of a host running current code');
+});
+
+test('CONTROL: an ABSENT directory is a complete answer, not an unreadable one', () => {
+  // Conflating the two would make every package without a `bin/` report null for ever — and this
+  // test file's own fixtures are such packages, which is how the distinction was found.
+  const clock = fakeClock();
+  const { root, tree, list, read, join } = fakeTree({ '/pkg/lib/a.mjs': 'one' });
+  const build = new PackageBuild({ root, list, read, join, now: clock.now });
+  assert.notEqual(build.boot, null, 'a package with no bin/ could not identify itself at all');
+
+  tree['/pkg/lib/a.mjs'] = 'changed';
+  clock.advance(60_000);
+  assert.notEqual(build.onDisk(), build.boot, 'and it must still notice a real change');
+});
+
+test('A READ THAT THROWS AT BOOT does not take the daemon down', () => {
+  // `sourceFiles` guards the LISTING; `buildIdentity` calls `read` unguarded, and the daemon passes a
+  // raw `readFileSync`. This runs while a top-level `const` in bin/aify-env.mjs is evaluated, so a
+  // throw is an unhandled module-evaluation error: aify-env does not start at all, and neither does
+  // `--version`, `doctor` or the TUI. A dangling symlink named `*.mjs` under lib/ does it every
+  // time, and npm-link installs make one plausible.
+  const clock = fakeClock();
+  const { root, list, join } = fakeTree({ '/pkg/lib/a.mjs': 'one', '/pkg/bin/b.mjs': 'two' });
+  let build;
+  assert.doesNotThrow(() => {
+    build = new PackageBuild({
+      root,
+      list,
+      read: () => { throw Object.assign(new Error('ENOENT: dangling symlink'), { code: 'ENOENT' }); },
+      join,
+      now: clock.now,
+    });
+  }, 'the constructor threw, which is an unstartable daemon rather than an unknown build');
+  assert.equal(build.boot, null, 'a build it could not read must be an absence, not a value');
 });
