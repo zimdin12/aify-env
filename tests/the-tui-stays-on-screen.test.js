@@ -116,3 +116,26 @@ test("the refusal path stops this process describing the host", () => {
     "the advertise block no longer consults the view flag, so a refused takeover arms the timer "
     + "anyway and describes a host it does not run");
 });
+
+test("AND THE FIRST BEAT IS GUARDED TOO, not just the timer", () => {
+  // R9-M9, external review 2026-09-06. The two assertions above cover the flag and the timer, and
+  // the comment on the second already names the reason they are not enough: module evaluation does
+  // not wait for an event handler. `viewOnly` is set inside `server.on("error")`, so the caller's
+  // synchronous `if (!viewOnly)` reads FALSE on a process that is about to refuse a takeover -- it
+  // fires `void advertiseOnce()` once and then arms the timer.
+  //
+  // Clearing the timer afterwards cannot recall a beat already dispatched. That single beat
+  // overwrites the incumbent's row, and the service stands its own bridge down on exactly this
+  // signal, so the host reads as described by a process running nothing for up to one advertise
+  // interval.
+  //
+  // So the guard has to sit on the ACT. An in-flight call that lands after the refusal is the same
+  // beat arriving by another route, and only a check inside the function catches both.
+  const entry = readFileSync(ENTRY, "utf8");
+  const body = entry.slice(entry.indexOf("async function advertiseOnce() {"));
+  assert.ok(body, "advertiseOnce is gone; this assertion needs re-pointing rather than deleting");
+  const firstStatements = body.slice(0, body.indexOf("registryText = readFileSync"));
+  assert.match(firstStatements, /if \(viewOnly\) return;/,
+    "advertiseOnce does not refuse from a view, so the beat fired during module evaluation -- "
+    + "before the error handler can set the flag -- still describes a host this process does not run");
+});

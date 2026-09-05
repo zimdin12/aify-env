@@ -881,6 +881,11 @@ function advertisingHealthNow() {
 }
 
 async function advertiseOnce() {
+  // CHECKED AT CALL TIME, not only by the caller (R9-M9). `viewOnly` is set inside the error
+  // handler, which cannot run until this module has finished evaluating -- so the caller's
+  // `if (!viewOnly)` reads false and fires one beat that clearing the interval cannot recall. See
+  // `the-tui-stays-on-screen.test.js` for what that beat costs the incumbent.
+  if (viewOnly) return;
   let registryText = "";
   try {
     registryText = readFileSync(REGISTRY_FILE, "utf8");
