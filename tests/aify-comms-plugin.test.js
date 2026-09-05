@@ -454,3 +454,72 @@ test("a service too old to answer is UNKNOWN, never a refusal", async () => {
   assert.equal(plugin.state().claimer, null, "absent must read as unknown, not as accepted");
   assert.equal(plugin.state().lastHeartbeatError, "");
 });
+
+// ── R9-H2: the TERMINAL CONTROL loop survives a throwing pass ────────────────────────────────
+//
+// External review, Round 9 H2. This is Round 8 H2's defect surviving in the loop beside the one that
+// was fixed: `controlForever` was `try { while ... } finally {}` with no catch, and its caller is a
+// one-shot `.catch(log)`. One throw ended terminal control for the life of the process, and the
+// heartbeat is a SEPARATE loop, so `bridgeLastSeen` kept refreshing and every instrument stayed
+// green while no terminal could be started, stopped or typed into.
+
+test("a control loop pass that THREW is reported, and the loop keeps going", async () => {
+  let roots = 0;
+  const api = fakeApi();
+  api.claimControls = async () => ({ controls: [] });
+  api.reportControl = async () => {};
+  const { plugin } = makePlugin(api, {
+    // BOTH LOOPS CALL THIS, and they race for the first failure. Throwing only once meant the
+    // claim loop consumed it and the control loop never saw a throw at all -- a test that would
+    // have passed against the unguarded code. Throwing twice guarantees each loop gets one.
+    cwdRoots: async () => {
+      roots += 1;
+      if (roots <= 2) throw new Error("cwd roots unavailable");
+      return ["C:/Users/Administrator"];
+    },
+    setTimeoutImpl: (fn) => setImmediate(fn),
+    clearTimeoutImpl: (h) => clearImmediate(h),
+  });
+  const { host, logs } = makeHost();
+  await plugin.start(host);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await plugin.stop();
+
+  assert.ok(
+    logs.some((l) => /terminal control pass failed/.test(String(l))),
+    `the throw was swallowed with no log; logs were ${JSON.stringify(logs)}`,
+  );
+  assert.ok(roots > 1, "the loop stopped after the throwing pass instead of costing one interval");
+});
+
+test("A FAILED REPORT DOES NOT END TERMINAL CONTROL", async () => {
+  // The specific throw R9-H2 named. `api.reportControl` rejects on any non-2xx -- a 409 when the
+  // operator cancels between acting and reporting, a 404 on a terminal the service has dropped.
+  // Of fifteen call sites in terminal-controls.mjs exactly one had a `.catch`, so from any of the
+  // other fourteen the throw escaped the pass and the loop. Guarded at the reporter now, because
+  // fourteen hand-written catches is a guarantee that lasts until the fifteenth call site.
+  let claims = 0;
+  const api = fakeApi();
+  api.claimControls = async () => {
+    claims += 1;
+    // A control with an id and NO terminal: the earliest report in the pass, and the one the
+    // reviewer cited as reached before any try.
+    return { controls: [{ id: `ctl-${claims}` }] };
+  };
+  api.reportControl = async () => { throw new Error("409 control already settled"); };
+
+  const { plugin } = makePlugin(api, {
+    setTimeoutImpl: (fn) => setImmediate(fn),
+    clearTimeoutImpl: (h) => clearImmediate(h),
+  });
+  const { host, logs } = makeHost();
+  await plugin.start(host);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await plugin.stop();
+
+  assert.ok(claims > 1, `terminal control stopped after ${claims} pass(es); a failed report ended the loop`);
+  assert.ok(
+    logs.some((l) => /could not report control/.test(String(l))),
+    `the failed report was silent; logs were ${JSON.stringify(logs)}`,
+  );
+});
