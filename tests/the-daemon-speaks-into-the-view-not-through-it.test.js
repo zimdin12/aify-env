@@ -158,6 +158,13 @@ test("THE SINK IS ROUTED, NOT DUPLICATED: the daemon writes stderr only when it 
     "the plugin log sink writes somewhere other than the routed one");
   assert.match(src, /if \(dashboardOwnsScreen\) \{\s*\n\s*NOTICES\.add\(message\);/,
     "logLine no longer routes into the notices ring");
-  assert.match(src, /dashboardOwnsScreen = true;/, "nothing marks the view as owning the screen");
+  // UPGRADED 2026-09-06 from a literal to the real seam. This asserted `dashboardOwnsScreen = true`,
+  // which pinned WHERE the flag was written rather than that it was written from the truth. The view
+  // wiring now lives in `lib/daemon-view.mjs`, which is importable -- so whether it reports owning a
+  // screen is tested by CALLING it, in `the-daemon-view-keyboard-policy.test.js`. What is left here
+  // is the half that is genuinely about this file: the flag comes from the view's own answer and not
+  // from the intent to start one.
+  assert.match(src, /dashboardOwnsScreen = view\.ownsScreen;/,
+    "the screen-ownership flag no longer comes from the view's own answer");
   assert.match(src, /notices: NOTICES,/, "the view is never given the ring");
 });

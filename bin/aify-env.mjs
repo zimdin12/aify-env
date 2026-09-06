@@ -55,7 +55,7 @@ import { fileURLToPath } from "node:url";
 import { handleRequest } from "../lib/protocol.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
-import { startDashboard } from "../lib/dashboard.mjs";
+import { startDaemonView } from "../lib/daemon-view.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-processes.mjs";
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
@@ -735,35 +735,25 @@ server.listen(port, HOST, async () => {
   // The view owns no lifecycle: `stop` is called from the shutdown path, so an interrupt still means
   // "take the managed processes with you" rather than being pre-empted by a handler belonging to a
   // screen. Two exit paths racing is the defect this repo just removed.
-  if (process.stdout.isTTY && !NO_DASHBOARD) {
-    try {
-      const view = await startDashboard({
-        endpoint: `http://${HOST}:${bound.port}`,
-        // `REGISTRY_FILE`, NOT a second `homedir()` join. This resolved the operator's real
-        // registry even in a daemon whose `AIFY_SERVICE_REGISTRY` was sealed -- read-only, since
-        // the view only displays, but one path with two resolvers is how the sealed one stops
-        // being the one that runs. Found by external review, Round 8 H1. The constant is
-        // declared below and this code runs after module evaluation, so there was never an
-        // ordering reason for the literal: line 672 already reads `REGISTRY_FILE`.
-        registryPath: REGISTRY_FILE,
-        intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),
-        // Decided HERE, where the screen is, and passed to a pure renderer. NO_COLOR is the
-        // convention every other tool honours and costs one condition to respect.
-        columns: process.stdout.columns || 100,
-        color: !process.env.NO_COLOR,
-        notices: NOTICES,
-      });
-      stopDashboard = view.stop;
-      // AFTER the first frame -- `startDashboard` resolves once a screen is visible -- so nothing
-      // written before that is held back from a terminal that was not yet being repainted.
-      dashboardOwnsScreen = true;
-    } catch (failure) {
-      // A view that cannot draw must never stop the environment from serving. It is the decoration;
-      // the daemon is the product.
-      dashboardOwnsScreen = false;
-      process.stderr.write(`[aify-env] dashboard unavailable: ${failure.message}${chr10}`);
-    }
-  }
+  // THE VIEW IS ONE SUBJECT AND LIVES IN ONE MODULE. It carries the daemon's keyboard policy --
+  // Ctrl+C is this environment's shutdown, `q` is nothing -- and that policy could not be tested
+  // while it lived here, because importing this file STARTS a daemon.
+  const view = await startDaemonView({
+    endpoint: `http://${HOST}:${bound.port}`,
+    // `REGISTRY_FILE`, NOT a second `homedir()` join: one path with two resolvers is how the sealed
+    // one stops being the one that runs. External review, Round 8 H1.
+    registryPath: REGISTRY_FILE,
+    runner,
+    shutdown,
+    notices: NOTICES,
+    enabled: !NO_DASHBOARD,
+    intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),
+    color: !process.env.NO_COLOR,
+  });
+  stopDashboard = view.stop;
+  // AFTER the first frame -- `startDaemonView` resolves once a screen is visible -- so nothing
+  // written before that is held back from a terminal that was not yet being repainted.
+  dashboardOwnsScreen = view.ownsScreen;
 });
 
 const SWEEP_MS = Number(process.env.AIFY_SWEEP_MS || 30_000);

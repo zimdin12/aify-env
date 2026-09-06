@@ -125,13 +125,22 @@ test("moving up and down walks the list", () => {
   assert.equal(s.selected.id, "a");
 });
 
-test("quit is reported to the caller rather than exiting from in here", () => {
+test("quit and interrupt are reported SEPARATELY, not decided in here", () => {
   // A library that calls process.exit takes the decision away from the binary that owns the
   // lifecycle, which is the separation bin/aify-env-tui.mjs already keeps deliberately.
+  //
+  // And they are two facts, not one. The daemon renders this same view in the terminal it was
+  // started from, where Ctrl+C means "stop the environment and take its managed processes with
+  // it" -- while `q` there must mean nothing at all. Collapsing them here would force one answer
+  // on both callers, and the expensive direction is a stray `q` reaping a live fleet.
   const s = session([]);
   s.syncProcesses(procs("a"));
-  const { quit } = s.handleInput(String.fromCharCode(3));
-  assert.equal(quit, true);
+  const ctrlC = s.handleInput(String.fromCharCode(3));
+  assert.equal(ctrlC.interrupt, true);
+  assert.equal(ctrlC.quit, false);
+  const q = s.handleInput("q");
+  assert.equal(q.quit, true);
+  assert.equal(q.interrupt, false);
 });
 
 test("input meant for the process comes back as toPty, not written from in here", () => {

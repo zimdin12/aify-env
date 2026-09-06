@@ -18,7 +18,7 @@ const pty = (selected = 0, count = 3) => ({ mode: "pty", selected, count });
 // ── initialFocus / reconcileFocus ───────────────────────────────────────────────────────────────
 
 test("an empty host selects nothing rather than index 0", () => {
-  assert.deepEqual(initialFocus(0), { mode: "dashboard", selected: -1, count: 0 });
+  assert.deepEqual(initialFocus(0), { mode: "dashboard", selected: -1, count: 0, query: "" });
   assert.equal(initialFocus(3).selected, 0);
 });
 
@@ -31,7 +31,7 @@ test("the selection is CLAMPED when the process list shrinks, not reset", () => 
 });
 
 test("when the last process goes, the pane closes rather than pointing at nothing", () => {
-  assert.deepEqual(reconcileFocus(pty(2, 3), 0), { mode: "dashboard", selected: -1, count: 0 });
+  assert.deepEqual(reconcileFocus(pty(2, 3), 0), { mode: "dashboard", selected: -1, count: 0, query: "" });
 });
 
 test("reconciling keeps pty mode while there is still something to show", () => {
@@ -63,9 +63,13 @@ test("Enter with NOTHING to attach to does nothing at all", () => {
   assert.equal(out.state.mode, "dashboard");
 });
 
-test("q and Ctrl+C quit from the dashboard", () => {
+test("q and Ctrl+C are DIFFERENT actions, and the daemon depends on that", () => {
+  // They were one action, which is right for `aify-env tui` and wrong for the daemon rendering the
+  // same view: there Ctrl+C means "stop the environment and take its managed processes with it".
+  // One action gave two ways to be wrong -- swallow Ctrl+C and the daemon cannot be stopped from
+  // its own terminal, or honour `q` the same way and one stray keystroke reaps every agent.
   assert.equal(routeKey("q", dash()).action, "quit");
-  assert.equal(routeKey(CTRL_C, dash()).action, "quit");
+  assert.equal(routeKey(CTRL_C, dash()).action, "interrupt");
 });
 
 test("an unbound key in dashboard mode is ignored, not forwarded anywhere", () => {
