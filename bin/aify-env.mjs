@@ -9,16 +9,9 @@
 // on request; reachable from another machine it is a remote shell with a JSON interface. The host is
 // fixed rather than configurable for the same reason a guard that can be turned off is decoration.
 //
-//   aify-env                 run in the foreground on 127.0.0.1:8802, showing the live view;
-//                            when one is already running WITH AGENTS, opens the view against it
-//   aify-env doctor          what this host can say about itself, and what each service said
-//   aify-env tui             the live view alone, against a daemon already running
-//   aify-env attach <agent>  give one process this whole terminal; Ctrl-] detaches, it keeps running
-//   aify-env run --service <s> --launcher <path> [--label <id>] -- <args...>
-//                            start a program HERE and attach to it, so it outlives this terminal
-//   aify-env --port 0        pick an ephemeral port (used by tests)
-//   aify-env --force         take the port even though the incumbent is running agents, ending them
-//   aify-env --version
+// WHAT IT ACCEPTS IS IN `lib/usage.mjs`, and `aify-env --help` prints it. It was written out
+// here, where nothing could print it and no reader outside the source could reach it -- and
+// `--help` itself fell through this file's subcommand guard and STARTED a daemon.
 //
 // STARTING WHEN ONE IS ALREADY RUNNING TAKES OVER, and the incumbent's agents die with it -- they
 // cannot be adopted, because a PTY-backed child is bound to a ConPTY its parent owns. So a takeover
@@ -45,6 +38,7 @@
 // attributed to it -- this environment knows which processes it started, and alive is not working.
 
 import { DEFAULT_PORT, portFromArgs } from "../lib/port-argument.mjs";
+import { USAGE, asksForHelp, asksForVersion, refuseUnknownFlag } from "../lib/usage.mjs";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 
@@ -124,7 +118,13 @@ const BUILD = PACKAGE_BUILD.boot;
 const HOST = "127.0.0.1";
 
 const args = process.argv.slice(2);
-if (args.includes("--version")) {
+// ASKING FOR HELP MUST NEVER BE A SIDE EFFECT, and here it started a daemon. See `lib/usage.mjs`.
+if (asksForHelp(args)) {
+  process.stdout.write(`${USAGE}
+`);
+  process.exit(0);
+}
+if (asksForVersion(args)) {
   // BOTH, because one of them is the useful one. This prints what is on DISK; the running
   // daemon's banner prints what IT loaded. Equal means current, different means restart -- and
   // neither number needs to mean anything on its own for that comparison to be exact.
@@ -187,6 +187,12 @@ if (firstArg && !firstArg.startsWith("-")) {
   }
   process.exit(process.exitCode ?? 0);
 }
+
+// AN UNRECOGNISED ARGUMENT IS REFUSED, not ignored -- the same rule the unknown-subcommand branch
+// above already applies, extended to the dash-prefixed half it never covered. AFTER the dispatch,
+// because a subcommand owns its own flags (`doctor --json`, `tui --once`, `run --service ...`) and
+// anything reaching this line is starting a daemon.
+refuseUnknownFlag(args, { write: (line) => process.stderr.write(line), exit: (code) => process.exit(code) });
 
 // The operator saying they meant it. Without this a takeover REFUSES when the incumbent is running
 // anything, because superseding ends that work and nothing can rescue it.
