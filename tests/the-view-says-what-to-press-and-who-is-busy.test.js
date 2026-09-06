@@ -51,11 +51,26 @@ test("POSITIVE CONTROL: the process table renders at all", () => {
 
 test("with a keyboard, the view says what to press", () => {
   const view = render({}, { keys: { enabled: true, canQuit: true } });
-  for (const hint of ["move", "jump", "find", "attach", "back"]) {
+  for (const hint of ["move", "jump", "find", "attach"]) {
     assert.match(view, new RegExp(hint), `the hint line does not mention ${hint}`);
   }
   assert.match(view, /1-9/, "the jump keys are not named");
-  assert.match(view, /ctrl\+\]/i, "the way back is not named");
+});
+
+test("THE HINT IS MODE-AWARE, because the same key does three different things", () => {
+  // It said "enter attach" while ATTACHED -- where Enter is a newline into the agent -- and while
+  // the picker was open, where Enter accepts the search. A hint that is wrong two thirds of the time
+  // teaches the operator to stop reading it.
+  const keys = { enabled: true, canQuit: true };
+  const attached = render({}, { keys, view: { mode: "pty", selected: 0, query: "" } });
+  assert.match(attached, /ctrl\+\]/i, "there is no way back named while attached");
+  assert.doesNotMatch(attached, /attach/, "the hint offers attaching to an already-attached pane");
+  assert.doesNotMatch(attached, /quit/, "`q` was offered while it is just the letter q to the agent");
+
+  const picking = render({}, { keys, view: { mode: "picker", selected: 0, query: "sc" } });
+  assert.match(picking, /choose/, "the picker does not say what Enter does");
+  assert.match(picking, /cancel/, "the picker does not say how to abandon the search");
+  assert.doesNotMatch(picking, /jump/, "digits are text in the picker and must not be offered");
 });
 
 test("WITHOUT a keyboard there is no hint, because there is nothing to press", () => {
