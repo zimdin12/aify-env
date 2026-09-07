@@ -168,3 +168,21 @@ test("THE NOTICE DOES NOT EXPIRE INTO THE ESCAPE IT WAS HIDING", () => {
   assert.ok(!later.join("").includes(`${ESC}[12;40H`),
     "the buffered cursor control was handed to the renderer");
 });
+
+test("R8: THE NOTICE NAMES THE COMMAND THAT WORKS, and promises nothing Enter does not do", () => {
+  // It used to say "press Enter to attach". Review followed that instruction through the real
+  // SSE -> follower -> buffer -> dashboard composition: Enter switches key forwarding ON but keeps
+  // this notice-only renderer, so the title changes to "typing here" and input reaches the agent
+  // while the operator sees no screen at all. Blind typing into a live worker is worse than a pane
+  // that admits it cannot draw.
+  const b = new PaneBuffer();
+  b.append(`${ESC}[2J${ESC}[Hpainted`);
+  const named = b.view({ height: 4, width: 60, agent: "sc-coder" }).join(" ");
+  assert.match(named, /aify-env attach sc-coder/, "the notice does not name the exact command");
+  assert.doesNotMatch(named, /press Enter/i,
+    "the notice still promises that Enter restores the display, which it does not");
+
+  // Without an agent it still names the command, with a placeholder rather than a wrong id.
+  const anonymous = b.view({ height: 4, width: 60 }).join(" ");
+  assert.match(anonymous, /aify-env attach <agent>/);
+});
