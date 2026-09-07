@@ -96,6 +96,23 @@ if (!once) {
   // timer, node found an empty loop with a pending top-level await and exited 13 -- a DIFFERENT
   // silent early exit from the one being fixed, reached in under a second. The first version of this
   // fix had exactly that bug.
+  // REGISTERED BEFORE THE AWAIT, because the await below never resolves.
+  //
+  // This listener shipped on 2026-09-07 sitting AFTER it, which is unreachable code: the terminal
+  // could be resized all day and nothing was ever called. Review executed the exact binary with fake
+  // terminal dependencies and measured it -- `started=1`, `keepalives=1`, `resizeListeners=0`, no
+  // resize calls -- then showed the identical registration moved above the await yielding one
+  // listener and a resize for 80x20. The direct dashboard and daemon tests do not reach this
+  // entrypoint, which is how a dead line passed a green suite.
+  //
+  // What it is for: `columns` and `rows` are read once at startup, so a resized window kept being
+  // painted at the old size. Wider rows leave a tail nothing erases; narrower ones wrap and
+  // desynchronise the frame diff's absolute row addressing.
+  if (interactive) {
+    process.stdout.on("resize", () => {
+      view.resize({ columns: process.stdout.columns, rows: process.stdout.rows });
+    });
+  }
   const keepAlive = setInterval(() => {}, 1 << 30);
   // The exits are `onQuit`, the two signal handlers above, and the daemon's death. There is no
   // fourth way for a view that owns nothing to be finished, so nothing resolves this.
@@ -103,14 +120,4 @@ if (!once) {
   clearInterval(keepAlive);
 } else {
   view.stop();
-}
-
-// THE TERMINAL CHANGES SIZE WHILE THE VIEW IS OPEN, and until 2026-09-07 nothing noticed: `columns`
-// and `rows` were read once, above, so a resized window kept being painted at the old size. Wider
-// rows leave a tail nothing erases; narrower ones wrap and desynchronise the frame diff's absolute
-// row addressing. The size is the caller's to know, so the caller reports it.
-if (interactive) {
-  process.stdout.on("resize", () => {
-    view.resize({ columns: process.stdout.columns, rows: process.stdout.rows });
-  });
 }
