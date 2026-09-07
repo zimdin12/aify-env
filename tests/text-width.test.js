@@ -119,3 +119,50 @@ test("a zero budget yields nothing, and never a stray escape", () => {
   assert.equal(clipToWidth(dim("text"), 0), "");
   assert.equal(clip(dim("text"), 0), "");
 });
+
+// ── R10: the cases an independent oracle caught ─────────────────────────────────────────────────
+//
+// Review measured a row this module ADMITTED as 80 cells occupying 115 under an independent wcwidth,
+// and wrapping in pyte. The cause was judging a cluster by its BASE character alone: an
+// emoji-presentation selector, a keycap mark and a regional-indicator pair each make a cluster two
+// cells wide whatever its base is.
+
+test("EMOJI PRESENTATION IS TWO CELLS, whatever the base character is", () => {
+  // U+FE0F asks for the emoji rendering of a character that is TEXT by default. The base is narrow;
+  // the cluster is not. Every one of these was counted as one cell.
+  assert.equal(width("❤️"), 2, "heart with emoji presentation");
+  assert.equal(width("✔️"), 2, "check mark with emoji presentation");
+  assert.equal(width("1️⃣"), 2, "keycap 1");
+  // ...and the TEXT presentation of the same base stays one cell, which is what makes this a rule
+  // about the selector rather than about the character.
+  assert.equal(width("❤"), 1, "a bare heart is text presentation and one cell");
+});
+
+test("A FLAG IS ONE GRAPHEME AND TWO CELLS", () => {
+  // A regional-indicator PAIR is a single grapheme. Counting the pair as two separate narrow
+  // characters is the same error in a different costume.
+  assert.equal(width("\u{1F1FA}\u{1F1F8}"), 2, "US flag");
+  assert.equal(width("\u{1F1FA}\u{1F1F8}\u{1F1EA}\u{1F1FA}"), 4, "two flags are four cells");
+});
+
+test("the ranges the table was missing", () => {
+  assert.equal(width("\u{1FAE0}"), 2, "melting face — Extended-A was absent entirely");
+  assert.equal(width("⌚"), 2, "watch — Emoji_Presentation outside the pictograph blocks");
+  assert.equal(width("⭐"), 2, "star");
+  assert.equal(width("\u{1F7E0}"), 2, "orange circle");
+  // CONTROL: the ambiguous glyphs this view is built from must NOT have become wide.
+  for (const glyph of ["●", "○", "❯", "▶", "─", "│", "·", "…", "↑"]) {
+    assert.equal(width(glyph), 1, `${glyph} became wide`);
+  }
+});
+
+test("CLIPPING SEGMENTS THE SAME BYTES WIDTH MEASURES", () => {
+  // `width` strips SGR then segments; clipping used to segment the RAW string, so an escape between a
+  // letter and its combining mark split one grapheme in two and the accent was dropped. The styled
+  // and unstyled forms are the same character and must clip the same way.
+  const styled = `e${ESC}[31ḿx`;
+  assert.ok(clipToWidth(styled, 1).includes("́"),
+    "the accent was cut off its letter because an escape sat between them");
+  assert.equal(width(clipToWidth(styled, 1)), 1, "the styled clip is not one column wide");
+  assert.equal(width(clipToWidth("éx", 1)), 1);
+});
