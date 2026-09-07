@@ -129,8 +129,11 @@ Services it can reach, the processes it started, and its own traffic. Each proce
   process knows what it is doing, and it already says so in a sequence every terminal honours.
 - **up** -- derived where a clock is allowed. The view is pure and holds none.
 
-**Resident agents never appear here**, and that is not a gap: they connect straight to their service
-and this environment never starts them. What this list shows is what it launched.
+**A resident agent appears here only if it was started through this environment**, which is what
+`--shared` does: `claude-aify --shared` execs `aify-env run`, so the process is launched HERE, gets a
+row, and can be attached to from another terminal. A resident started the ordinary way connects
+straight to its service and this environment never sees it. The rule is not resident-versus-managed
+-- it is whether this environment launched the process.
 
 Colour and width are decided by the caller, so a pipe gets neither and `NO_COLOR` is honoured. Every
 state is a word as well as a colour -- a glyph alone fails for a piped view or a colour-blind reader.
@@ -197,20 +200,24 @@ carrying no clue at all.
 
 ## What it does today
 
+```bash
+aify-env --help
 ```
-aify-env                 run the environment on 127.0.0.1:8802, with the live view in this terminal
-aify-env tui             the live view alone, against an environment already running
-aify-env tui --once      render one frame and exit -- what a script or a test wants
-aify-env doctor          what this host can say about itself, and what each service said
-aify-env --port 0        pick an ephemeral port (what the tests use)
-aify-env --version
 
-aify-env                     run the environment, with the live view in this terminal
-aify-env tui                 the live view alone, against a daemon already running
-aify-env doctor              passed / failed / unanswered, human-readable
-aify-env doctor --json       {summary, counts, exitCode, checks:[{id, state, detail, fix}]}
-aify-env doctor --strict     exit non-zero when anything failed OR went UNANSWERED
-```
+**That is the list, and this file deliberately does not keep a second copy of it.** The block that
+used to sit here had been hand-copied twice into one code fence -- the same six commands written out
+in two different wordings, one after the other -- and between them they had missed `attach`, `run`,
+`credential` and `--force` entirely. A command list in prose is a cache of `--help`, and this one had
+gone stale in the way a cache does: silently, while looking authoritative.
+
+What `--help` does not say, and belongs here:
+
+- **`aify-env doctor --strict` is the one to reach for in a script.** It exits non-zero when anything
+  failed OR went UNANSWERED, and `--json` gives
+  `{summary, counts, exitCode, checks:[{id, state, detail, fix}]}`.
+- **`aify-env tui --once` renders one frame and exits** -- what a test or a status line wants.
+- **`aify-env --port 0` asks the OS for a free port**, which is how the suite runs without touching a
+  live environment.
 
 **`--strict` is the one to reach for in a script**, and the word "unanswered" in its description is
 load-bearing. Without it the exit is always 0, because a report you run to look at should not fail the
