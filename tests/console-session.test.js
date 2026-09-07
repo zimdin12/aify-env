@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { dashboardColumns } from "../lib/console-view.mjs";
 import { ConsoleSession } from "../lib/console-session.mjs";
 import { STREAMING } from "../lib/output-follower.mjs";
 
@@ -156,6 +157,9 @@ test("input meant for the process comes back as toPty, not written from in here"
 test("the pane carries what the composer needs, including the follower's own status", () => {
   const s = session([]);
   s.syncProcesses(procs("a"));
+  // THE PANE IS HIDDEN UNTIL ASKED FOR, so this presses the key an operator would. What is under
+  // test here is what the pane CARRIES, not whether it is showing.
+  s.handleInput("p");
   const pane = s.pane();
   assert.equal(pane.id, "a");
   assert.equal(pane.label, "label-a");
@@ -167,9 +171,36 @@ test("the pane says whether input is going to the process", () => {
   // An operator typing into a pane needs to know whether the keys land there or move the selection.
   const s = session([]);
   s.syncProcesses(procs("a"));
+  s.handleInput("p");
   assert.equal(s.pane().attached, false);
   s.handleInput(String.fromCharCode(13));
   assert.equal(s.pane().attached, true);
+});
+
+test("THE PANE IS HIDDEN UNTIL ASKED FOR, so the agent list gets the whole screen", () => {
+  // The operator's complaint, in one assertion: "as you can see right side does not show much and I
+  // cannot see all my agents in a list". `dashboard.mjs` derives the dashboard's width from
+  // `Boolean(console_?.pane())` and passes the same call's result as the pane, so a null here both
+  // drops the console and widens the list. One answer, not two that can disagree.
+  const s = session([]);
+  s.syncProcesses(procs("a"));
+  assert.equal(s.pane(), null, "the pane was showing before anyone asked for it");
+  assert.equal(dashboardColumns(120, Boolean(s.pane())), 120, "the list did not get the full width");
+
+  s.handleInput("p");
+  assert.notEqual(s.pane(), null, "`p` did not open the pane");
+  assert.equal(dashboardColumns(120, Boolean(s.pane())), 60, "the split did not happen");
+});
+
+test("attaching opens the pane even when it was hidden", () => {
+  // Otherwise Enter puts the keyboard inside a process whose output is not on screen.
+  const s = session([]);
+  s.syncProcesses(procs("a"));
+  assert.equal(s.pane(), null);
+  s.handleInput(String.fromCharCode(13));
+  const pane = s.pane();
+  assert.notEqual(pane, null, "attached with the pane still hidden -- input would be blind");
+  assert.equal(pane.attached, true);
 });
 
 test("stop() closes the stream and is safe twice", () => {
@@ -201,6 +232,7 @@ test("a follower whose start REJECTS does not reject into the render loop", asyn
   });
   assert.doesNotThrow(() => s.syncProcesses(procs("a")));
   await new Promise((r) => setImmediate(r));
+  s.handleInput("p");
   assert.equal(s.pane().status, "failed");
 });
 
