@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { clip, clipToWidth, renderDashboard, width, windowAround } from "../lib/tui.mjs";
-import { composeConsole, dashboardColumns } from "../lib/console-view.mjs";
+import { composeConsole, dashboardColumns, paneTitle } from "../lib/console-view.mjs";
 import { sanitizeTitle } from "../lib/process-registry.mjs";
 
 const ESC = String.fromCharCode(27);
@@ -190,4 +190,81 @@ test("the hint is shown even when NOTHING is running", () => {
   const out = renderDashboard(idle, { columns: 90, keys: { enabled: true, canQuit: true }, view: { rows: [], selected: -1, mode: "dashboard", query: "" } }).join("\n");
   assert.match(out, /find/, "an idle environment names no bindings at all");
   assert.doesNotMatch(out, /attach/, "it offers attaching when there is nothing to attach to");
+});
+
+// ── the floors that let a frame run past the terminal ───────────────────────────────────────────
+
+test("A NARROW TERMINAL IS A LAYOUT, NOT AN INPUT TO OVERRIDE", () => {
+  // `wide = Math.max(60, columns)` rendered a 60-column frame into a 40-column window: 13 of 19
+  // lines over the margin, every one wrapping, and one wrapped row shifts every row below it out
+  // from under `frameUpdate`'s absolute addressing. A 40-column terminal is a split pane, not an
+  // exotic case.
+  for (const columns of [40, 50, 60, 80]) {
+    const lines = renderDashboard(snap(3), { columns, keys: KEYS, view: view(3, 0) });
+    const over = lines.filter((line) => width(line) > columns);
+    assert.deepEqual(over.map((l) => width(l)), [], `lines exceed ${columns} columns`);
+  }
+});
+
+test("THE TABLE DOES NOT OVERSHOOT, even when the fixed columns nearly fill the screen", () => {
+  // An 8-column floor on the last column won whenever the rest nearly filled the width, and the row
+  // then ran `2 + fixed + 8` wide regardless -- measured at up to 15 columns past the margin with
+  // this fleet's real agent names.
+  const long = Array.from({ length: 3 }, (_, i) => ({
+    ...procs(1)[0], id: `aaaa-p${i + 1}`, label: "comms-senior-dev", title: "claude working on something",
+  }));
+  for (const columns of [55, 60, 65, 72]) {
+    const lines = renderDashboard({ ...snap(3), processes: long },
+      { columns, keys: KEYS, view: { rows: long, selected: 0, mode: "dashboard", query: "" } });
+    const over = lines.filter((line) => width(line) > columns);
+    assert.deepEqual(over.map((l) => width(l)), [], `the table overshoots at ${columns} columns`);
+  }
+});
+
+test("the terminals line is clipped like everything else", () => {
+  // A real node-pty failure reason runs past 90 columns and this line had no budget at all.
+  const broken = {
+    ...snap(1),
+    terminals: { available: false, reason: "node-pty failed to load: The specified module could not be found, and here is a great deal more detail nobody asked for" },
+  };
+  const lines = renderDashboard(broken, { columns: 60, keys: KEYS, view: view(1, 0) });
+  assert.deepEqual(lines.filter((l) => width(l) > 60).map((l) => width(l)), []);
+});
+
+// ── the field that had no reader ────────────────────────────────────────────────────────────────
+
+test("AN ATTACHED PANE SAYS SO IN ITS HEADER", () => {
+  // `console-session.mjs` has set `pane.attached` since the pane existed and nothing read it, so a
+  // watched pane and one holding your keyboard were byte-identical -- and on a wide screen the pane
+  // is where the eye is. A declared field with no reader changes nothing.
+  const base = { id: "p1", label: "sc-coder", status: "open", exit: null };
+  const watched = paneTitle({ ...base, attached: false }, 40);
+  const typing = paneTitle({ ...base, attached: true }, 40);
+  assert.notEqual(watched, typing, "attached and watched panes render identically");
+  assert.match(typing, /typing here/);
+  assert.doesNotMatch(watched, /typing here/);
+});
+
+test("the pane header still fits its column when it says so", () => {
+  const long = { id: "p1", label: "a-very-long-agent-identifier", status: "open", exit: null, attached: true };
+  assert.ok(width(paneTitle(long, 20)) <= 20);
+});
+
+// ── polish ──────────────────────────────────────────────────────────────────────────────────────
+
+test("no phantom column when there is no keyboard", () => {
+  // An empty header still costs its two-space separator, so a piped render carried a dead column
+  // plus its gap on every row.
+  const withKeys = renderDashboard(snap(1), { columns: 100, keys: KEYS, view: view(1, 0) })
+    .find((l) => l.includes("agent-01"));
+  const without = renderDashboard(snap(1), { columns: 100, view: view(1, 0) })
+    .find((l) => l.includes("agent-01"));
+  assert.ok(width(without) < width(withKeys), "the keyboardless row is no narrower");
+});
+
+test("one unknown process is described in the singular", () => {
+  const one = { ...snap(1), unknown: [{ id: "u1", pid: 5 }] };
+  const out = renderDashboard(one, { columns: 100, keys: KEYS, view: view(1, 0) }).join("\n");
+  assert.match(out, /1 process whose liveness/);
+  assert.doesNotMatch(out, /process\(es\)/);
 });
