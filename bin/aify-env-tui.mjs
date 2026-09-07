@@ -29,7 +29,7 @@ const endpoint = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
 // calls the same function and deliberately passes no input for the same reason.
 const interactive = !once && Boolean(process.stdin.isTTY);
 
-const { stop } = await startDashboard({
+const view = await startDashboard({
   endpoint,
   registryPath,
   once,
@@ -39,7 +39,7 @@ const { stop } = await startDashboard({
   // THIS process is only a view, so quitting is the whole of its shutdown -- but the decision stays
   // here rather than in lib, which owns no lifecycle on purpose.
   onQuit: () => {
-    stop();
+    view.stop();
     process.exit(0);
   },
   // Writing to a process is the daemon's business. A view asks; it does not reach into a PTY.
@@ -72,7 +72,7 @@ if (!once) {
   // does not get to reuse this handler, which is why it lives here and not in lib.
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.on(signal, () => {
-      stop();
+      view.stop();
       process.exit(0);
     });
   }
@@ -102,5 +102,15 @@ if (!once) {
   await new Promise(() => {});
   clearInterval(keepAlive);
 } else {
-  stop();
+  view.stop();
+}
+
+// THE TERMINAL CHANGES SIZE WHILE THE VIEW IS OPEN, and until 2026-09-07 nothing noticed: `columns`
+// and `rows` were read once, above, so a resized window kept being painted at the old size. Wider
+// rows leave a tail nothing erases; narrower ones wrap and desynchronise the frame diff's absolute
+// row addressing. The size is the caller's to know, so the caller reports it.
+if (interactive) {
+  process.stdout.on("resize", () => {
+    view.resize({ columns: process.stdout.columns, rows: process.stdout.rows });
+  });
 }
