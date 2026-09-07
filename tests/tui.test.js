@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { renderDashboard } from "../lib/tui.mjs";
+import { DEFAULT_NOTICE_ROWS, renderDashboard } from "../lib/tui.mjs";
 
 const SNAPSHOT = {
   version: "0.6.0",
@@ -189,4 +189,73 @@ test("a long value is clipped rather than allowed to wrap", () => {
 test("the same snapshot renders identically twice, with and without colour", () => {
   assert.deepEqual(renderDashboard(OWNED), renderDashboard(OWNED));
   assert.deepEqual(renderDashboard(OWNED, { color: true }), renderDashboard(OWNED, { color: true }));
+});
+
+// ── notices must never cost the operator their agents ───────────────────────────────────────────
+//
+// REPORTED FROM THE OPERATOR'S OWN SCREEN. A service restart produced a burst of
+// `output not delivered: fetch failed`, the ring filled to twenty, and the fitting loop -- which
+// shrank ONLY the process table -- gave the whole overflow to the agents. Three processes were
+// running and the view showed one, under twenty rows of the same repeated failure. Their words:
+// "i would rather see more agents and less notices, most useful thing in this is that i see what
+// agent is working and what not."
+
+const manyProcs = (n) => Array.from({ length: n }, (_, i) => ({
+  id: `9d8ad800-p${i}`, pid: 1000 + i, label: `agent-${i}`, service: "aify-comms",
+  terminal: true, uptimeMs: 240000, title: "working",
+}));
+// OLDEST FIRST, as the ring really holds them: `createNotices` pushes and shifts, so index 0 is the
+// oldest and the view reverses it. My first fixture had this backwards and failed a correct
+// implementation -- a fixture that does not match the producer tests the fixture.
+const manyNotices = (n) => Array.from({ length: n }, (_, i) => ({
+  atMs: Date.now() - (n - 1 - i) * 1000, count: 1,
+  text: `terminal term_${i} output not delivered: fetch failed`,
+}));
+const fleetSnapshot = (procs, notices) => ({
+  ...SNAPSHOT, processes: procs, notices, nowMs: Date.now(),
+});
+const drawFleet = (procs, notices, rows) => renderDashboard(
+  fleetSnapshot(procs, notices),
+  { rows, columns: 100, keys: { enabled: true, canQuit: true }, view: { rows: procs, selected: 0 } },
+);
+const agentRows = (out) => out.filter((line) => /agent-\d/.test(line)).length;
+const noticeRows = (out) => out.filter((line) => /not delivered/.test(line)).length;
+
+test("A BURST OF NOTICES DOES NOT COST THE AGENT LIST", () => {
+  const procs = manyProcs(12);
+  const out = drawFleet(procs, manyNotices(20), 45);
+  assert.equal(agentRows(out), 12, "agents were dropped to make room for notices");
+  assert.ok(noticeRows(out) <= 10, `notices were not bounded: ${noticeRows(out)} rows`);
+});
+
+test("WHEN IT IS GENUINELY TIGHT, NOTICES GO FIRST AND THE AGENTS STAY", () => {
+  // The ordering is the whole fix. At a height that cannot hold both, the section the operator opened
+  // the view for is the one that survives.
+  const procs = manyProcs(12);
+  const out = drawFleet(procs, manyNotices(20), 30);
+  assert.equal(agentRows(out), 12, "the fitting loop still takes the agents before the notices");
+  assert.equal(noticeRows(out), 0, "notices did not yield when there was no room for both");
+});
+
+test("POSITIVE CONTROL: notices are shown when there is room", () => {
+  // A change that simply deleted the section would satisfy both tests above. This is what stops it.
+  const out = drawFleet(manyProcs(3), manyNotices(20), 60);
+  assert.ok(noticeRows(out) > 0, "the notices section vanished entirely");
+  assert.equal(noticeRows(out), DEFAULT_NOTICE_ROWS,
+    "the cap is not the ten the operator asked for");
+  assert.equal(DEFAULT_NOTICE_ROWS, 10, "the default moved without the operator asking");
+});
+
+test("the heading says the count is a window, not the whole ring", () => {
+  // Ten of twenty is a different fact from ten recent, and an operator chasing a failure needs to
+  // know there are more behind it.
+  const out = drawFleet(manyProcs(2), manyNotices(20), 60).join("\n");
+  assert.match(out, /NOTICES.*10 of 20/, "the heading hides that notices were dropped");
+});
+
+test("NEWEST FIRST, so a cap keeps the ones being asked about", () => {
+  const notices = manyNotices(20);          // index 0 is the newest
+  const out = drawFleet(manyProcs(2), notices, 60).join("\n");
+  assert.match(out, /term_19 /, "the newest notice was cut");
+  assert.doesNotMatch(out, /term_0 /, "an older notice survived while the newest was dropped");
 });
