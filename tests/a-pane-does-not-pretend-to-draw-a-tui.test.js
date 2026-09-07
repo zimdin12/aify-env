@@ -24,7 +24,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { PaneBuffer, CURSOR_PAINT_WINDOW_MS } from "../lib/pane-buffer.mjs";
+import { PaneBuffer } from "../lib/pane-buffer.mjs";
 import { drawsWithCursor } from "../lib/process-registry.mjs";
 
 const ESC = String.fromCharCode(27);
@@ -90,34 +90,23 @@ test("A PAINTED SCREEN SHOWS A NOTICE, not fragments", () => {
   assert.doesNotMatch(out, /fragment A|fragment B/, "screen fragments reached the pane");
 });
 
-test("IT IS A WINDOW, NOT A LATCH", () => {
-  // A process that paints a banner at startup and then logs is a log again afterwards. Latching
-  // would cost it a pane it could legitimately have, for the life of the process.
-  const b = new PaneBuffer();
-  b.append(`${ESC}[2J${ESC}[Hbanner`, { nowMs: NOW });
-  assert.match(seen(b, NOW), /cannot draw/);
-  b.append("\nnow just logging\nmore logs\n");
-  assert.match(
-    seen(b, NOW + CURSOR_PAINT_WINDOW_MS + 1000), /now just logging/,
-    "a process that stopped painting never got its pane back",
-  );
-});
+test("IT IS THE CONTENT, NOT A LATCH AND NOT A CLOCK", () => {
+  // A process that paints a banner at startup and then logs is a log again -- but only once the
+  // painted output has SCROLLED OUT of what the pane retains. Latching would cost it a pane it could
+  // legitimately have; expiring on a timer released the very escape the notice was hiding, with no
+  // new output at all (review measured that at N+30000 versus N+30001). Asking the content answers
+  // both with one rule.
+  const b = new PaneBuffer({ maxLines: 5 });
+  b.append(`${ESC}[2J${ESC}[Hbanner\n`);
+  assert.match(seen(b), /cannot draw/, "the banner was not recognised as a paint");
 
-test("the window holds while a quiet TUI sits idle", () => {
-  // An idle TUI repaints only when something changes. A window shorter than that would flicker
-  // between the notice and a scrambled screen, which is worse than either.
-  const b = new PaneBuffer();
-  b.append(`${ESC}[5;1Hpainted`, { nowMs: NOW });
-  assert.match(seen(b, NOW + CURSOR_PAINT_WINDOW_MS - 1), /cannot draw/);
-});
+  b.append("still holding the banner\n");
+  assert.match(seen(b), /cannot draw/,
+    "the pane was released while the painted bytes were still in the buffer");
 
-test("a clock that runs backwards does not latch the pane", () => {
-  // A stamp from the future is not evidence. Latching is the costly direction: it would hide a
-  // working log behind a notice until the skew cleared.
-  const b = new PaneBuffer();
-  b.append(`${ESC}[5;1Hpainted`, { nowMs: NOW });
-  b.cursorAddressedAtMs = NOW + 60_000;
-  assert.equal(b.isPainting(NOW), false);
+  for (let i = 0; i < 8; i += 1) b.append(`log line ${i}\n`);
+  assert.match(seen(b), /log line 7/,
+    "a process that stopped painting never got its pane back once the paint scrolled out");
 });
 
 test("the notice fits the pane it is given", () => {
@@ -136,4 +125,46 @@ test("height 0 still yields nothing", () => {
   const b = new PaneBuffer();
   b.append(`${ESC}[1;1Hx`, { nowMs: NOW });
   assert.deepEqual(b.view({ height: 0, width: 40, nowMs: NOW }), []);
+});
+
+// ── R9: the two ways the protection was falsified ──────────────────────────────────────────────
+
+test("A SPLIT ESCAPE IS STILL AN ESCAPE", () => {
+  // A PTY splits its output wherever it likes. Review took the same bytes the detector caught whole
+  // -- `ESC[12;40Hfragment` -- delivered them as `ESC[12;` then `40Hfragment`, and the executable
+  // control reached the renderer; pyte confirmed it wrote at row 12 column 40 rather than the pane
+  // origin. Detection now carries the unterminated escape across the boundary.
+  const whole = new PaneBuffer();
+  whole.append(`${ESC}[12;40Hfragment`);
+  const split = new PaneBuffer();
+  split.append(`${ESC}[12;`);
+  split.append("40Hfragment");
+  assert.equal(whole.isPainting(), true, "the whole escape stopped being detected");
+  assert.equal(split.isPainting(), true, "the SAME bytes split across two chunks were not detected");
+});
+
+test("NEGATIVE CONTROL: an ordinary log is not a painted screen", () => {
+  // Without this, a detector that answered true to everything would satisfy the test above and turn
+  // every pane into a permanent notice.
+  const plain = new PaneBuffer();
+  plain.append("building...\ndone\n");
+  assert.equal(plain.isPainting(), false);
+  // ...and a lone ESC that never becomes a sequence must not latch the pane either.
+  const stray = new PaneBuffer();
+  stray.append(`${ESC}`);
+  stray.append("plain text after a stray escape");
+  assert.equal(stray.isPainting(), false, "an ESC that never completed latched the pane");
+});
+
+test("THE NOTICE DOES NOT EXPIRE INTO THE ESCAPE IT WAS HIDING", () => {
+  // Review: the notice at N+30000, and at N+30001 the SAME buffered escape released to the renderer
+  // with no new output at all. Silence is not evidence that cursor controls became safe log text --
+  // the bytes did not change, only the clock did. `isPainting` is now a fact about the buffer.
+  const pane = new PaneBuffer();
+  pane.append(`${ESC}[12;40Hfragment`);
+  assert.equal(pane.isPainting(), true);
+  const later = pane.view({ width: 60, rows: 4 });
+  assert.ok(later.join(" ").length > 0, "the pane rendered nothing at all");
+  assert.ok(!later.join("").includes(`${ESC}[12;40H`),
+    "the buffered cursor control was handed to the renderer");
 });
