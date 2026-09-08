@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { startDashboard } from "../lib/dashboard.mjs";
+import { CLIENT_ACTIONS, performClientAction } from "../lib/client-actions.mjs";
 
 const args = process.argv.slice(2);
 const once = args.includes("--once");
@@ -58,6 +59,14 @@ const view = await startDashboard({
       // void and concluding the agent is ignoring them -- the pane shows that as `gone`.
     }
   },
+  // WHAT THIS CLIENT CAN PERFORM. The same two the daemon offers, reached differently: a client owns
+  // no processes, so it ASKS over HTTP where the daemon calls its own runner. Restart is absent from
+  // both because respawning a managed agent is the service's business and neither tier has a
+  // primitive for it -- and a menu row nobody can run is a control that lies.
+  // ONE LINE, because the logic lives where a test can reach it: importing this file STARTS a view
+  // that talks to a daemon, so anything written here can only ever be read, never exercised.
+  actions: CLIENT_ACTIONS,
+  onAction: (chosen) => { void performClientAction(chosen, { endpoint }); },
   // A pipe gets no escapes: --once is what a script or a test uses, and colour in captured output is
   // noise that has to be stripped again by whoever reads it.
   columns: process.stdout.columns || 100,
