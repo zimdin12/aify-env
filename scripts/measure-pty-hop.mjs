@@ -73,6 +73,10 @@ const MARKER_CHARS = 12;
 //: most a screenful -- a byte floor refused every real PTY run on the first attempt, which is the
 //: measurement telling me the semantics were wrong. Rows survive the rendering; bytes do not.
 const PAINTED_ROW = /row \d+ of a full-screen redraw/g;
+//: THE ROWS A PAINT MAY CONTAIN come from the CHILD, which builds the payloads -- see its `I`
+//: verb. A row-shaped string is not a row from the payload that was requested: review answered
+//: with rows 900 to 904, none of which any payload addresses, and every figure published.
+//:
 //: HOW MANY DISTINCT PAINTED ROWS MUST ARRIVE before a paint's timing is a sample. MEASURED, and
 //: the report prints the numbers it is set against: the fewest any iteration delivered is 14 / 39 /
 //: 39 through the PTY and 14 / 200 / 200 through the pipe, at 1 / 16 / 64 KB. Five is well clear of
@@ -156,7 +160,7 @@ class Peer {
    *
    * Answers `{ms, rows}`, or NaN milliseconds when nothing usable arrived in time.
    */
-  ask(request, token) {
+  ask(request, token, maxRow = 0) {
     const needle = `~${token}~`;
     this.window = "";
     // ARMED BEFORE THE WRITE. A reply to a small request can arrive inside the same tick the write
@@ -171,8 +175,16 @@ class Peer {
     const started = process.hrtime.bigint();
     this._write(request + CR + LF);
     return settled.then((at) => {
-      const rows = new Set(this.window.match(PAINTED_ROW) || []).size;
-      if (typeof at !== "bigint") return { ms: NaN, rows };
+      const seen = [...new Set(this.window.match(PAINTED_ROW) || [])];
+      const rows = seen.length;
+      // A ROW NUMBER NO PAYLOAD ADDRESSES IS NOT THIS PAINT. `maxRow` comes from the child, which
+      // builds the payloads and answers for them; zero means the arm asked for no paint and there
+      // is nothing to bind.
+      const foreign = maxRow > 0 && seen.some((line) => {
+        const number = Number(line.slice(4, line.indexOf(" of ")));
+        return !(number >= 1 && number <= maxRow);
+      });
+      if (typeof at !== "bigint") return { ms: NaN, rows, foreign };
       const ms = Number(at - started) / 1e6;
       // THE AGE DECIDES, NOT WHICH CALLBACK RAN FIRST. A reply delivered after the bound but before
       // the deferred timer fired was accepted and aged -- review's completion at 6000ms on an
@@ -184,8 +196,8 @@ class Peer {
       // ever starved -- review reached the case with an INJECTED monotonic clock, which this file
       // does not have. So it is a guard against a condition this file cannot currently produce, kept
       // because the alternative is publishing a number aged past its own bound.
-      if (!(ms >= 0) || ms > REPLY_TIMEOUT_MS) return { ms: NaN, rows, aged: ms > REPLY_TIMEOUT_MS };
-      return { ms, rows };
+      if (!(ms >= 0) || ms > REPLY_TIMEOUT_MS) return { ms: NaN, rows, foreign, aged: ms > REPLY_TIMEOUT_MS };
+      return { ms, rows, foreign };
     });
   }
 
@@ -222,8 +234,31 @@ class Arm {
     this.badSpans = 0;
     this.thinDrains = 0;
     this.agedOut = 0;
+    //: REPLIES CARRYING A ROW NUMBER NO PAYLOAD ADDRESSES. Counted apart from a thin drain:
+    //: one says too little arrived, the other says the wrong thing did.
+    this.foreignRows = 0;
+    //: THE HIGHEST ROW THIS ARM'S PAYLOAD ADDRESSES, asked of the child before the arm runs.
+    this.maxRow = 0;
     this.issued = 0;
     this.tokens = [];
+  }
+
+  /**
+   * Ask the child which rows this arm's payload addresses, before timing anything.
+   *
+   * THE PARENT MUST NOT OWN THE RECIPE. Copying `paintedBytes` here to derive the range would make
+   * two sources of truth for one fact, and the one that rots is always the copy. The child builds
+   * the payloads, so the child answers for them.
+   */
+  async learnRows(peer) {
+    if (!this.expectBytes) return true;
+    const token = freshToken();
+    this.tokens.push(`~${token}~`);
+    const { ms } = await peer.ask(`I ${token} ${this.expectBytes}`, token);
+    if (!Number.isFinite(ms)) return false;
+    const said = peer.window.match(/maxrow=(\d+)/);
+    this.maxRow = said ? Number(said[1]) : 0;
+    return this.maxRow > 0;
   }
 
   async run(peer) {
@@ -231,7 +266,8 @@ class Arm {
       const token = freshToken();
       this.issued += 1;
       this.tokens.push(`~${token}~`);
-      const { ms, rows, aged } = await peer.ask(this.make(token), token);
+      const { ms, rows, aged, foreign } = await peer.ask(this.make(token), token, this.maxRow);
+      if (foreign) { this.foreignRows += 1; continue; }
       if (this.expectBytes) this.minRows = Math.min(this.minRows, rows);
       // AGED AND NEVER-ARRIVED ARE DIFFERENT FACTS and are counted apart. Folded together, a run in
       // which the deadline guard actually fired would be indistinguishable from one where a reply
@@ -309,7 +345,16 @@ const refusals = [];
 for (const [transport, open] of [["pty", openPtyPeer], ["pipe", openPipePeer]]) {
   const peer = open();
   const arms = armsFor(transport);
-  for (const arm of arms) await arm.run(peer);
+  for (const arm of arms) {
+    // THE HANDSHAKE FIRST, and a child that cannot answer it stops the run: without the payload's
+    // row range there is nothing to bind an admission to, and a probe that quietly fell back to
+    // "any row-shaped string" would be the exact weakness this replaces.
+    if (!await arm.learnRows(peer)) {
+      refusals.push(`${transport} ${arm.label}: the child did not say which rows its payload `
+        + "addresses, so a reply could not be bound to the paint that was requested");
+    }
+    await arm.run(peer);
+  }
   // NEGATIVE CONTROL, ASKED OF THE SAME STREAM THAT ANSWERED EVERY ARM, before the child is asked
   // to leave. A wrap nobody requested must not be found; a search that cannot return ABSENT cannot
   // return PRESENT.
@@ -326,13 +371,19 @@ for (const [transport, open] of [["pty", openPtyPeer], ["pipe", openPipePeer]]) 
         + `${REPLY_TIMEOUT_MS}ms bound while their timer had not yet run, so a starved loop was `
         + "about to publish an aged sample as a fresh one");
     }
+    if (arm.foreignRows) {
+      refusals.push(`${transport} ${arm.label}: ${arm.foreignRows} repl(ies) carried a painted row `
+        + `number this payload never addresses (its highest is ${arm.maxRow}), so what came back is `
+        + "not the paint that was asked for");
+    }
     if (arm.thinDrains) {
       refusals.push(`${transport} ${arm.label}: ${arm.thinDrains} repl(ies) carried fewer than `
         + `${MIN_PAINTED_ROWS} distinct painted rows (fewest seen: ${arm.minRows}), so the `
         + "terminator arrived without the paint it terminates");
     }
     // THE LEDGER HAS TO BALANCE, or requests are going somewhere this probe does not name.
-    const accounted = arm.ms.length + arm.timedOut + arm.badSpans + arm.thinDrains + arm.agedOut;
+    const accounted = arm.ms.length + arm.timedOut + arm.badSpans + arm.thinDrains + arm.agedOut
+      + arm.foreignRows;
     if (accounted !== arm.issued) {
       refusals.push(`${transport} ${arm.label}: ${accounted} of ${arm.issued} requests accounted for`);
     }

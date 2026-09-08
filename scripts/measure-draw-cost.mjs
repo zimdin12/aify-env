@@ -49,10 +49,23 @@ const ROWS = 40;
 
 // THE FRAME IS PARSED, not searched: it is split into the lines the renderer laid out, and a line
 // is the unit a row is bound to below.
-//: EVERY escape, not only the CSI ones: a frame this renderer draws contains none of either,
-//: so the check is "is there an escape here at all" rather than a vocabulary to keep current.
-const ESCAPES = /\u001b(?:\[[0-9;?]*[ -\/]*[@-~]|[@-Z\\-_])?/g;
-const NEWLINE = /\r?\n/;
+//: THE WHOLE CONTROL VOCABULARY A FRAME MAY CONTAIN, which is LF and nothing else.
+//:
+//: MEASURED, NOT CHOSEN, 2026-09-09: a real frame from this renderer at this configuration holds
+//: exactly one control character -- LF, 32 of them in 2,335 chars. No CR, no ESC, no tab, no
+//: DEL. An ESC-only refusal was therefore half a grammar, and review walked through the other
+//: half: a correct identity and token followed by an embedded CR and 24 X's on each row published
+//: eight numeric rows, while those exact bytes interpreted at 132x40 leave six rows of X and
+//: every identity overwritten. Stripping or ignoring a CR treats an OVERWRITE as decoration,
+//: which is the same mistake the ESC round made about an erase.
+//:
+//: A FRAME THIS RENDERER DOES NOT DRAW IS REFUSED AND NAMED, rather than interpreted. If it
+//: ever starts emitting one of these, the run says which -- and that is the failure anybody
+//: would want from a probe whose figures are attributed to it.
+const FORBIDDEN_CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f]/g;
+//: LF ALONE, because CR is refused above -- an `\r?` here would be unreachable and would read as though
+//: a CRLF frame were expected.
+const NEWLINE = /\n/;
 //: THE SHAPE `freshToken` MINTS, so a marker can be recognised without knowing which one it is.
 //: That is what makes "no marker but this frame's" checkable at all: a scan that only knew the
 //: tokens this run ISSUED could never see one it did not.
@@ -227,12 +240,12 @@ async function drawOnce(fetchImpl, count) {
   // optional dependency in this repo -- to answer a question this renderer never poses. If it ever
   // starts emitting escapes, this refuses and names them, which is the failure everyone wants.
   const missing = [];
-  const escapes = text.match(ESCAPES) || [];
-  if (escapes.length) {
-    const named = JSON.stringify(escapes[0]).split(String.fromCharCode(27)).join("ESC");
-    missing.push(`${escapes.length} escape sequence(s) in a frame this renderer draws without any, `
-      + `starting ${named} -- refused rather than stripped, because stripping treats an erase as `
-      + "decoration");
+  const controls = text.match(FORBIDDEN_CONTROL) || [];
+  if (controls.length) {
+    const first = controls[0].codePointAt(0).toString(16).padStart(4, "0");
+    missing.push(`${controls.length} control character(s) outside this renderer's vocabulary, which `
+      + `is LF and nothing else -- the first is U+${first}. Refused rather than stripped or `
+      + "interpreted, because an erase and an overwrite are not decoration");
   }
   const lines = text.split(NEWLINE);
   // PHYSICAL LINES, not painted ones. Filtering the blanks out first was a hole review walked

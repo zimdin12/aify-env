@@ -7,7 +7,14 @@
 //
 //   E <token>          echo once, immediately: a round trip with no work in the middle
 //   P <token> <size>   write a pre-built painted frame of that size, terminated by the token
+//   I <token> <size>   say the HIGHEST row number that payload addresses, then the token
 //   Q                  exit 0
+//
+// `I` EXISTS BECAUSE THE PARENT MUST NOT OWN THE RECIPE. It admits a paint by the row identities
+// that come back, and "a row-shaped string" is not "a row from the payload I asked for" -- review
+// substituted rows 900 to 904 and every figure published. The parent needs the payload's own row
+// range to bind that, and copying the recipe there would make two sources of truth for one fact.
+// The payloads are built here, so the answer comes from here.
 //
 // PAYLOADS ARE BUILT AT BOOT, not per request, so the timed span is a write and a read rather than
 // this process generating bytes. The recipe is the one `measure-xterm-write.mjs` and
@@ -32,6 +39,13 @@ function paintedBytes(targetChars) {
 }
 
 const PAYLOADS = new Map(SIZES.map((size) => [String(size), paintedBytes(size)]));
+//: THE HIGHEST ROW EACH PAYLOAD ADDRESSES, read off the payload rather than from the recipe -- so a
+//: change to `paintedBytes` cannot leave this saying something the bytes do not.
+const MAX_ROW = new Map([...PAYLOADS].map(([size, body]) => [
+  size,
+  Math.max(0, ...(body.match(/row (\d+) of a full-screen redraw/g) || [])
+    .map((seen) => Number(seen.slice(4, seen.indexOf(" of "))))),
+]));
 
 let pending = "";
 process.stdin.setEncoding("utf8");
@@ -51,6 +65,12 @@ function handle(line) {
   if (verb === "Q") { process.exit(0); return; }
   if (verb === "E") {
     process.stdout.write(`${ESC}[1;1H~${token}~${ESC}[0m`);
+    return;
+  }
+  if (verb === "I") {
+    const highest = MAX_ROW.get(String(size));
+    if (highest === undefined) { process.stdout.write(`${ESC}[1;1H~unknown-size-${size}~`); return; }
+    process.stdout.write(`${ESC}[1;1Hmaxrow=${highest} ~${token}~${ESC}[0m`);
     return;
   }
   if (verb === "P") {
