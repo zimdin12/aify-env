@@ -30,7 +30,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { FRAME_OUTPUT, readFrames } from "../lib/sse-frames.mjs";
+import { FRAME_OUTPUT, FRAME_UNREADABLE, readFrames } from "../lib/sse-frames.mjs";
 import { loadEmulator, ScreenEmulator } from "../lib/screen-emulator.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -55,6 +55,15 @@ function capturedFrame() {
   const output = frames.filter((frame) => frame?.type === FRAME_OUTPUT);
   const text = output.map((frame) => frame.text).join("");
   const problems = [];
+  // UNREADABLE FRAMES FIRST, before anything is filtered away. `readFrames` reports them explicitly,
+  // and filtering for FRAME_OUTPUT discarded that report -- so a committed capture with one broken
+  // frame appended still decoded to the expected seven frames and 562 characters, and published.
+  // A workload with a frame the reader could not parse is not the workload this file names.
+  const unreadable = frames.filter((frame) => frame?.type === FRAME_UNREADABLE);
+  if (unreadable.length) {
+    problems.push(`${unreadable.length} frame(s) could not be read `
+      + `(${unreadable.map((frame) => frame.why).join("; ")}), so this capture is damaged`);
+  }
   if (String(carry || "").trim()) {
     problems.push(`${String(carry).length} characters were never consumed, so this is a prefix`);
   }

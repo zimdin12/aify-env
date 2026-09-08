@@ -40,7 +40,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { FRAME_OUTPUT, readFrames } from "../lib/sse-frames.mjs";
+import { FRAME_OUTPUT, FRAME_UNREADABLE, readFrames } from "../lib/sse-frames.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CAPTURE = join(HERE, "..", "tests", "fixtures", "claude-console-sse.raw.txt");
@@ -73,6 +73,15 @@ function realFrame() {
   const output = frames.filter((frame) => frame?.type === FRAME_OUTPUT);
   const text = output.map((frame) => frame.text).join("");
   const problems = [];
+  // UNREADABLE FRAMES FIRST, before anything is filtered away. `readFrames` reports them explicitly,
+  // and filtering for FRAME_OUTPUT discarded that report -- so a committed capture with one broken
+  // frame appended still decoded to the expected seven frames and 562 characters, and published.
+  // A workload with a frame the reader could not parse is not the workload this file names.
+  const unreadable = frames.filter((frame) => frame?.type === FRAME_UNREADABLE);
+  if (unreadable.length) {
+    problems.push(`${unreadable.length} frame(s) could not be read `
+      + `(${unreadable.map((frame) => frame.why).join("; ")}), so this capture is damaged`);
+  }
   if (!output.length) problems.push("the capture decoded to NO output frames");
   if (String(carry || "").trim()) {
     problems.push(`${String(carry).length} characters of the capture were never consumed, so this `
@@ -160,7 +169,8 @@ class Arm {
       // the platform's ~15.6ms timer granularity, not the parse. That number is real and belongs
       // here, but it is a property of the SCHEDULER and it swamped the thing being measured.
       //
-      // PARSE COST is the whole batch issued back to back with only the LAST callback awaited. The
+      // COMPLETION WALL TIME is the whole batch OFFERED back to back with only the LAST callback
+      // awaited. It is not a parse cost and this file no longer calls it one. The
       // deferral is then paid a handful of times for the run instead of once per write, so what is
       // left is the work.
       // THE SAME ADMISSION AS THE BATCH, because guarding one phase and not the other leaves the
@@ -254,7 +264,7 @@ const ARMS = [
 ];
 
 const rows = ["HOP FIVE, FIRST HALF: amortized headless write-completion wall time",
-  "  arm                     UTF-8 B   latency p50   write/frame     MB/s written",
+  "  arm                  offered B   latency p50   per OFFERED     offered MB/s",
   "                                        (one write)   (amortised,                ",
   "                                                       includes xterm's deferral)"];
 const refusals = [];
@@ -325,7 +335,9 @@ for (const arm of ARMS) {
 //
 // The floor sits between two things that were actually measured on this host: arms of IDENTICAL size
 // give 0.99x, and the real geometry gives 4.1x. 2x is comfortably above the first and comfortably
-// below the second, so it cannot be met by noise and does not go red on an ordinary run. The ratio is
+// below the second. It says the ARMS DIFFER; it does not say the difference is parsing, and review
+// showed why that distinction matters -- charging every arm an identical parser cost and changing
+// only the large arm's scheduling still published 5.4x. The ratio is
 // sublinear -- 64x the bytes for ~4x the time -- because per-write overhead dominates at 1KB, which
 // is why a floor anywhere near 64 would be wrong.
 const MIN_GROWTH = 2;
@@ -338,7 +350,7 @@ if (![small, large].every((ms) => Number.isFinite(ms) && ms > 0)) {
   refusals.push(`the growth check compared ${small} and ${large}, at least one of which is not a `
     + `positive finite number, so the inequality between them means nothing`);
 } else if (!(large >= small * MIN_GROWTH)) {
-  refusals.push(`64 KB parses in ${large.toFixed(4)}ms and 1 KB in ${small.toFixed(4)}ms -- `
+  refusals.push(`64 KB completes in ${large.toFixed(4)}ms and 1 KB in ${small.toFixed(4)}ms -- `
     + `${(large / small).toFixed(2)}x for 64x the bytes, under the ${MIN_GROWTH}x floor. These `
     + `timings are not tracking the work.`);
 }
@@ -352,16 +364,31 @@ if (refusals.length) {
   console.log("");
   console.log(`Both phases of every arm left their own witness on the screen, a marker no arm wrote `
     + `was not found, and 64 KB costs ${(large / small).toFixed(1)}x what 1 KB costs -- so these `
-    + `timings vary with the work rather than being a fixed overhead.`);
-  console.log(`THE LATENCY COLUMN IS THE SCHEDULER: every arm reads about the same `
-    + `${percentile(ARMS[0].ms, 0.5).toFixed(1)}ms whatever its size, which is this host's ~15.6ms `
-    + `timer granularity showing through xterm's deferred callback. A browser defers differently, so `
-    + `it does not transfer.`);
-  console.log(`AND THE AMORTISED COLUMN IS NOT THE PARSER IN ISOLATION EITHER. It is write-completion `
-    + `wall time per frame, which contains xterm's own deferral -- the WriteBuffer yields after a `
-    + `12ms slice -- so a growth ratio shows that the arms differ, not that the difference is parsing. `
-    + `Separating the parser from its scheduling would need per-interval instrumentation this does not `
-    + `have.`);
+    + `completion times differ between the arms rather than being one fixed overhead. THAT IS ALL `
+    + `IT SAYS: which component the difference is in is not established here.`);
+  // THE EXPLANATION IS CONDITIONAL ON THE READING, because it was printed unconditionally and
+  // review produced rows spanning 1.1 to 32.1ms under it while the sentence claimed they were all
+  // about the same. A line that describes the data has to look at the data.
+  const latencies = ARMS.map((arm) => percentile(arm.ms, 0.5));
+  const spread = Math.max(...latencies) - Math.min(...latencies);
+  if (spread < 2) {
+    console.log(`THE LATENCY COLUMN IS THE SCHEDULER: every arm reads about the same `
+      + `${latencies[0].toFixed(1)}ms whatever its size (spread ${spread.toFixed(2)}ms), which on `
+      + `this host is the ~15.6ms timer granularity showing through xterm's deferred callback. A `
+      + `browser defers differently, so it does not transfer.`);
+  } else {
+    console.log(`THE LATENCY COLUMN VARIES ACROSS THE ARMS HERE (${latencies.map((ms) => ms.toFixed(1)).join(", ")}ms, `
+      + `spread ${spread.toFixed(2)}ms), so it is NOT simply this host's timer floor and no single `
+      + `explanation is offered for it.`);
+  }
+  console.log(`THE CONTRACT, so the columns are not read for more than they say: the batch OFFERS `
+    + `${WRITES} writes and awaits ONLY the final callback. A completion is that callback firing, `
+    + `not ${WRITES} parses. Each phase leaves a marker witness, which shows the phase drew `
+    + `something and does NOT show that every offered write was separately consumed. The amortised `
+    + `column is batch wall time per OFFERED write; the throughput column is offered UTF-8 bytes per `
+    + `completion-wall second. Both contain xterm's own deferral -- the WriteBuffer yields after a `
+    + `12ms slice -- so neither isolates the parser, and separating the two would need per-interval `
+    + `instrumentation this does not have.`);
   console.log("WHAT THIS IS NOT, and it is half the hop: the RENDERER is absent. Painting the parsed "
     + "buffer into a DOM or canvas, and the browser's scheduling of that work against everything "
     + "else on the page, are not in any figure above and still need a browser.");
