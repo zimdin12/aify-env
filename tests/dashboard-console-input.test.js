@@ -50,6 +50,11 @@ const fakeFetch = (processes) => async (url) => {
       ok: true,
       status: 200,
       body: (async function* body() {
+        // LEADS WITH `meta`, as the daemon does. Without it the stream reads as an unknown history,
+        // the pane shows the refusal notice, and input is correctly declined -- so a fixture that
+        // omits it is testing a configuration this version does not produce.
+        yield encoder.encode(`event: meta${LF}data: ${JSON.stringify(
+          { cols: 80, rows: 24, truncated: false, replayBytes: 65536 })}${LF}${LF}`);
         yield encoder.encode(`data: ${JSON.stringify("ready")}${LF}${LF}`);
         // Held open, like the real one: a console stream ends when the process does.
         await new Promise(() => {});
@@ -192,7 +197,7 @@ test("keys meant for a process are HANDED BACK, not written from inside the view
   const sent = [];
   const input = new FakeInput();
   const { stop } = await start(input, { onInput: (target, data) => sent.push([target?.id, data]) });
-  input.emit("data", ENTER);   // attach
+  input.emit("data", ENTER);   // attach -- which OPENS the follower and resets readiness with it
   // A FRAME HAS TO LAND FIRST, and this await is the test being honest rather than a workaround.
   // Input is gated on a pane frame having actually RENDERED -- not on the layout permitting one --
   // so a synchronous burst outruns the screen and is refused. At human typing speed the draw
@@ -201,7 +206,10 @@ test("keys meant for a process are HANDED BACK, not written from inside the view
   // Long enough for the stream to OPEN, not just for a microtask: `start()` is deliberately not
   // awaited by the session (a render loop must not block on a connection), so the follower reaches
   // `streaming` a few tasks later.
-  await new Promise((r) => setTimeout(r, 30));
+  // LONGER NOW, and the reason is a real gate rather than a slow machine: attaching opens a follower,
+  // which resets readiness, so the frame that restores it is the one drawn AFTER the attach -- and
+  // the stream has to reach `streaming` before input is live at all.
+  await new Promise((r) => setTimeout(r, 120));
   input.emit("data", "hello");
   stop();
   assert.deepEqual(sent, [["p1", "hello"]]);
@@ -291,6 +299,49 @@ test("NEGATIVE CONTROL: with no handler the menu is inert and nothing throws", a
     input.emit("data", String.fromCharCode(13));
   });
   stop();
+});
+
+
+test("A FRAME THAT WAS NEVER WRITTEN IS NOT CACHED AS DRAWN", async () => {
+  // REVIEW'S CACHE COUNTEREXAMPLE. `frameUpdate` diffs against `previousLines`, and caching those
+  // lines BEFORE the write meant a FAILED frame still recorded them as on screen -- so re-entering
+  // the same state produced no bytes at all, and the readiness that the failure revoked came straight
+  // back with nothing having been drawn. An intention is not a frame.
+  let failNext = false;
+  const written = [];
+  const input = new FakeInput();
+  const { stop } = await startDashboard({
+    endpoint: "http://127.0.0.2:1",
+    registryPath: "/nonexistent/services.json",
+    clearScreen: true,
+    intervalMs: 60_000,
+    columns: 120,
+    rows: 20,
+    input,
+    write: (text) => {
+      if (failNext) throw new Error("the terminal refused the write");
+      written.push(text);
+    },
+    fetchImpl: fakeFetch([{ id: "p1", label: "one" }]),
+    readFile: () => { throw new Error("no registry"); },
+  });
+  await new Promise((r) => setTimeout(r, 60));
+  const before = written.length;
+  assert.ok(before > 0, "nothing was ever drawn, so this test proves nothing");
+
+  // A frame that throws: the cache must not remember it.
+  failNext = true;
+  input.emit("data", "p");
+  await new Promise((r) => setTimeout(r, 60));
+  failNext = false;
+
+  // The very next draw of the SAME state must therefore produce bytes again.
+  input.emit("data", "p");
+  input.emit("data", "p");
+  await new Promise((r) => setTimeout(r, 60));
+  stop();
+  assert.ok(written.length > before,
+    "a state whose frame failed produced no bytes on re-entry, so the cache had recorded it as drawn");
 });
 
 console.log("dashboard-console-input.test.js: all assertions passed");

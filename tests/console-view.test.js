@@ -9,6 +9,7 @@ import test from "node:test";
 
 import {
   MIN_COLUMNS_FOR_PANE,
+  PANE_HEADER_ROWS,
   composeConsole,
   paneTitle,
   paneWillBeDrawn,
@@ -207,6 +208,26 @@ test("the compositor AGREES with the predicate, which is the point of having one
     assert.equal(composed.includes("pane-body"), paneWillBeDrawn(pane, columns),
       `at ${columns} columns the compositor and the predicate disagree`);
   }
+});
+
+
+test("HEIGHT COUNTS: a terminal with room for only the header draws no pane", () => {
+  // Review measured a 120x1 terminal displaying a HEADER and forwarding input. `composeConsole` spends
+  // `PANE_HEADER_ROWS` on the title and its rule before any body, and readiness computed from width
+  // alone called that a rendered pane.
+  const pane = { id: "p1", label: "alpha", lines: () => ["body"] };
+  assert.equal(paneWillBeDrawn(pane, 120, 24), true);
+  assert.equal(paneWillBeDrawn(pane, 120, PANE_HEADER_ROWS), false, "header-only counted as a pane");
+  assert.equal(paneWillBeDrawn(pane, 120, 1), false);
+  assert.equal(paneWillBeDrawn(pane, 120, PANE_HEADER_ROWS + 1), true, "one body row is a pane");
+});
+
+test("THE HEADER COST IS ONE NUMBER, not two literals that can drift", () => {
+  // The composer subtracting it and the predicate deciding whether anything is left have to agree.
+  // Two literals is how a 120x1 terminal came to report a rendered pane.
+  const pane = { id: "p1", label: "alpha", lines: ({ height }) => Array.from({ length: height }, () => "b") };
+  const composed = composeConsole({ dashboardLines: ["x"], pane, columns: 120, rows: PANE_HEADER_ROWS + 1 });
+  assert.ok(composed.join("\n").includes("b"), "the composer drew no body where the predicate says it would");
 });
 
 console.log("console-view.test.js: all assertions passed");

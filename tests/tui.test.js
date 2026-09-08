@@ -92,6 +92,24 @@ test("THE TARGET COMES FROM THE FULL LIST, not the visible window", () => {
   assert.match(view, /actions for charlie/, "the menu named the wrong agent under a scrolled table");
 });
 
+test("THE PROMPT NAMES THE BOUND TARGET, not whatever the cursor is on now", () => {
+  // REVIEW'S WITNESS, and it is the confirmation failing in the direction that matters most: the
+  // executor already resolved by identity, but the PROMPT still indexed the current row. After a row
+  // above it exited, the screen read "stop charlie?" while `y` stopped bravo. An operator reading the
+  // wrong name and confirming is worse than either half alone, because the confirmation is the thing
+  // that is supposed to make it safe.
+  const view = withKeys({ mode: "confirm", selected: 2, confirming: "stop", actionTargetId: "p2" });
+  assert.match(view, /stop bravo\?/, "the prompt named the cursor row rather than the bound target");
+  assert.ok(!view.includes("stop charlie?"), "the prompt named the row the cursor drifted onto");
+});
+
+test("A TARGET THAT HAS GONE IS SAID, not silently replaced", () => {
+  // The executor refuses a vanished target, so the prompt must not read as though `y` will stop
+  // something else. It names the id and says it is gone.
+  const view = withKeys({ mode: "confirm", selected: 0, confirming: "stop", actionTargetId: "p9" });
+  assert.match(view, /stop p9 \(gone\)\?/);
+});
+
 test("THE CONFIRMATION STATES THE VERB AND THE SUBJECT, and how to refuse", () => {
   const view = withKeys({ mode: "confirm", selected: 1, confirming: "stop" });
   assert.match(view, /stop bravo\?/);
