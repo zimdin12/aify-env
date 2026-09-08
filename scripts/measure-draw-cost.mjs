@@ -108,8 +108,17 @@ function fakeFetch(processCount, nonceFor) {
 
 async function drawOnce(fetchImpl, count) {
   // ONE NONCE PER FRAME, chosen before the render and read back after it.
+  //
+  // AND OUTSIDE THE CLOCK, with the frame check below. Timing the whole of this function charged
+  // the render for the instrument: minting a token (`randomBytes`), stripping escapes, splitting
+  // lines and scanning a growing retired-token set all sat inside the measured span. Review held
+  // the renderer constant and charged token generation two fake milliseconds; the published figures
+  // moved to 0.03 static and 2.02 changing, which is an instrument boundary, not a render. So the
+  // clock now brackets `startDashboard` and nothing else, and the delta this file reports is the
+  // renderer's.
   if (fetchImpl.nextFrame) fetchImpl.nextFrame();
   let text = "";
+  const renderStarted = process.hrtime.bigint();
   await startDashboard({
     endpoint: ENDPOINT, registryPath: REGISTRY_PATH,
     write: (t) => { text += t; }, clearScreen: false, once: true,
@@ -119,6 +128,7 @@ async function drawOnce(fetchImpl, count) {
     // input, and one an injected fetch does not close. (External review of c74927a.)
     readCredentialStore: () => [],
   });
+  const renderNs = Number(process.hrtime.bigint() - renderStarted);
   // A FRAME IS ONLY A SAMPLE IF IT DREW *THIS* FRAME, and review has now defeated three weaker
   // versions of that: one marker, six markers, and whole-output membership of a per-frame token --
   // the last by returning one fixed blob carrying every token the arm would ever issue. Each time
@@ -133,15 +143,27 @@ async function drawOnce(fetchImpl, count) {
   //   EXCLUSIVE no line may carry a token this arm has retired. A superset carries them all, and
   //             that is precisely what makes it not this frame.
   //
-  // WHAT THIS STILL DOES NOT PROVE, said plainly: the STATIC arm's token is constant for the run
-  // by construction, so within that arm a correct render IS the same text every frame and no
-  // predicate here can separate it from a cache of one. It is unpredictable rather than fixed --
-  // generated per run, so nothing written in advance can contain it -- and the CHANGING arm is
-  // where per-frame rendering is actually demonstrated.
+  // WHAT THIS ESTABLISHES, and no more: that each accepted frame carries THIS frame's identity and
+  // content, laid out inside the viewport it was given. That is a content-and-identity predicate.
+  // It is NOT proof that the imported renderer ran -- an answer that reads the input and lays it
+  // out itself satisfies every clause here, and one is kept in the mutation battery for that
+  // reason. Whether the real renderer was invoked is a source-and-execution fact, established by
+  // reading this file's imports, not inferred from anything below.
+  //
+  // The STATIC arm is weaker still: its token is constant for the run by construction, so within
+  // it a correct render IS the same text every frame and nothing here separates that from a cache
+  // of one. It is unpredictable rather than fixed -- generated per run, so nothing written in
+  // advance can contain it.
   const lines = text.replace(ANSI, "").split(NEWLINE);
   const missing = [];
-  const painted = lines.filter((line) => line.trim() !== "");
-  if (painted.length > ROWS) missing.push(`${painted.length} painted lines exceeds the ${ROWS}-row viewport`);
+  // PHYSICAL LINES, not painted ones. Filtering the blanks out first was a hole review walked
+  // straight through: forty empty lines inserted between the rows changed no label and no token,
+  // took the frame to 46 physical lines, and still passed -- a frame three viewports tall that the
+  // height bound never saw. Only a single trailing terminator is excused, because a frame ending in
+  // a newline yields one empty element that was never a row.
+  const terminated = lines.length > 0 && lines[lines.length - 1] === "";
+  const physical = lines.length - (terminated ? 1 : 0);
+  if (physical > ROWS) missing.push(`${physical} physical lines exceeds the ${ROWS}-row viewport`);
   const overWide = lines.find((line) => line.length > COLUMNS);
   if (overWide !== undefined) missing.push(`a line of ${overWide.length} columns exceeds ${COLUMNS}`);
 
@@ -159,7 +181,7 @@ async function drawOnce(fetchImpl, count) {
     if (text.includes(retired)) { missing.push(`a retired token ${retired} is still on screen`); break; }
   }
   const drewRoster = count === 0 || missing.length === 0;
-  return { bytes: text.length, drewRoster, missing };
+  return { bytes: text.length, drewRoster, missing, renderNs };
 }
 
 async function timeFrames(processCount, nonceFor) {
@@ -170,13 +192,16 @@ async function timeFrames(processCount, nonceFor) {
 
   let bytes = warm.bytes;
   let rejected = warm.drewRoster ? 0 : 1;
-  const started = process.hrtime.bigint();
+  // THE SUM OF THE RENDERS, not the wall time of the loop. The loop also mints tokens and parses
+  // frames, and neither is a cost the console pays.
+  let renderNs = 0;
   for (let i = 0; i < FRAMES; i += 1) {
     const frame = await drawOnce(fetchImpl, processCount);
     bytes += frame.bytes;
+    renderNs += frame.renderNs;
     if (!frame.drewRoster) rejected += 1;
   }
-  const ms = Number(process.hrtime.bigint() - started) / 1e6 / FRAMES;
+  const ms = renderNs / 1e6 / FRAMES;
   return { ms, bytesPerFrame: Math.round(bytes / (FRAMES + 1)), rejected };
 }
 
@@ -218,7 +243,9 @@ for (const [label, nonceFor] of ARMS) {
 if (failures === 0) {
   console.log(header);
   for (const row of rows) console.log(row);
-  console.log(`${LF}Every frame drew the roster it was given, so the figures above are renders.`);
+  console.log(`${LF}Every frame carried this frame's identity and content inside its viewport, and`
+    + ` the figures are the bracketed cost of startDashboard alone -- token generation and frame`
+    + ` checking are outside the clock.`);
 } else {
   process.stderr.write(
     `${LF}NOTHING IS PUBLISHED: ${failures} frame(s) timed without drawing the roster, so those`
