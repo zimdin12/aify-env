@@ -76,6 +76,20 @@ test("CONCEALED TEXT NEVER LEAVES THIS MODULE, and the row does not shift", asyn
   e.dispose();
 });
 
+test("A CONCEALED WIDE GLYPH KEEPS ITS FOOTPRINT, or everything after it shifts left", async () => {
+  // Review measured this: a concealed wide character emitted ONE space while its continuation cell
+  // was skipped, so a `B` at column 3 came out at column 2. Removing the CONTENT is right; removing
+  // its width is a different screen, and a screen whose columns are wrong is the thing an emulator
+  // exists to prevent.
+  const e = await screen({ cols: 20, rows: 2 });
+  await e.write(`${ESC}[1;1HA${ESC}[8m${String.fromCodePoint(0x1f600)}${ESC}[0mB`);
+  const [row] = e.rows();
+  assert.ok(!row.includes(String.fromCodePoint(0x1f600)), "the concealed glyph was printed");
+  assert.equal(row.indexOf("B"), 3,
+    `B sits at column ${row.indexOf("B")} rather than 3 -- the concealed glyph lost a column`);
+  e.dispose();
+});
+
 test("UNICODE 11 IS ACTIVE, because the browser's terminal uses it and a default headless one does not", async () => {
   // Measured: a bare headless terminal reports "6" and an emoji is ONE cell there and TWO at 11, so
   // every character after one sits in a different column. Same parser is only parity when it is the
@@ -190,6 +204,66 @@ test("a style is emitted ONCE PER RUN, not once per cell", async () => {
   const opens = row.split(`${ESC}[0;32;49m`).length - 1;
   assert.equal(opens, 1, `the style was re-emitted ${opens} times for one run`);
   e.dispose();
+});
+
+// ── what a "full repaint" has to mean, measured against the real package ────────────────────
+//
+// THE ORACLE AND THE RECONSTRUCTION. `screen-baseline.mjs` decides whether a screen built from a
+// TRUNCATED replay may be shown as the truth. The only honest way to check that rule is to build both
+// screens -- one fed the whole history, one fed only the retained suffix -- and compare them. If they
+// differ, the rule is calling a wrong screen sound.
+//
+// I ACCEPTED FOUR SEQUENCES AND THREE WERE WRONG, one of them producing actual DISCLOSURE. These
+// tests are the comparisons that removed them, kept so a future widening has to meet them.
+
+/** The screen a terminal shows after `bytes`, with concealed cells blanked as the pane blanks them. */
+async function screenAfter(bytes, { cols = 40, rows = 6 } = {}) {
+  const e = await screen({ cols, rows });
+  await e.write(bytes);
+  const out = e.rows().map((r) => r.trimEnd());
+  e.dispose();
+  return out.join("|");
+}
+
+test("ESC[2J IS NOT A BASELINE: it discloses text the real screen conceals", async () => {
+  // THE MEASURED DISCLOSURE, and the reason the accepted set is now one sequence. `ESC[2J` erases the
+  // display and resets NOTHING else -- not SGR. With the `ESC[8m` that turned conceal ON lost off the
+  // front of a truncated replay, the reconstruction has conceal OFF and PRINTS what the terminal is
+  // hiding. That is not a rendering difference; it is the pane showing a secret.
+  const lost = `${ESC}[8m`;
+  const kept = `${ESC}[2JSYNTHETIC_HIDDEN`;
+  const oracle = await screenAfter(lost + kept);
+  const rebuilt = await screenAfter(kept);
+  assert.ok(!oracle.includes("SYNTHETIC_HIDDEN"), "the oracle is not concealing; this test is void");
+  assert.ok(rebuilt.includes("SYNTHETIC_HIDDEN"),
+    "the reconstruction no longer discloses -- if that is a real fix, this test should be rewritten "
+    + "rather than deleted, because the RULE it justifies is still the conservative one");
+  assert.notEqual(oracle, rebuilt, "the two screens agree, so ESC[2J would be safe after all");
+});
+
+test("ESC[3J IS NOT A BASELINE: it clears scrollback, not the display", async () => {
+  const lost = `${ESC}[1;1HOLD_TEXT_STILL_ON_SCREEN`;
+  const kept = `${ESC}[3J${ESC}[2;1HNEW`;
+  assert.notEqual(await screenAfter(lost + kept), await screenAfter(kept),
+    "ESC[3J discarded the earlier display, which would make it a valid baseline");
+});
+
+test("ESC[?1049h IS NOT A BASELINE: the normal screen underneath was never reconstructed", async () => {
+  // And it comes back: `ESC[?1049l` restores it. Soundness cannot be permanent on the strength of a
+  // switch that can be switched back.
+  const lost = `${ESC}[1;1HNORMAL_SCREEN_CONTENT`;
+  const kept = `${ESC}[?1049hALT${ESC}[?1049l`;
+  assert.notEqual(await screenAfter(lost + kept), await screenAfter(kept),
+    "the alternate-screen round trip preserved the normal screen, which would make it a baseline");
+});
+
+test("POSITIVE CONTROL: RIS IS a baseline -- the two screens agree", async () => {
+  // Without this, the three tests above would be satisfied by an emulator where nothing ever agrees,
+  // and the rule would be "trust nothing" rather than "trust a full reset".
+  const lost = `${ESC}[8m${ESC}[1;1HOLD`;
+  const kept = `${ESC}c${ESC}[1;1HAFTER_RESET`;
+  assert.equal(await screenAfter(lost + kept), await screenAfter(kept),
+    "RIS did not make the lost history irrelevant, so nothing can be a baseline");
 });
 
 // ── the ABSENT arm, in a child process where the package genuinely cannot be resolved ────────────

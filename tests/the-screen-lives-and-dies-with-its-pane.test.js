@@ -48,6 +48,31 @@ function following(...wire) {
 /** Let the emulator finish loading and applying, which it does in tasks rather than synchronously. */
 const settle = () => new Promise((r) => setTimeout(r, 80));
 
+/**
+ * Like `following`, but PAUSES after the first frame so the emulator is loaded before the rest.
+ *
+ * WITHOUT THE PAUSE THERE IS NO WINDOW TO OBSERVE. The import is async, so an unpaused stream is
+ * consumed entirely before the screen exists -- every chunk takes the "no screen yet" path, and a
+ * test written against it cannot tell an eager flag from a correct one. A mutant walked through
+ * exactly that.
+ */
+function followingSlowly(first, ...rest) {
+  const encoder = new TextEncoder();
+  return new OutputFollower({
+    endpoint: "http://127.0.0.1:8802",
+    id: "p1",
+    fetchImpl: async () => ({
+      status: 200,
+      ok: true,
+      body: (async function* body() {
+        yield encoder.encode(first);
+        await new Promise((r) => setTimeout(r, 80));   // the emulator loads in here
+        for (const piece of rest) yield encoder.encode(piece);
+      })(),
+    }),
+  });
+}
+
 const META = (over = {}) => namedFrame("meta", {
   cols: 40, rows: 6, truncated: false, replayBytes: 65536, ...over,
 });
@@ -119,13 +144,76 @@ test("A FULL REPAINT RESCUES IT, which is what stops this being a permanent refu
   //
   // Once a process throws its screen away and draws it again, whatever fell off the front stops
   // bearing on what is displayed. A coding agent repaints constantly, so the wait is seconds.
+  // RIS (`ESC c`), NOT `ESC[2J`. This test used the latter until review proved it is not a full
+  // reset: it erases the display and leaves SGR standing, so a conceal lost off the front of a
+  // truncated replay comes back OFF and the reconstruction prints what the terminal hides.
   const f = following(META({ truncated: true }), dataFrame(`${ESC}[2;3HSUSPECT`),
-    dataFrame(`${ESC}[2J${ESC}[1;1HTRUSTED`));
+    dataFrame(`${ESC}c${ESC}[1;1HTRUSTED`));
   await f.start();
   await settle();
   const drawn = f.lines({ height: 6, width: 60 }).join(" ");
   assert.match(drawn, /TRUSTED/, `a repaint did not rescue the screen: ${drawn}`);
   assert.ok(!drawn.includes("waiting"), "it still says it is waiting after a repaint arrived");
+  f.stop();
+});
+
+test("A SPLIT RESET IS STILL SEEN, because a socket breaks wherever it likes", async () => {
+  // `ESC c` is two bytes. A detector judging each chunk alone misses it delivered as `ESC` then `c`,
+  // and the cost is a console that stays unsound for ever -- the harmless direction, and still a
+  // screen the operator never gets.
+  const f = following(META({ truncated: true }),
+    dataFrame(`${ESC}[2;3HSUSPECT`), dataFrame(ESC), dataFrame(`c${ESC}[1;1HTRUSTED`));
+  await f.start();
+  await settle();
+  const drawn = f.lines({ height: 6, width: 60 }).join(" ");
+  assert.match(drawn, /TRUSTED/, `a reset split across frames was missed: ${drawn}`);
+  f.stop();
+});
+
+test("THE SCREEN IS NOT CALLED SOUND BEFORE THE PARSER HAS APPLIED THE RESET", async () => {
+  // `write` is asynchronous. Setting the flag when the BYTES arrive declares the screen trustworthy
+  // while the buffer still holds the pre-reset picture -- review measured `lines()` publishing
+  // pre-reset content as correct. The flag follows the write's COMPLETION instead.
+  //
+  // TWO EARLIER VERSIONS OF THIS TEST COULD NOT FAIL. The first called `f.screen.write()` directly,
+  // bypassing the function under test. The second drove the real path but on an unpaused stream,
+  // which is consumed before the emulator exists -- so every chunk took the "no screen yet" branch
+  // and neither the correct nor the eager version ever set the flag during the window. This one
+  // pauses the stream so the screen is already open when the reset arrives, which is the only
+  // arrangement where the two behave differently.
+  const f = followingSlowly(META({ truncated: true }), dataFrame(`${ESC}c${ESC}[1;1HAFTER`));
+  await f.start();
+  assert.ok(f.screen, "precondition: the screen was open before the reset arrived");
+  assert.equal(f.repaintedSince, false,
+    "the screen was declared sound while the reset was still in the parser's queue");
+
+  await settle();
+  assert.equal(f.repaintedSince, true, "the reset never took effect at all");
+  f.stop();
+});
+
+test("A CHUNK IS JUDGED ONCE, or a replay can INVENT a reset that never arrived", async () => {
+  // THE DANGEROUS DIRECTION of a double-judged carry. Bytes arriving before the emulator loads are
+  // held and replayed, and if the verdict is recomputed on the way through, the carry left over from
+  // the FIRST pass prefixes the first replayed chunk.
+  //
+  // Constructed here: a first chunk that STARTS with "c" (and paints, so the pane takes the screen
+  // path at all), then a chunk that is a lone ESC. No reset in that order. After the first pass the
+  // carry is ESC; recomputing on replay joins it to the leading "c" and reads `ESC c`, so the
+  // follower would declare a TRUNCATED screen sound on the strength of a reset the process never
+  // sent. Same class as the ED2 disclosure: a wrong screen shown as right.
+  //
+  // THE LEADING "c" AND THE CURSOR MOVE ARE BOTH LOAD-BEARING. Without the cursor move the buffer is
+  // a log, the pane never consults the screen, and the test measures nothing -- which is how my first
+  // version of it failed against correct code.
+  const f = following(META({ truncated: true }), dataFrame(`c${ESC}[1;1Hx`), dataFrame(ESC));
+  await f.start();
+  await settle();
+  assert.equal(f.repaintedSince, false,
+    "a reset was invented by re-judging replayed chunks against a stale carry");
+  const waiting = f.lines({ height: 6, width: 60 }).join(" ");
+  assert.match(waiting, /waiting for the first full repaint/,
+    "the pane published a truncated screen as trustworthy");
   f.stop();
 });
 

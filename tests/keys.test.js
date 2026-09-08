@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DETACH, MENU_ACTIONS, initialFocus, needsConfirming, reconcileFocus, routeKey } from "../lib/keys.mjs";
+import { DETACH, MENU_ACTIONS, MODES, initialFocus, needsConfirming, reconcileFocus, routeKey } from "../lib/keys.mjs";
 
 const ESC = String.fromCharCode(27);
 const UP = `${ESC}[A`;
@@ -34,7 +34,8 @@ test("the selection is CLAMPED when the process list shrinks, not reset", () => 
 test("when the last process goes, the pane closes rather than pointing at nothing", () => {
   // `paneHidden` goes back to the default here because there is nothing left to show in a pane.
   assert.deepEqual(reconcileFocus(pty(2, 3), 0),
-    { mode: "dashboard", selected: -1, count: 0, query: "", paneHidden: true });
+    { mode: "dashboard", selected: -1, count: 0, query: "", paneHidden: true,
+      menuAt: 0, confirming: null });
 });
 
 test("reconciling keeps pty mode while there is still something to show", () => {
@@ -50,6 +51,39 @@ test("reconciling keeps pty mode while there is still something to show", () => 
 
 const ENTER = String.fromCharCode(13);
 const menu = (selected = 1, count = 3) => ({ mode: "dashboard", selected, count, query: "", paneHidden: true });
+
+test("EVERY MODE SURVIVES A REDRAW -- the list of survivors was typed by hand and lost two", () => {
+  // FOUND BY REVIEW WITHIN AN HOUR OF SHIPPING B6. `reconcileFocus` preserved `pty` and `picker` and
+  // reset everything else, so `menu` and `confirm` were discarded on EVERY redraw -- every two
+  // seconds and after every keystroke. The menu vanished before it could be used and a confirmation
+  // was dropped before it could be answered.
+  //
+  // WALKS THE DECLARED SET rather than naming modes again here. A test that listed them would be a
+  // third hand-typed copy of the same fact, and the third copy is the one that goes stale.
+  for (const mode of MODES) {
+    if (mode === "dashboard") continue;
+    const kept = reconcileFocus({ mode, selected: 1, count: 3, query: "", confirming: "stop" }, 3);
+    assert.equal(kept.mode, mode, `a redraw discarded ${mode} mode`);
+  }
+});
+
+test("A SURVIVING CONFIRMATION KEEPS ITS SUBJECT", () => {
+  // A prompt that no longer knows what it is asking about is worse than one that closed: the next
+  // `y` would confirm `confirmed:null`.
+  const kept = reconcileFocus({ mode: "confirm", confirming: "stop", selected: 1, count: 3 }, 3);
+  assert.equal(kept.confirming, "stop");
+  assert.equal(reconcileFocus({ mode: "menu", menuAt: 2, selected: 1, count: 3 }, 3).menuAt, 2,
+    "the menu cursor was reset by a redraw, so arrowing to `stop` could never stick");
+});
+
+test("AN EMPTY LIST CLOSES THE MENU, because its actions all name a process", () => {
+  // The same rule an attached pane already follows. Only the picker survives nothing-to-show.
+  for (const mode of ["menu", "confirm", "pty"]) {
+    assert.equal(reconcileFocus({ mode, selected: 0, count: 1, confirming: "stop" }, 0).mode, "dashboard",
+      `${mode} outlived the list it acts on`);
+  }
+  assert.equal(reconcileFocus({ mode: "picker", selected: 0, count: 1, query: "x" }, 0).mode, "picker");
+});
 
 test("POSITIVE CONTROL: `m` opens the menu on a real selection", () => {
   const opened = routeKey("m", menu());

@@ -19,10 +19,40 @@ const ESC = String.fromCharCode(27);
 test("POSITIVE CONTROL: every sequence this module claims is a repaint is detected", () => {
   // The list and the detector are two things that could disagree. If one grew and the other did not,
   // a baseline would be waited for forever with the evidence already on screen.
-  assert.ok(FULL_REPAINTS.length >= 4, "the repaint list has been emptied");
+  assert.ok(FULL_REPAINTS.length >= 1, "the repaint list has been emptied");
   for (const sequence of FULL_REPAINTS) {
     assert.equal(hasFullRepaint(`before${sequence}after`), true, `${JSON.stringify(sequence)} was missed`);
   }
+});
+
+test("ONLY RIS COUNTS, and the three sequences that used to are each a measured defect", () => {
+  // I accepted four and review disproved three by feeding the WHOLE history to one emulator and the
+  // retained SUFFIX to another. `screen-emulator.test.js` reproduces those comparisons against the
+  // real package; this pins the RULE that came out of them, so a future edit cannot widen the list
+  // back without meeting them.
+  //
+  //   ESC[2J     erases the display and resets NOTHING else -- with a conceal lost off the front the
+  //              reconstruction PRINTED text the oracle hid. Disclosure, not a rendering difference.
+  //   ESC[3J     clears scrollback, not the display.
+  //   ESC[?1049h the alternate screen starts blank, but the normal screen underneath was never
+  //              reconstructed and ESC[?1049l restores it.
+  assert.deepEqual([...FULL_REPAINTS], [`${ESC}c`]);
+  for (const notARepaint of [`${ESC}[2J`, `${ESC}[3J`, `${ESC}[?1049h`, `${ESC}[?1049l`]) {
+    assert.equal(hasFullRepaint(notARepaint), false,
+      `${JSON.stringify(notARepaint)} is treated as a full reset again -- it is not one`);
+  }
+});
+
+test("MALFORMED METADATA FAILS CLOSED, because absent evidence is not evidence of completeness", () => {
+  // The parser coerces a missing or non-boolean `truncated` to `false`, and `false` means "the
+  // history is complete" -- the most dangerous of the three possible answers. A frame that does not
+  // say must not be read as one that says yes.
+  assert.equal(baselineIsSound({}, false), false, "a meta frame with no `truncated` read as complete");
+  assert.equal(baselineIsSound({ truncated: undefined }, false), false);
+  assert.equal(baselineIsSound({ cols: 80, rows: 24 }, false), false);
+  assert.equal(baselineIsSound({ truncated: "no" }, false), false, "a string read as a claim");
+  // POSITIVE CONTROL: a frame that DOES say complete is still believed.
+  assert.equal(baselineIsSound({ truncated: false }, false), true);
 });
 
 test("NEGATIVE CONTROL: ordinary output is not a repaint", () => {

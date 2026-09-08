@@ -272,7 +272,11 @@ test("meta NUMBERS ARE COERCED ONCE, here, and zero survives as a real answer", 
   })).frames;
   assert.equal(strings.cols, 132);
   assert.equal(strings.rows, 40);
-  assert.equal(strings.truncated, false, "a non-boolean truthy value became a truncation claim");
+  // FAILS CLOSED, and this assertion changed direction on 2026-09-08. It used to require a
+  // non-boolean to become `false` -- which is a COMPLETENESS CLAIM, the most dangerous of the three
+  // answers, made on the strength of a field nobody set. "We were not told" now becomes `true`:
+  // unsound until a full reset, which cannot disclose anything.
+  assert.equal(strings.truncated, true, "a frame that did not say was read as saying 'complete'");
 
   const [piped] = readFrames("", namedFrame("meta", { cols: 0, rows: 0 })).frames;
   assert.equal(piped.cols, 0);
