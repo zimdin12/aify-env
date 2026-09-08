@@ -154,4 +154,66 @@ test("THE FLAG IS SET WHERE THE LOSS HAPPENS, not inferred from a full-looking b
   }
 });
 
+test("A RESIZE IS ANNOUNCED, because geometry is a stream and not a fact read once", async () => {
+  // REVIEW'S FINDING: `streamMeta` reported the CURRENT size, but nothing told a subscriber when it
+  // changed -- so a console that learned the geometry before the replay rendered every row after a
+  // resize at the wrong width. Identical bytes wrap differently at a different width, so the
+  // reconstruction and the real screen diverge silently from that moment.
+  const terminal = fakeTerminal({ cols: 132, rows: 40 });
+  const runner = new Runner({ openTerminal: () => terminal });
+  const handle = await runner.start(speaksAndStays("hello"));
+  try {
+    const announced = [];
+    const stop = runner.subscribe(handle.id, () => {}, null, (size) => announced.push(size));
+    assert.ok(stop, "the subscription was refused");
+
+    assert.deepEqual(runner.resize(handle.id, 80, 24), { ok: true });
+    assert.deepEqual(announced, [{ cols: 80, rows: 24 }], "the resize reached no subscriber");
+
+    // AFTER THE PTY TOOK IT, never before. A REFUSED resize must not tell a console the geometry
+    // changed, or it reflows a screen the process is still painting at the old width.
+    //
+    // TWO KINDS OF REFUSAL, and only one of them was tested first. A rejected ARGUMENT never reaches
+    // the pty at all, so an announce placed on the throw path survived that test -- the mutation
+    // could not fail. The pty REFUSING a resize it was actually given is the case that matters, and
+    // it is the one a real terminal produces.
+    const refused = runner.resize(handle.id, -1, 24);
+    assert.equal(refused.ok, false);
+    assert.equal(announced.length, 1, "a rejected argument was announced anyway");
+
+    terminal.resize = () => { throw new Error("the pty refused"); };
+    const threw = runner.resize(handle.id, 90, 28);
+    assert.equal(threw.ok, false);
+    assert.match(threw.error, /the pty refused/);
+    assert.equal(announced.length, 1,
+      "a resize the PTY refused was announced, so a console reflowed to a size nothing has");
+    terminal.resize = function (cols, rows) { this.cols = cols; this.rows = rows; };
+
+    // AND IT UNSUBSCRIBES WITH THE REST. A console that closed and still received geometry would be
+    // holding a reference to a pane that is gone.
+    stop();
+    runner.resize(handle.id, 100, 30);
+    assert.equal(announced.length, 1, "a resize reached an unsubscribed console");
+  } finally {
+    await runner.stop(handle.id).catch(() => {});
+  }
+});
+
+test("NEGATIVE CONTROL: a subscriber that wants no geometry still gets its output", async () => {
+  // `onResize` is optional like `onExit`, so every consumer written before this is untouched -- one
+  // that does not model a screen has no use for a size.
+  const runner = new Runner({ openTerminal: null });
+  const handle = await runner.start(speaksAndStays("hello"));
+  try {
+    const seen = [];
+    const stop = runner.subscribe(handle.id, (text) => seen.push(text));
+    assert.ok(stop, "a two-argument subscribe was refused");
+    await new Promise((r) => setTimeout(r, 200));
+    assert.ok(seen.join("").includes("hello"), "output stopped arriving for an old-style subscriber");
+    stop();
+  } finally {
+    await runner.stop(handle.id).catch(() => {});
+  }
+});
+
 console.log("the-feed-declares-what-a-screen-needs.test.js: all assertions passed");

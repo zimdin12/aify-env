@@ -489,9 +489,15 @@ const server = createServer(async (request, response) => {
       (code, signal) => {
         // THEN THE STREAM ENDS. A console told the process is gone has nothing left to wait for, and
         // leaving it open makes a dead agent look like a thinking one -- which is the failure this
-        // event exists to prevent. The frame's own rules live in `lib/sse.mjs`.
+        // event exists to prevent. The frame's own rules live in `lib/sse-frames.mjs`.
         response.write(exitFrame(code, signal));
         response.end();
+      },
+      // A RESIZE IS A NEW `meta`, not a new frame type. The geometry a console needs is the same fact
+      // it was told before the replay, so it arrives the same way -- and a consumer that already
+      // handles `meta` follows a resize with no further work.
+      ({ cols, rows }) => {
+        response.write(namedFrame("meta", { ...(runner.streamMeta?.(result.stream) ?? {}), cols, rows }));
       },
     );
     if (!unsubscribe) {

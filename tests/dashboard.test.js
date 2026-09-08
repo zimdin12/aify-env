@@ -125,11 +125,22 @@ test("stop halts the redraw", async () => {
     fakeFetch({ "8802/health": ENV_HEALTH }),
     { intervalMs: 10, write: (text) => written.push(text) },
   ));
-  await new Promise((resolve) => setTimeout(resolve, 45));
+  // WAITS FOR THE CONDITION, NOT FOR A DURATION. This slept 45ms and required more than one frame at
+  // a 10ms interval -- which is three ticks on an idle machine, fewer than two under a full suite,
+  // and Windows' timer floor is about 15ms before any load at all. It failed inside a 1,489-test run
+  // and passed three times alone, which is this repo's definition of a budget below its own cost.
+  //
+  // The SECOND wait stays a fixed sleep, and has to: it is proving frames STOP, and there is no
+  // condition to wait for when the correct answer is that nothing more happens. It is generous enough
+  // that several intervals would have elapsed.
+  const deadline = Date.now() + 5000;
+  while (written.length < 2 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   const drawn = written.length;
   assert.ok(drawn > 1, "the loop never redrew, so stopping it proves nothing");
   stop();
-  await new Promise((resolve) => setTimeout(resolve, 45));
+  await new Promise((resolve) => setTimeout(resolve, 120));
   assert.equal(written.length, drawn, "frames kept arriving after stop()");
 });
 

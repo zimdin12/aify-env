@@ -273,6 +273,56 @@ test("NEGATIVE CONTROL: a piped process with a complete history still shows its 
   f.stop();
 });
 
+test("A LATER meta RESIZES THE SCREEN, so the reconstruction follows the producer", async () => {
+  // The consumer half of the same finding. `ScreenEmulator.resize` HAD NO PRODUCTION CALLER until
+  // this path existed -- a method nothing invokes is a claim the code does not make -- and without it
+  // a screen built at 132 columns keeps wrapping every row at 132 after the pty moves to 80.
+  const f = following(
+    META({ cols: 132, rows: 40 }),
+    dataFrame(`${ESC}[1;1Hbefore`),
+    namedFrame("meta", { cols: 80, rows: 24, truncated: false, replayBytes: 65536 }),
+    dataFrame(`${ESC}[2;1Hafter`),
+  );
+  await f.start();
+  await settle();
+  assert.ok(f.screen, "no screen was built");
+  assert.equal(f.screen.term.cols, 80, "the screen kept the geometry it was born with");
+  assert.equal(f.screen.term.rows, 24);
+  assert.equal(f.meta.cols, 80, "the follower kept the old meta");
+  f.stop();
+});
+
+test("A RESIZE AFTER THE SCREEN EXISTS ALSO FOLLOWS, which is the ordinary case", async () => {
+  // THE TEST ABOVE COULD NOT FAIL ON THIS PATH. Its second `meta` arrives while the emulator is still
+  // loading, so the screen is born at the latest geometry and the resize branch never runs -- a
+  // mutation removing that branch survived. A PAUSED stream puts the screen in place first, which is
+  // what happens on a real console: the pane has been open for a while and then the window changes.
+  const f = followingSlowly(
+    META({ cols: 132, rows: 40 }),
+    dataFrame(`${ESC}[1;1Hbefore`),
+    namedFrame("meta", { cols: 80, rows: 24, truncated: false, replayBytes: 65536 }),
+  );
+  await f.start();
+  await settle();
+  assert.equal(f.screen.term.cols, 80, "a screen that already existed kept its old width");
+  assert.equal(f.screen.term.rows, 24);
+  f.stop();
+});
+
+test("NEGATIVE CONTROL: a meta that repeats the SAME size does not disturb the screen", async () => {
+  // Resizing an emulator reflows its buffer. Doing it for an unchanged size would reflow a screen
+  // for no reason, which on a busy console is a visible flicker with no cause.
+  const f = following(
+    META({ cols: 100, rows: 30 }),
+    dataFrame(`${ESC}[1;1Hkept`),
+    namedFrame("meta", { cols: 100, rows: 30, truncated: false, replayBytes: 65536 }),
+  );
+  await f.start();
+  await settle();
+  assert.match(f.screen.rows()[0], /^kept/, "an identical meta disturbed the screen");
+  f.stop();
+});
+
 test("STOP DISPOSES THE SCREEN, so it cannot outlive its pane", async () => {
   const f = following(META());
   await f.start();
