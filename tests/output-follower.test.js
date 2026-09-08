@@ -221,3 +221,117 @@ test("unreadable frames are counted on the follower, so a view can say the feed 
 });
 
 console.log("output-follower.test.js: all assertions passed");
+
+test("PROGRESS IS REPORTED WHEN THE PARSER HAS APPLIED, NOT WHEN THE BYTES ARRIVED", async () => {
+  // The write is queued on `applying`, so reporting at arrival tells the view to draw a screen the
+  // emulator has not touched. Review measured the consequence: the repaint drew the refusal, nothing
+  // reported once the parse landed, and the refusal stood with input blocked until the next
+  // collection -- display writes stuck at 3 while an explicit resize produced the fourth frame.
+  //
+  // The screen's write is held here, which is the only way to separate the two moments.
+  let releaseParser;
+  const parsed = new Promise((resolve) => { releaseParser = resolve; });
+  const reports = [];
+
+  const f = follow([outputFrame("hello")]);
+  f.onProgress = () => reports.push(f.status);
+  // A screen whose write does not resolve until told. `applyWrite` chains on it.
+  f.screen = { write: () => parsed.then(() => true), resize: () => {}, dispose: () => {} };
+
+  await f.start();
+  const beforeParse = reports.length;
+
+  releaseParser();
+  await f.applying;                       // the parser chain, drained
+  await new Promise((r) => setImmediate(r));
+
+  assert.ok(reports.length > beforeParse,
+    `nothing was reported after the parser applied (${beforeParse} -> ${reports.length}); the view `
+    + "would keep showing the frame it drew before the screen existed");
+});
+
+test("A STATUS-ONLY TRANSITION REPORTS, so a 404 does not leave 'connecting' on screen", async () => {
+  // Review's case: the follower becomes GONE while the last frame still says connecting..., and
+  // nothing redraws because no bytes ever arrived. Writes stayed 2 -> 2.
+  const reports = [];
+  const f = new OutputFollower({
+    endpoint: "http://127.0.0.1:8802",
+    id: "missing",
+    fetchImpl: async () => ({ ok: false, status: 404, body: null }),
+  });
+  f.onProgress = () => reports.push(f.status);
+
+  await f.start();
+  assert.equal(f.status, "gone", "the fixture did not produce the case this test is about");
+  assert.deepEqual(reports, ["gone"],
+    "becoming GONE reported nothing; the pane would still say connecting with no redraw due");
+});
+
+test("A FAILED RESPONSE REPORTS TOO, and every transition goes through one setter", async () => {
+  // The same claim for the other branch, because the fix is a setter rather than a call per branch
+  // and a setter is only worth having if more than one branch uses it.
+  const reports = [];
+  const f = new OutputFollower({
+    endpoint: "http://127.0.0.1:8802",
+    id: "broken",
+    fetchImpl: async () => ({ ok: false, status: 503, body: null }),
+  });
+  f.onProgress = () => reports.push(f.status);
+
+  await f.start();
+  assert.equal(f.status, "failed");
+  assert.deepEqual(reports, ["failed"], "becoming FAILED reported nothing");
+});
+
+test("A STATUS RE-ASSERTED AS ITSELF REPORTS NOTHING", async () => {
+  // NEGATIVE CONTROL for the setter. Without the change check, a status written again inside a loop
+  // would schedule a repaint every time, which is a redraw storm dressed as a notification.
+  const reports = [];
+  const f = new OutputFollower({ endpoint: "http://x", id: "p", fetchImpl: async () => ({ ok: true, status: 200, body: null }) });
+  f.onProgress = () => reports.push(f.status);
+
+  await f.start();                       // no body -> failed, one report
+  const afterFirst = reports.length;
+  assert.equal(afterFirst, 1, "the first transition did not report exactly once");
+
+  await f.start();                       // fails the same way again
+  assert.equal(reports.length, afterFirst,
+    "re-asserting the same status reported again; every repeat would schedule another repaint");
+});
+
+test("A META FRAME THAT WRITES NOTHING STILL REPORTS, because it changes what may be drawn", async () => {
+  // PIPED, so there is no emulator and no screen: 0x0 means the output is lines, which the buffer
+  // already models. A later meta then takes neither the resize branch nor the backlog branch -- it
+  // only assigns `this.meta`, which `baselineIsSound` reads. Nothing is written, and the pane's
+  // answer to "may I be drawn" has still changed.
+  //
+  // THIS IS THE ONLY PATH ARRIVAL REPORTING COVERS. Every other one reports when its parse, resize,
+  // screen-open or status transition completes, so without this case a mutant that deleted arrival
+  // reporting altogether survives -- which is exactly what happened before this test existed.
+  const piped = (extra) => `event: meta${LF}data: ${JSON.stringify(
+    { cols: 0, rows: 0, truncated: false, resized: false, replayBytes: 65536, ...extra })}${FRAME_END}`;
+
+  const runFor = async (pieces) => {
+    const reports = [];
+    const f = new OutputFollower({
+      endpoint: "http://127.0.0.1:8802",
+      id: "piped",
+      fetchImpl: fakeStream(pieces),
+    });
+    f.onProgress = () => reports.push(f.status);
+    await f.start();
+    await f.applying;
+    await new Promise((r) => setImmediate(r));
+    return reports.length;
+  };
+
+  const withoutTrailingMeta = await runFor([piped(), outputFrame("hello")]);
+  const withTrailingMeta = await runFor([piped(), outputFrame("hello"), piped({ truncated: true })]);
+
+  assert.ok(withoutTrailingMeta > 0, "the baseline run reported nothing; the probe is not wired");
+  assert.ok(
+    withTrailingMeta > withoutTrailingMeta,
+    `a trailing meta frame added no report (${withoutTrailingMeta} -> ${withTrailingMeta}); it `
+    + "changes what the pane may draw and nothing would redraw",
+  );
+});
