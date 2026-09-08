@@ -42,7 +42,7 @@ function fakeStream(pieces, { status = 200 } = {}) {
 test("an output frame lands in the buffer and the stream continues", () => {
   const buffer = new PaneBuffer();
   const result = applyFrame(buffer, { type: FRAME_OUTPUT, text: `hello${LF}` });
-  assert.deepEqual(result, { done: false, exit: null, unreadable: 0 });
+  assert.deepEqual(result, { done: false, exit: null, unreadable: 0, meta: null });
   assert.deepEqual(buffer.view({ height: 2, width: 20 }), ["hello"]);
 });
 
@@ -69,7 +69,7 @@ test("AN UNREADABLE FRAME IS COUNTED, NOT PRINTED", () => {
 });
 
 test("a null frame changes nothing", () => {
-  assert.deepEqual(applyFrame(new PaneBuffer(), null), { done: false, exit: null, unreadable: 0 });
+  assert.deepEqual(applyFrame(new PaneBuffer(), null), { done: false, exit: null, unreadable: 0, meta: null });
 });
 
 // -- OutputFollower ------------------------------------------------------------------------------

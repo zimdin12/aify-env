@@ -9,6 +9,7 @@ import test from "node:test";
 
 import {
   FRAME_EXIT,
+  FRAME_META,
   FRAME_OUTPUT,
   FRAME_UNREADABLE,
   dataFrame,
@@ -243,6 +244,46 @@ test("EVERYTHING THIS FILE WRITES, THIS FILE READS BACK -- byte for byte, one by
   assert.deepEqual(got.slice(0, -1).map((f) => f.text), awkward,
     "a payload did not survive the round trip");
   assert.deepEqual(got.at(-1), { type: FRAME_EXIT, code: null, signal: "SIGKILL" });
+});
+
+test("A META FRAME ROUND-TRIPS, and it did NOT when the writer shipped without the reader", () => {
+  // THE DEFECT THIS PINS, measured before it was fixed: `namedFrame("meta", {...})` came back as
+  // `{type:"unreadable", why:"an output frame whose data was not a string"}`. Meta carries an OBJECT,
+  // like exit and unlike output, and the parser had no branch for it -- so every stream would have
+  // opened with an unreadable frame, which this protocol REPORTS rather than drops. A console would
+  // have led with an error on every attach.
+  //
+  // The agreement test below existed and did not catch it, because it checked the frame's PREFIX and
+  // never fed one back through the parser. A field is not shipped until BOTH ends are proven.
+  const { frames } = readFrames("", namedFrame("meta", {
+    cols: 132, rows: 40, truncated: true, replayBytes: 65536,
+  }));
+  assert.deepEqual(frames, [{
+    type: FRAME_META, cols: 132, rows: 40, truncated: true, replayBytes: 65536,
+  }]);
+});
+
+test("meta NUMBERS ARE COERCED ONCE, here, and zero survives as a real answer", () => {
+  // A consumer sizing an emulator from the string "132" builds a one-column screen and paints every
+  // row into it. And 0 is not a missing value: a piped process has no terminal and therefore no size,
+  // so it must not be defaulted away into an invented 80.
+  const [strings] = readFrames("", namedFrame("meta", {
+    cols: "132", rows: "40", truncated: "yes", replayBytes: "65536",
+  })).frames;
+  assert.equal(strings.cols, 132);
+  assert.equal(strings.rows, 40);
+  assert.equal(strings.truncated, false, "a non-boolean truthy value became a truncation claim");
+
+  const [piped] = readFrames("", namedFrame("meta", { cols: 0, rows: 0 })).frames;
+  assert.equal(piped.cols, 0);
+  assert.equal(piped.rows, 0);
+});
+
+test("a meta frame whose data is not an object is unreadable, not coerced", () => {
+  for (const payload of ['"132x40"', "42", "[132,40]", "null"]) {
+    const [frame] = readFrames("", `event: meta${LF}data: ${payload}${FRAME_END}`).frames;
+    assert.equal(frame.type, FRAME_UNREADABLE, `${payload} was accepted as meta`);
+  }
 });
 
 test("NEGATIVE CONTROL: the round trip can FAIL, so passing it means something", () => {

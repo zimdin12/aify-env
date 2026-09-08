@@ -9,6 +9,11 @@ import test from "node:test";
 
 import { DEFAULT_MAX_LINES, PaneBuffer, splitChunk } from "../lib/pane-buffer.mjs";
 
+//: Control characters by CODE POINT. Typing them into source makes the file grep as binary --
+//: including the comment saying so, which this repo has been caught by before.
+const ESC = String.fromCharCode(27);
+const LF = String.fromCharCode(10);
+
 // -- splitChunk ----------------------------------------------------------------------------------
 
 test("a chunk of whole lines splits into them, with nothing carried", () => {
@@ -203,6 +208,86 @@ test("append returns the buffer, so a replay and the live feed chain", () => {
   const buf = new PaneBuffer();
   assert.equal(buf.append("a\n"), buf);
   assert.equal(buf.clear(), buf);
+});
+
+
+// -- a real screen, when somebody built one ------------------------------------------------------
+//
+// The pane refuses to draw a painted process as lines, and has done since the operator saw
+// `Cited file didn't exist.—eflaggedCtheTbrokentpointer` -- text from different screen positions
+// concatenated onto one row. That refusal stands. What is new is that a caller can now HAND IT A
+// SCREEN, built by an emulator it owns, and the pane draws that instead.
+//
+// THE SCREEN IS PASSED IN, NOT BUILT HERE, so this file keeps its one dependency and every rule below
+// is a literal. The emulator is optional and lives elsewhere; this is only about which of three
+// different things the pane says.
+
+test("A SOUND SCREEN IS DRAWN, which is the whole point of the emulator", () => {
+  const buffer = new PaneBuffer();
+  buffer.append(`${ESC}[2;1Hpainted`);
+  assert.equal(buffer.isPainting(), true, "precondition: this buffer holds a painted screen");
+
+  const screen = { rows: ["FIRST", "  second"], problem: "" };
+  assert.deepEqual(buffer.view({ height: 6, width: 40, screen }), ["FIRST", "  second"]);
+});
+
+test("AN UNSOUND SCREEN IS NOT DRAWN, and the pane says what it is waiting for", () => {
+  // A picture reconstructed from a truncated history is coherent-looking and possibly wrong.
+  // Wrong-looking-right is worse than blank in a console, because an operator reads a screen to
+  // decide what an agent is doing.
+  const buffer = new PaneBuffer();
+  buffer.append(`${ESC}[2;1Hpainted`);
+  const screen = { rows: ["MISLEADING"], problem: "waiting for the first full repaint" };
+  const view = buffer.view({ height: 6, width: 60, screen, agent: "sc-coder" });
+
+  assert.ok(!view.join(" ").includes("MISLEADING"), "an untrusted screen was drawn anyway");
+  assert.match(view[0], /waiting for the first full repaint/);
+  assert.match(view.join(" "), /aify-env attach sc-coder/, "a wait with no way round it is a dead end");
+});
+
+test("it distinguishes 'nothing painted yet' from 'a partial screen'", () => {
+  // The two look identical on screen and are different problems: one resolves by waiting, the other
+  // might not. An operator staring at a pane deserves to know which they are in.
+  const buffer = new PaneBuffer();
+  buffer.append(`${ESC}[2;1Hpainted`);
+  const problem = "waiting for the first full repaint";
+
+  const blank = buffer.view({ height: 6, width: 60, screen: { rows: ["", "   "], problem } });
+  assert.match(blank.join(" "), /nothing painted yet/);
+
+  const partial = buffer.view({ height: 6, width: 60, screen: { rows: ["", "some output"], problem } });
+  assert.match(partial.join(" "), /a partial screen so far/);
+});
+
+test("WITH NO SCREEN AT ALL the pane says exactly what it always said", () => {
+  // The emulator is OPTIONAL. On a machine without it this path is the whole feature, and it must not
+  // have changed a byte -- so this compares against the notice rather than describing it.
+  const buffer = new PaneBuffer();
+  buffer.append(`${ESC}[2;1Hpainted`);
+  const view = buffer.view({ height: 6, width: 60, agent: "sc-coder" });
+  assert.deepEqual(view, [
+    "live TUI — this pane cannot draw it",
+    "run: aify-env attach sc-coder",
+  ]);
+});
+
+test("A NON-PAINTING PROCESS IGNORES THE SCREEN ENTIRELY", () => {
+  // A plain log needs no emulator and must not get one: handing it a screen must change nothing, or
+  // every ordinary process would start rendering through a path it never needed.
+  const buffer = new PaneBuffer();
+  buffer.append(`one${LF}two${LF}`);
+  const withScreen = buffer.view({ height: 6, width: 40, screen: { rows: ["WRONG"], problem: "" } });
+  const without = buffer.view({ height: 6, width: 40 });
+  assert.deepEqual(withScreen, without, "a log was rendered through the screen path");
+  assert.deepEqual(without, ["one", "two"]);
+});
+
+test("a screen is clipped to the pane, like every other row", () => {
+  const buffer = new PaneBuffer();
+  buffer.append(`${ESC}[2;1Hpainted`);
+  const rows = ["r1", "r2", "r3", "r4", "r5"];
+  const view = buffer.view({ height: 3, width: 40, screen: { rows, problem: "" } });
+  assert.deepEqual(view, ["r1", "r2", "r3"]);
 });
 
 console.log("pane-buffer.test.js: all assertions passed");
