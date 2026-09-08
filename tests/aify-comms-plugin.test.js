@@ -523,3 +523,74 @@ test("A FAILED REPORT DOES NOT END TERMINAL CONTROL", async () => {
     `the failed report was silent; logs were ${JSON.stringify(logs)}`,
   );
 });
+
+// ── the capability this plugin offers the host ───────────────────────────────────────────────────
+//
+// BOTH ENDS OR NEITHER. This repo has been caught three ways by the same defect: a field with no
+// reader, a guard whose input nothing writes, and a sender and reader pointed at different carriers.
+// The daemon reads `capabilities.agents` off a started plugin; these prove the plugin puts one there
+// and that it is wired to something real rather than to a stub that answers politely.
+
+test("the plugin OFFERS an agents capability, and it is not a lifecycle method", () => {
+  const { plugin } = makePlugin(fakeApi());
+  assert.equal(typeof plugin.capabilities?.agents?.list, "function", "no agents capability is offered at all");
+  assert.equal(typeof plugin.capabilities?.agents?.start, "function");
+  // Under its own key, because a bare `start` property IS the plugin's boot. A route wired to that
+  // would reboot the plugin instead of starting an agent, and both take one argument.
+  assert.notEqual(plugin.capabilities.agents.start, plugin.start);
+});
+
+test("BEFORE START THE CAPABILITY SAYS THE PLUGIN IS NOT RUNNING, rather than throwing", async () => {
+  // It is reached from an HTTP route and from a keyboard handler. A throw in either is a 500 that
+  // says nothing or a screen that dies -- and the honest answer is available, so there is no excuse
+  // for either.
+  const { plugin } = makePlugin(fakeApi());
+  const listed = await plugin.capabilities.agents.list();
+  assert.deepEqual(listed.agents, []);
+  assert.match(listed.problem, /not running/);
+  const started = await plugin.capabilities.agents.start("ef-tester");
+  assert.equal(started.started, false);
+  assert.match(started.problem, /not running/);
+});
+
+test("AFTER START IT REACHES THE REAL SERVICE CALLS, not a stub that answers politely", async () => {
+  // The failure this rules out is a capability that was declared, wired to nothing, and reported an
+  // empty list forever -- which looks exactly like a host with no startable agents.
+  const asked = [];
+  const api = {
+    ...fakeApi(),
+    async agents() {
+      asked.push("agents");
+      return { agents: { "ef-tester": { sessionMode: "managed", machineId: "win32:box", status: "available" } } };
+    },
+    async sessionsFor(id) { asked.push(`sessionsFor:${id}`); return { sessions: [] }; },
+  };
+  const { plugin } = makePlugin(api, { machineId: "win32:box" });
+  const { host } = makeHost();
+  await plugin.start(host);
+  const listed = await plugin.capabilities.agents.list();
+  assert.deepEqual(asked, ["agents"], "the capability did not ask the service anything");
+  assert.deepEqual(listed.agents.map((a) => a.id), ["ef-tester"]);
+  await plugin.stop();
+});
+
+test("THE CAPABILITY IS SCOPED TO THIS HOST'S MACHINE, which is the only scope it can honour", async () => {
+  // A restart is routed by the service to the agent's OWN environment, so an agent bound elsewhere
+  // would come up on a machine the operator is not looking at. Passing the wrong machine id here --
+  // or none -- is how the menu would quietly list the whole fleet.
+  const api = {
+    ...fakeApi(),
+    async agents() {
+      return { agents: {
+        mine: { sessionMode: "managed", machineId: "win32:box", status: "available" },
+        theirs: { sessionMode: "managed", machineId: "linux:laputa", status: "available" },
+      } };
+    },
+    async sessionsFor() { return { sessions: [] }; },
+  };
+  const { plugin } = makePlugin(api, { machineId: "win32:box" });
+  const { host } = makeHost();
+  await plugin.start(host);
+  assert.deepEqual((await plugin.capabilities.agents.list()).agents.map((a) => a.id), ["mine"]);
+  await plugin.stop();
+});

@@ -182,3 +182,63 @@ test("an advertisement's own metadata survives the bridge fields", () => {
       assert.ok(body.metadata.bridgeStartedAt, "and the bridge fields must still be there");
     });
 });
+
+// ── the three READ/CONTROL calls behind "start an available agent" ────────────────────────────────
+
+test("the roster and the session listing are plain reads, with no body", async () => {
+  const fetchImpl = fakeFetch({ json: { agents: {} } });
+  await api(fetchImpl).agents();
+  await api(fetchImpl).sessionsFor("ef tester/1");
+  assert.deepEqual(fetchImpl.calls.map((c) => [c.options.method, c.url]), [
+    ["GET", "http://127.0.0.1:8800/api/v1/agents"],
+    // ENCODED, so an id carrying a space or a slash cannot address another route or split the query.
+    ["GET", "http://127.0.0.1:8800/api/v1/sessions?agentId=ef%20tester%2F1"],
+  ]);
+  for (const call of fetchImpl.calls) assert.equal(call.options.body, undefined);
+});
+
+test("A SESSION CONTROL CARRIES NO BRIEF, AND THAT IS THE MOST EXPENSIVE LINE IN THIS FILE", async () => {
+  // `/sessions/:id/control` stores `body` as the spawn request's `initial_message`, and the service
+  // turns a non-empty one into a real `type=request` MESSAGE plus a dispatch run addressed to the
+  // agent that just came up. A polite receipt therefore reaches a freshly-started agent as an
+  // instruction owing a reply, and the obvious reply is to restart itself.
+  //
+  // MEASURED ON THIS FLEET: all 21 self-issued spawn requests were preceded, 45 to 75 seconds
+  // earlier, by exactly one dashboard `Restart <agent>` message of type=request. That is the whole
+  // of the operator's "agents exited even though I never stopped them".
+  const fetchImpl = fakeFetch({ json: { ok: true } });
+  await api(fetchImpl).controlSession("s1/2");
+  const [call] = fetchImpl.calls;
+  assert.equal(call.options.method, "POST");
+  assert.equal(call.url, "http://127.0.0.1:8800/api/v1/sessions/s1%2F2/control");
+  const sent = JSON.parse(call.options.body);
+  assert.deepEqual(Object.keys(sent).sort(), ["action", "from_agent"],
+    `the control carried a field beyond the action and the actor: ${call.options.body}`);
+  assert.equal(sent.action, "restart");
+  // THE ACTOR IS THIS TIER, BY NAME. Never a person, and never read from an environment variable:
+  // a control attributed to whichever agent happened to be in `AIFY_AGENT_ID` puts somebody else's
+  // name on a restart they did not ask for.
+  assert.equal(sent.from_agent, "aify-env");
+});
+
+test("the control's action travels, so a future verb cannot silently become a restart", async () => {
+  const fetchImpl = fakeFetch({ json: { ok: true } });
+  await api(fetchImpl).controlSession("s1", "recreate");
+  assert.equal(JSON.parse(fetchImpl.calls[0].options.body).action, "recreate");
+});
+
+test("a refused control raises a CommsApiError carrying the status, like every other call here", async () => {
+  // The caller has to tell "the service said no" from "the service was not there": one means a
+  // person must change something, the other means retry.
+  const refused = fakeFetch({ status: 409, text: "environment offline" });
+  await assert.rejects(() => api(refused).controlSession("s1"), (error) => {
+    assert.ok(error instanceof CommsApiError);
+    assert.equal(error.status, 409);
+    return true;
+  });
+  const unreachable = fakeFetch({ throws: "ECONNREFUSED" });
+  await assert.rejects(() => api(unreachable).controlSession("s1"), (error) => {
+    assert.equal(error.status, 0, "an unreachable service was reported with a refusal's status");
+    return true;
+  });
+});

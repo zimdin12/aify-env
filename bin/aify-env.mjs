@@ -64,6 +64,7 @@ import { defaultIsAlive } from "../lib/reaper.mjs";
 import { homedir, hostname } from "node:os";
 import { PackageBuild } from "../lib/build-identity.mjs";
 import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
+import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { readServices } from "../lib/services.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
@@ -458,6 +459,14 @@ const server = createServer(async (request, response) => {
         // 2026-09-02 the first was healthy while the second was refused every time for hours with
         // nothing anywhere able to say so. `/health` reported the half that was fine.
         plugins: servicePlugins.report(),
+        // STARTING A KNOWN AGENT, offered by whichever plugin can. Resolved per request rather than
+        // captured once: plugins start after the server binds, so a reference taken here at module
+        // scope would be null for the life of the process. Asking each time also means a plugin that
+        // failed to start answers 503 rather than a stale capability answering with a dead api.
+        //
+        // THE DAEMON NAMES NO SERVICE, which is the whole point of the plugin split: a second
+        // `aify-` service offering the same capability needs no change on this line.
+        agents: servicePlugins.capability("agents"),
         traffic,
       },
     );
@@ -793,42 +802,6 @@ const REDETECT_MS = Number(process.env.AIFY_ADVERTISE_REDETECT_MS || 300_000);
 const REGISTRY_FILE = process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json");
 
 /**
- * Where the wrappers live: every PATH entry, which is where a launcher has to be to be launchable.
- *
- * Reading a directory is not running anything in it. Deciding what a launcher is by ASKING it would
- * start a coding-agent runtime -- a pre-contract wrapper forwards `--check` to the runtime -- which
- * is how a fleet went down once already.
- */
-function launcherCandidates() {
-  const separator = process.platform === "win32" ? ";" : ":";
-  const entries = [];
-  const seen = new Set();
-  for (const dir of String(process.env.PATH || "").split(separator).map((d) => d.trim()).filter(Boolean)) {
-    let names = [];
-    try {
-      names = readdirSync(dir);
-    } catch {
-      // One unreadable directory must not make the rest of PATH unsearchable.
-      continue;
-    }
-    for (const name of names) {
-      const file = `${dir}/${name}`;
-      if (seen.has(file)) continue;
-      seen.add(file);
-      // Only files whose NAME could be a launcher are read. The marker is still what decides, but
-      // reading every executable on PATH to find out would be a great deal of I/O for one answer.
-      if (!name.includes("-aify")) continue;
-      try {
-        entries.push({ file, text: readFileSync(file, "utf8") });
-      } catch {
-        // FAILS CLOSED: unread is absent, never present.
-      }
-    }
-  }
-  return entries;
-}
-
-/**
  * POST one advertisement. Injected into `advertiseTo`, which is otherwise pure.
  *
  * The key is an ARGUMENT, resolved by `credentialFor` from the names the registry declares. It sent
@@ -902,7 +875,7 @@ async function advertiseOnce() {
 
   const now = Date.now();
   if (shouldRedetect({ lastDetectedAt, now, intervalMs: REDETECT_MS })) {
-    detectedRuntimes = runtimeAvailability(installedHarnesses(launcherCandidates()));
+    detectedRuntimes = runtimeAvailability(installedHarnesses(aifyLauncherFilesOnPath()));
     lastDetectedAt = now;
   }
 
