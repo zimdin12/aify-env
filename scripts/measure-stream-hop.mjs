@@ -84,15 +84,20 @@ async function sample(token, bytes, waitMs) {
     return { ok: false, why: `the write was refused: ${wrote.error ?? "no reason given"}` };
   }
 
+  // THE COMPLETE REPLY THIS SAMPLE EXPECTS, built the way the child builds it. Matching a token and
+  // a length is IDENTITY, not fidelity: review passed every sample with correct tokens wrapped
+  // around `z` filler instead of the `x` the child emits, and prefix or suffix junk was silently
+  // excluded by slicing between the markers.
+  const fill = Math.max(0, bytes - expectedOpen.length - expectedClose.length);
+  const expected = expectedOpen + "x".repeat(fill) + expectedClose;
+
   const arrived = await new Promise((resolve) => {
     let timer = null;
     onChunk = () => {
-      const open = inbox.indexOf(expectedOpen);
-      const close = inbox.indexOf(expectedClose, open + 1);
-      if (open >= 0 && close >= 0) {
+      if (inbox.length >= expected.length) {
         clearTimeout(timer);
         onChunk = null;
-        resolve({ at: process.hrtime.bigint(), text: inbox.slice(open, close + expectedClose.length) });
+        resolve({ at: process.hrtime.bigint(), text: inbox });
       }
     };
     timer = setTimeout(() => { onChunk = null; resolve(null); }, DEADLINE_MS);
@@ -101,8 +106,15 @@ async function sample(token, bytes, waitMs) {
 
   // A TIMEOUT IS A REJECTION, NOT A SAMPLE. This is the defect that made v2's figures meaningless.
   if (!arrived) return { ok: false, why: `no matching reply within ${DEADLINE_MS}ms` };
-  if (arrived.text.length !== bytes) {
-    return { ok: false, why: `reply was ${arrived.text.length} characters, asked for ${bytes}` };
+  // THE WHOLE REPLY, COMPARED. Anything before, after or instead of it is a rejection with the
+  // difference named, rather than a slice that quietly discards the parts that disagree.
+  if (arrived.text !== expected) {
+    const where = [...arrived.text].findIndex((c, i) => c !== expected[i]);
+    return {
+      ok: false,
+      why: `reply differed at index ${where < 0 ? expected.length : where}`
+        + ` (${arrived.text.length} characters, expected ${expected.length})`,
+    };
   }
   return { ok: true, ms: Number(arrived.at - startedAt) / 1e6 };
 }
@@ -110,13 +122,23 @@ async function sample(token, bytes, waitMs) {
 async function series(label, bytes, waitMs) {
   const times = [];
   const rejected = [];
+  const raw = [];
+  let warmupFailures = 0;
   for (let i = 0; i < WARMUP + SAMPLES; i += 1) {
-    const got = await sample(`T${bytes}W${waitMs}N${i}`, bytes, waitMs);
-    if (i < WARMUP) continue;                       // discarded, explicitly
+    const token = `T${bytes}W${waitMs}N${i}`;
+    const got = await sample(token, bytes, waitMs);
+    raw.push({ token, warmup: i < WARMUP, ...got });
+    // A WARM-UP IS VALIDATED TOO. Review refused all three and they vanished here before any check,
+    // so a series with nothing warm still reported a clean control. An ATTEMPTED warm-up is not a
+    // successful one, and readiness is what these three exist to establish.
+    if (i < WARMUP) {
+      if (!got.ok) warmupFailures += 1;
+      continue;
+    }
     if (got.ok) times.push(got.ms);
     else rejected.push(got.why);
   }
-  return { label, bytes, waitMs, times, rejected };
+  return { label, bytes, waitMs, times, rejected, warmupFailures, raw };
 }
 
 function spread(values) {
@@ -134,35 +156,51 @@ const control = await series(`control, child waits ${DELAY_MS}ms`, 64, DELAY_MS)
 stop?.();
 runner.stop(handle.id);
 
-console.log("aify-env's own carry: Runner.write -> the child's echo -> Runner.subscribe");
-console.log(`${SAMPLES} samples per arm after ${WARMUP} discarded warm-ups; pipes, not PTYs\n`);
+// ── RAW OUTCOMES GO TO stderr, ALWAYS, and the summary to stdout ONLY IF IT IS EARNED ────────
+//
+// A sentence printed after the numbers cannot retract them. Review ran this with a control that
+// produced no replies at all: three numeric rows went to stdout, then "nothing above is published",
+// and the process exited 0 -- so an automated caller saw a successful run with figures in it.
+for (const run of [...runs, control]) {
+  for (const row of run.raw) {
+    process.stderr.write(`${run.label}\t${row.token}\t${row.warmup ? "warmup" : "sample"}\t`
+      + `${row.ok ? row.ms.toFixed(3) : "REJECTED"}\t${row.ok ? "" : row.why}${LF}`);
+  }
+}
 
-const controlValid = control.times.length === SAMPLES && control.rejected.length === 0;
+const controlValid = control.times.length === SAMPLES
+  && control.rejected.length === 0
+  && control.warmupFailures === 0;
 const controlMedian = control.times.length
   ? [...control.times].sort((a, b) => a - b)[Math.floor(control.times.length / 2)] : 0;
 const controlProves = controlValid && controlMedian >= DELAY_MS * 0.7;
+const armsComplete = runs.every((r) =>
+  r.times.length === SAMPLES && r.rejected.length === 0 && r.warmupFailures === 0);
 
-for (const run of [...runs, control]) {
-  const line = run.times.length
-    ? spread(run.times)
-    : "no valid sample";
-  console.log(`${run.label.padStart(28)}   ${line}`
-    + (run.rejected.length ? `   REJECTED ${run.rejected.length}: ${run.rejected[0]}` : ""));
+if (!controlProves || !armsComplete) {
+  console.error(
+    `NOTHING IS PUBLISHED. control: ${control.times.length}/${SAMPLES} valid, `
+    + `${control.warmupFailures} warm-up failure(s), median ${controlMedian.toFixed(2)}ms for a `
+    + `requested ${DELAY_MS}ms. Arms complete: ${armsComplete}. Raw outcomes are on stderr above.`,
+  );
+  process.exitCode = 1;
+} else {
+  console.log("aify-env's own carry: Runner.write -> the child's echo -> Runner.subscribe");
+  console.log(`${SAMPLES} samples per arm after ${WARMUP} VALIDATED warm-ups; pipes, not PTYs\n`);
+  for (const run of [...runs, control]) {
+    console.log(`${run.label.padStart(28)}   ${spread(run.times)}`);
+  }
+  console.log(
+    `${LF}The control took ${controlMedian.toFixed(2)}ms for a requested ${DELAY_MS}ms with every `
+    + `sample valid, so the clock reports a slow round trip and the arms above are the transport.`,
+  );
+  console.log(
+    `${LF}A SAMPLE COUNTS ONLY IF the write was accepted, a reply arrived before ${DEADLINE_MS}ms, and`
+    + `${LF}the reply carries THIS sample's token at exactly the requested length. Everything else is`
+    + `${LF}rejected with a reason and counted above -- an earlier version of this script recorded`
+    + `${LF}timeouts as samples and published the result.`
+    + `${LF}${LF}Both timestamps are taken in this process, so the child's own read-and-echo is inside`
+    + `${LF}the number: an upper bound on aify-env's share for THAT sample, not aify-env's share, and`
+    + `${LF}not a statement about the PTY path, which this does not exercise.`,
+  );
 }
-
-console.log(
-  controlProves
-    ? `${LF}The control took ${controlMedian.toFixed(2)}ms for a requested ${DELAY_MS}ms with every `
-      + `sample valid, so the clock reports a slow round trip and the arms above are the transport.`
-    : `${LF}THE CONTROL DID NOT HOLD, so nothing above is published: `
-      + `${control.times.length}/${SAMPLES} valid samples, median ${controlMedian.toFixed(2)}ms.`,
-);
-console.log(
-  `${LF}A SAMPLE COUNTS ONLY IF the write was accepted, a reply arrived before ${DEADLINE_MS}ms, and`
-  + `${LF}the reply carries THIS sample's token at exactly the requested length. Everything else is`
-  + `${LF}rejected with a reason and counted above -- an earlier version of this script recorded`
-  + `${LF}timeouts as samples and published the result.`
-  + `${LF}${LF}Both timestamps are taken in this process, so the child's own read-and-echo is inside`
-  + `${LF}the number: an upper bound on aify-env's share for THAT sample, not aify-env's share, and`
-  + `${LF}not a statement about the PTY path, which this does not exercise.`,
-);
