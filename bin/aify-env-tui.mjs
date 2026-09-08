@@ -16,7 +16,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { startDashboard } from "../lib/dashboard.mjs";
-import { CLIENT_ACTIONS, performClientAction } from "../lib/client-actions.mjs";
+import {
+  CLIENT_ACTIONS,
+  listStartableAgents,
+  performClientAction,
+  startKnownAgent,
+} from "../lib/client-actions.mjs";
 
 const args = process.argv.slice(2);
 const once = args.includes("--once");
@@ -67,6 +72,14 @@ const view = await startDashboard({
   // that talks to a daemon, so anything written here can only ever be read, never exercised.
   actions: CLIENT_ACTIONS,
   onAction: (chosen) => { void performClientAction(chosen, { endpoint }); },
+  // STARTING A KNOWN AGENT, over the same one hop and for the same reason: this process holds no
+  // aify-comms credential and no service endpoint. The daemon holds the plugin that holds both, so
+  // the client asks the daemon and both tiers reach one implementation.
+  //
+  // ONE LINE EACH, like the action above, because importing this file STARTS a view that talks to a
+  // daemon -- anything written here can only ever be read, never exercised.
+  onStartList: () => listStartableAgents({ endpoint }),
+  onStartAgent: (agent) => startKnownAgent(agent?.id, { endpoint }),
   // A pipe gets no escapes: --once is what a script or a test uses, and colour in captured output is
   // noise that has to be stripped again by whoever reads it.
   columns: process.stdout.columns || 100,

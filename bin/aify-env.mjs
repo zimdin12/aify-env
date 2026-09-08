@@ -765,6 +765,10 @@ server.listen(port, HOST, async () => {
     registryPath: REGISTRY_FILE,
     runner,
     shutdown,
+    // A FUNCTION, NOT A CAPABILITY. Plugins start after the server binds, so a value resolved on
+    // this line would be null for the life of the process -- the same reason the request handler
+    // asks per request rather than capturing one.
+    agents: () => servicePlugins.capability("agents"),
     notices: NOTICES,
     enabled: !NO_DASHBOARD,
     intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),

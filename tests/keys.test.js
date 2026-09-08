@@ -56,7 +56,7 @@ test("when the last process goes, the pane closes rather than pointing at nothin
   // `paneHidden` goes back to the default here because there is nothing left to show in a pane.
   assert.deepEqual(reconcileFocus(pty(2, 3), 0),
     { mode: "dashboard", selected: -1, count: 0, query: "", paneHidden: true,
-      menuAt: 0, confirming: null, menuActions: null });
+      menuAt: 0, confirming: null, menuActions: null, startAt: 0, startCount: 0 });
 });
 
 test("reconciling keeps pty mode while there is still something to show", () => {
