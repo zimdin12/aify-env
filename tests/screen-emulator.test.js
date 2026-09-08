@@ -325,3 +325,97 @@ test("PHYSICAL ABSENCE: with the package unresolvable, create() returns null rat
 });
 
 console.log("screen-emulator.test.js: all assertions passed");
+
+test("A COMPLETE HISTORY CAN STILL DISCLOSE THROUGH THE LOG PATH, and the pane must refuse it", async () => {
+  // THE THIRD CONCEAL DISCLOSURE IN THIS FEATURE, and the first two were both about a TRUNCATED
+  // history. This one has none: the whole stream is present, the daemon's `truncated: false` is
+  // honest, and there is not a single cursor command in it -- so the baseline gate is satisfied,
+  // `isPainting` is false, and the pane takes the LOG path.
+  //
+  // WHY THE LOG PATH CANNOT SEE IT. `splitChunk` gives an escape a column, so the carriage return
+  // overwrites `ESC[8m` with the first five letters of the token. The retained line is
+  // `SYNTHETIC_HIDDEN` with no escape in it at all -- there is nothing left for the buffer to scan.
+  const bytes = `${ESC}[8m${String.fromCharCode(13)}SYNTHETIC_HIDDEN`;
+  const oracle = await screenAfter(bytes);
+  assert.ok(!oracle.includes("SYNTHETIC_HIDDEN"),
+    "the real terminal is not concealing this, so this test is void");
+
+  const { PaneBuffer } = await import("../lib/pane-buffer.mjs");
+  const pane = new PaneBuffer({ maxLines: 20 });
+  pane.append(bytes);
+  assert.equal(pane.isPainting(), false,
+    "the stream now looks painted, so this no longer reproduces the log path it was written for");
+  const shown = pane.view({ height: 6, width: 60, screen: { problem: "" } }).join("|");
+  assert.ok(!shown.includes("SYNTHETIC_HIDDEN"), `the pane printed what the terminal hides: ${shown}`);
+  assert.match(shown, /cannot draw it/, "it refused silently rather than naming the attach");
+});
+
+test("A FULL RESET RELEASES THE REFUSAL, so one conceal does not cost a process its pane for ever", async () => {
+  // `ESC c` is the one sequence that throws the whole screen away -- the same rule the baseline
+  // already enforces -- so nothing said before it bears on what is displayed. Anything weaker leaves
+  // concealed cells in the buffer, and this project accepted `ESC[2J` as a reset once and disclosed
+  // through it.
+  const { PaneBuffer } = await import("../lib/pane-buffer.mjs");
+  const pane = new PaneBuffer({ maxLines: 20 });
+  pane.append(`${ESC}[8mhidden${String.fromCharCode(10)}`);
+  assert.match(pane.view({ height: 6, width: 60, screen: { problem: "" } }).join("|"), /cannot draw it/);
+  pane.append(`${ESC}cAFTER_RESET${String.fromCharCode(10)}`);
+  assert.match(pane.view({ height: 6, width: 60, screen: { problem: "" } }).join("|"), /AFTER_RESET/,
+    "a full reset did not release the refusal");
+
+  // AND A WEAKER ONE DOES NOT. `ESC[28m` turns conceal off for what FOLLOWS and leaves everything
+  // already concealed exactly as it was.
+  //
+  // SEPARATE CHUNKS, and that is what makes the assertion mean anything. One chunk carrying both the
+  // conceal and the weaker sequence latches whichever rule is in force -- the conceal is scanned
+  // after the release either way -- so it cannot tell a correct rule from a wrong one. A mutant that
+  // accepted `ESC[28m` as a release survived a single-chunk version of this test.
+  // SGR RESETS ONLY. `ESC[2J`, `ESC[3J` and `ESC[?1049h` are ERASE and screen-switch sequences:
+  // `drawsWithCursor` sees them, the pane takes the PAINTING branch, and it never reaches the log
+  // path this latch guards. They are refused as baselines by `screen-baseline.mjs`, which is where
+  // that argument belongs and where it is already tested.
+  for (const weaker of [`${ESC}[28m`, `${ESC}[0m`, `${ESC}[m`]) {
+    const still = new PaneBuffer({ maxLines: 20 });
+    still.append(`${ESC}[8mhidden${String.fromCharCode(10)}`);
+    still.append(`${weaker}visible${String.fromCharCode(10)}`);
+    assert.match(still.view({ height: 6, width: 60, screen: { problem: "" } }).join("|"), /cannot draw it/,
+      `${JSON.stringify(weaker)} was accepted as a full reset`);
+  }
+  // AND THE RELEASE ITSELF ARRIVES IN ITS OWN CHUNK TOO, for the same reason.
+  const released = new PaneBuffer({ maxLines: 20 });
+  released.append(`${ESC}[8mhidden${String.fromCharCode(10)}`);
+  released.append(`${ESC}cAFTER${String.fromCharCode(10)}`);
+  assert.match(released.view({ height: 6, width: 60, screen: { problem: "" } }).join("|"), /AFTER/);
+});
+
+test("A CONCEAL AFTER A RESET IN THE SAME CHUNK STILL LATCHES", async () => {
+  // Ordering, and it is the direction that matters: a chunk carrying both must end up refused,
+  // because the conceal came after. Reading the reset last would clear a latch the same bytes had
+  // just earned.
+  const { PaneBuffer } = await import("../lib/pane-buffer.mjs");
+  const pane = new PaneBuffer({ maxLines: 20 });
+  pane.append(`${ESC}cclean${String.fromCharCode(10)}${ESC}[8msecret${String.fromCharCode(10)}`);
+  assert.match(pane.view({ height: 6, width: 60, screen: { problem: "" } }).join("|"), /cannot draw it/);
+});
+
+test("RE-POINTING A PANE FORGETS THE PREVIOUS PROCESS'S CONCEAL", async () => {
+  // `clear` is what moves a pane to a different agent. Carrying the latch across would refuse a
+  // fresh stream for something somebody else's process did.
+  const { PaneBuffer } = await import("../lib/pane-buffer.mjs");
+  const pane = new PaneBuffer({ maxLines: 20 });
+  pane.append(`${ESC}[8msecret${String.fromCharCode(10)}`);
+  pane.clear();
+  pane.append(`ordinary log${String.fromCharCode(10)}`);
+  assert.match(pane.view({ height: 6, width: 60, screen: { problem: "" } }).join("|"), /ordinary log/);
+});
+
+test("NEGATIVE CONTROL: an ordinary coloured log is still drawn as a log", async () => {
+  // Every refusal above passes against a pane that refuses everything, which would be the feature
+  // deleted rather than fixed.
+  const { PaneBuffer } = await import("../lib/pane-buffer.mjs");
+  const pane = new PaneBuffer({ maxLines: 20 });
+  pane.append(`${ESC}[31mred${ESC}[0m and ${ESC}[38:5:8mgrey${ESC}[0m${String.fromCharCode(10)}`);
+  const shown = pane.view({ height: 6, width: 60, screen: { problem: "" } }).join("|");
+  assert.match(shown, /red/);
+  assert.match(shown, /grey/, "palette colour 8 was mistaken for a conceal");
+});
