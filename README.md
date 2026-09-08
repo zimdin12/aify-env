@@ -164,9 +164,19 @@ against a list of every agent on the host -- and the operator's stated priority 
 seeing which agents are working. `p` brings it back. While it is hidden nothing is streamed at all:
 no connection, no buffer, no emulator.
 
-**A DESTRUCTIVE ACTION IS A QUESTION, not a keystroke.** `stop` kills a live worker mid-turn and
-`restart` discards its context, so neither is reachable without opening the menu, choosing it, and
-answering `y`. Anything that is not `y` cancels.
+**A DESTRUCTIVE ACTION IS A QUESTION, not a keystroke.** `stop` kills a live worker mid-turn, so it
+is not reachable without opening the menu, choosing it, and answering `y`. Anything that is not `y`
+cancels.
+
+**`restart` IS NOT OFFERED BY EITHER TIER, and this paragraph used to say it was.** Respawning a
+managed agent is the service's business and neither the daemon nor the client has a primitive for it,
+so listing it would be a menu row that does nothing when chosen. The word survives in the action
+*vocabulary* — which is what constrains a caller's offer — and no caller offers it.
+
+**STARTING IS THE OTHER DIRECTION AND DOES NOT ASK.** `s` lists the agents this host knows that have
+no worker and starts the one you choose. It ends nothing, and the stop that undoes it is one menu
+away — the confirmation is derived from "does this end work you cannot get back", and starting does
+not. It still takes three deliberate keystrokes.
 
 **What the pane can draw depends on what it is given.** A coding agent paints with cursor moves, so
 with the emulator installed the pane runs one at the PRODUCER's geometry and shows the real screen --

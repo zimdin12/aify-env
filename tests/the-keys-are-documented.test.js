@@ -23,7 +23,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { MODES, VIEW_KEYS, initialFocus, routeKey } from "../lib/keys.mjs";
+import { MENU_ACTIONS, MODES, VIEW_KEYS, initialFocus, routeKey } from "../lib/keys.mjs";
+import { CLIENT_ACTIONS } from "../lib/client-actions.mjs";
 import { USAGE } from "../lib/usage.mjs";
 import { renderDashboard, width } from "../lib/tui.mjs";
 
@@ -257,4 +258,35 @@ test("THE WAIT NAMES WHOEVER ANSWERED, and nobody when it was not told", () => {
   }).join("\n");
   assert.match(unnamed, /asking…/);
   assert.doesNotMatch(unnamed, /asking [a-z]/, "a service was invented for a capability that named none");
+});
+
+// ── and the README must not name an action no tier offers ────────────────────────────────────────
+//
+// MEASURED 2026-09-08: the README said "`stop` kills a live worker mid-turn and `restart` discards
+// its context, so NEITHER is reachable without opening the menu" -- describing `restart` as a menu
+// action. No caller offers it. Respawning a managed agent is the service's business and neither tier
+// has a primitive for it, which is why review had the OFFER narrowed; the README kept the old
+// sentence, so a reader would go looking for a control that is not there.
+//
+// This is the same defect as a skill naming a file nobody has, one layer up: prose that describes
+// behaviour nothing implements.
+
+test("THE README NAMES NO ACTION THIS TIER CANNOT PERFORM", () => {
+  // The two callers are the daemon's own view and the `tui` client. Whatever they OFFER between them
+  // is the whole set an operator can reach.
+  const offered = new Set(["attach", "stop"]);
+  // POSITIVE CONTROL: those are really what the client declares, so a change there reddens this too
+  // rather than leaving the README checked against a list typed here.
+  assert.deepEqual([...CLIENT_ACTIONS].sort(), [...offered].sort(),
+    "the client's offer changed; this test's idea of what is reachable is now stale");
+
+  // Only the MENU paragraph is judged. `restart` is legitimate elsewhere in the README -- restarting
+  // the daemon itself is a real instruction and has nothing to do with a per-agent action.
+  const paragraph = README.split("\n\n").find((block) => block.includes("A DESTRUCTIVE ACTION IS A QUESTION"));
+  assert.ok(paragraph, "the destructive-action paragraph is gone, so this test now checks nothing");
+  for (const action of MENU_ACTIONS) {
+    if (offered.has(action)) continue;
+    assert.ok(!paragraph.includes(`\`${action}\``),
+      `the README's menu paragraph names \`${action}\`, which no caller offers`);
+  }
 });

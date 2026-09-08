@@ -56,6 +56,69 @@ function startDaemon(record) {
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * How many `sleep` processes descend from ONE process, by walking the PID/PPID tree.
+ *
+ * COUNTING BY NAME ACROSS THE MACHINE WAS THE DEFECT, and it is the one this file's flake is best
+ * explained by. `ps -W | grep -c '[s]leep'` counts every sleep on the host — and SEVEN test files in
+ * this suite spawn one, while `node --test` runs files in PARALLEL. So `before` could include a
+ * sibling's sleep, and the "did the count fall" assertion could be defeated by a sibling STARTING
+ * one in the same window. Nothing about that is a timing budget; the observable was shared.
+ *
+ * This is the hazard aify-comms' own CLAUDE.md names for its Python suite: two files on different
+ * workers touching one external resource is what `--dist loadfile` does not cover. A machine-wide
+ * process count is exactly that resource.
+ *
+ * WINPID IS THE BRIDGE. `ps -W` reports an MSYS `PID`, its `PPID`, and the Windows `WINPID`; node
+ * hands out Windows pids. So the row is found by WINPID and the tree is walked on PID/PPID.
+ */
+function sleepingDescendantsOf(windowsPid) {
+  const res = spawnSync("bash", ["-c", "ps -W 2>/dev/null || true"], { encoding: "utf8" });
+  const rows = String(res.stdout).split("\n").slice(1)
+    .map((line) => line.trim().split(/\s+/))
+    .filter((cells) => cells.length >= 8)
+    .map((cells) => ({ pid: cells[0], ppid: cells[1], winpid: cells[3], command: cells.slice(7).join(" ") }));
+  const root = rows.find((row) => row.winpid === String(windowsPid));
+  if (!root) return 0;
+
+  const wanted = new Set([root.pid]);
+  // REPEATED TO A FIXED POINT rather than assumed one level deep: a launcher is a shell, the agent is
+  // its child, and a real one nests further. Bounded by the row count, so a cycle cannot hang it.
+  for (let pass = 0; pass < rows.length; pass += 1) {
+    const before = wanted.size;
+    for (const row of rows) if (wanted.has(row.ppid)) wanted.add(row.pid);
+    if (wanted.size === before) break;
+  }
+  return rows.filter((row) => wanted.has(row.pid) && row.pid !== root.pid && /sleep/.test(row.command)).length;
+}
+
+/**
+ * Wait until `check()` is true, or fail saying what it was instead.
+ *
+ * A FIXED SLEEP IS A BUDGET, AND THIS FILE'S BUDGETS WERE BELOW THEIR OWN COST. `a GRANDCHILD dies
+ * too` failed once at 1500ms while the machine was running two other suites, and passed alone and on
+ * every clean run after — which is this repo's standing description of a flake: not randomness, a
+ * deadline chosen when the machine was idle. Its sibling, `a process outlives a KILLED environment`,
+ * had failed the same way at 12.2s under heavy parallel load.
+ *
+ * POLLING IS NOT A LONGER SLEEP. A bigger number makes the suite slower on every run and still fails
+ * on a slower machine; waiting for the CONDITION finishes as soon as it is true and only spends the
+ * deadline when something is actually wrong. And the failure message then carries the observation
+ * rather than "it was not done yet", which is the difference between a diagnosis and a retry.
+ */
+async function until(check, { what, deadlineMs = 20_000, everyMs = 100 } = {}) {
+  const started = Date.now();
+  let last;
+  for (;;) {
+    last = await check();
+    if (last) return last;
+    if (Date.now() - started > deadlineMs) {
+      throw new Error(`${what} did not become true within ${deadlineMs}ms (last saw ${JSON.stringify(last)})`);
+    }
+    await settle(everyMs);
+  }
+}
+
 test("a process outlives a KILLED environment, and the next one reaps it", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-orphan-"));
   const record = path.join(dir, "owned.json");
@@ -162,23 +225,82 @@ test("a GRANDCHILD dies too — killing the launcher is not enough", async () =>
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ service: "aify-comms", launcher }),
   })).json();
-  await settle(1200);
-
-  const descendants = () => {
-    const res = spawnSync("bash", ["-c", "ps -W 2>/dev/null | grep -c '[s]leep' || true"], { encoding: "utf8" });
-    return Number(String(res.stdout).trim() || 0);
-  };
-  const before = descendants();
+  // SCOPED TO THIS LAUNCHER, so a sibling test file's `sleep` can neither inflate the count nor keep
+  // it from falling. Seven files in this suite spawn one and they run in parallel.
+  const descendants = () => sleepingDescendantsOf(started.pid);
+  // WAIT FOR THE CHILD TO EXIST rather than for a fixed 1200ms. On a loaded machine the launcher's
+  // `sleep` may not be forked yet, and the count below would be taken before there was anything to
+  // count -- which fails the "this test would prove nothing" guard rather than the thing being tested.
+  const before = await until(() => descendants() || 0, { what: "the launcher's own child appearing" });
   assert.ok(before > 0, "the launcher never started its child; this test would prove nothing");
 
   await fetch(`${base}/processes/${started.id}`, { method: "DELETE" });
-  await settle(1500);
 
   try {
-    assert.ok(descendants() < before, "the launcher was stopped but its child kept running");
+    // AND FOR THE COUNT TO FALL, which is the thing being tested. A stop is asynchronous all the way
+    // down -- the daemon signals the launcher, the launcher's shell reaps its child -- so the only
+    // honest question is whether it happens, not whether it happens inside a number chosen here.
+    await until(() => descendants() < before,
+      { what: `the launcher's own child exiting (it had ${before})` });
   } finally {
     child.kill("SIGKILL");
     killTree(started.pid);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("THE COUNT IS SCOPED TO ONE LAUNCHER, so a sibling test file cannot defeat it", async () => {
+  // THE BEST EXPLANATION FOR THIS FILE'S FLAKE, and it is not a timing budget. The count used to be
+  // `ps -W | grep -c '[s]leep'` -- every sleep on the machine. SEVEN files in this suite spawn one
+  // and `node --test` runs files in PARALLEL, so `before` could include a sibling's process, and the
+  // "did the count fall" assertion could be defeated by a sibling STARTING one in the same window.
+  //
+  // aify-comms' own CLAUDE.md names this hazard for its Python suite: two files touching one external
+  // resource is what per-file distribution does not cover. A machine-wide process count is exactly
+  // that resource, and no amount of waiting fixes a shared observable.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-scope-"));
+  const record = path.join(dir, "owned.json");
+  const launcher = path.join(dir, "scope-aify");
+  fs.writeFileSync(launcher, ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', "sleep 90 &", "wait", ""].join(LF));
+
+  const { child, base } = await startDaemon(record);
+  // A DECOY: a `sleep` this launcher did not start, standing in for whatever a sibling file is doing.
+  const decoy = spawn("bash", ["-c", "sleep 60"], { stdio: "ignore", detached: false });
+  try {
+    const started = await (await fetch(`${base}/processes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ service: "aify-comms", launcher }),
+    })).json();
+
+    const mine = await until(() => sleepingDescendantsOf(started.pid) || 0,
+      { what: "this launcher's own child appearing" });
+    // POSITIVE CONTROL: it finds the one it should. Without this, a counter that returned 0 for
+    // everything would satisfy the scoping assertion below perfectly.
+    assert.equal(mine, 1, "the scoped count did not find this launcher's own sleep");
+
+    // AND NOT THE OTHERS. This is the discriminating evidence, measured in the same run: the
+    // machine-wide count is strictly higher than the scoped one, so the old `grep -c '[s]leep'`
+    // would have been reading somebody else's processes.
+    const machineWide = Number(String(spawnSync("bash",
+      ["-c", "ps -W 2>/dev/null | grep -c '[s]leep' || true"], { encoding: "utf8" }).stdout).trim() || 0);
+    assert.ok(machineWide > mine,
+      `the machine shows ${machineWide} sleeps and this launcher owns ${mine}; with no other sleep `
+      + "running, this test cannot tell a scoped count from a global one");
+    assert.equal(sleepingDescendantsOf(started.pid), 1,
+      `the count included a sleep this launcher did not start (machine has ${machineWide})`);
+
+    // A DECOY ASSERTION WAS DELETED HERE, and the reason is worth more than the assertion was.
+    // It read `sleepingDescendantsOf(decoy.pid) === 0` and claimed to prove the count follows
+    // DESCENT rather than process NAME. It could not fail: measured on this host, `ps -W` reports
+    // these sleeps with `ppid 1` — orphaned in its view — so no implementation would have linked the
+    // decoy's sleep to the decoy, and the assertion passed for a reason that had nothing to do with
+    // the rule it named. The `machineWide > mine` check above is the honest version: other sleeps
+    // demonstrably exist, and the scoped count still answers one.
+    killTree(started.pid);
+  } finally {
+    child.kill("SIGKILL");
+    try { decoy.kill("SIGKILL"); } catch { /* already gone */ }
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
