@@ -158,4 +158,30 @@ test("a zero-row screen produces no rows rather than a negative slice", () => {
   assert.ok(Array.isArray(out));
 });
 
+
+test("THE TITLE SAYS WHEN THE PANE IS SHOWING ONLY PART OF THE SCREEN", () => {
+  // A screen is emulated at the PRODUCER's width, because identical bytes wrap differently at a
+  // different one. So a 132-column agent in a 60-column pane is genuinely cropped and the right-hand
+  // side of every row is missing. An operator reading a truncated line needs to know the LINE is
+  // truncated rather than that the agent stopped mid-word -- which is the exact misreading the old
+  // line-buffer pane produced, and the thing this whole feature exists to end.
+  const title = paneTitle({ id: "p1", label: "sc-coder", screenCols: 132 }, 60);
+  assert.match(title, /132 cols, cropped/);
+});
+
+test("NEGATIVE CONTROL: a screen that FITS gains no furniture", () => {
+  // The ordinary case must stay quiet, or the note becomes noise nobody reads -- and then it is not
+  // there when it matters.
+  assert.ok(!paneTitle({ id: "p1", label: "sc-coder", screenCols: 40 }, 60).includes("cropped"));
+  assert.ok(!paneTitle({ id: "p1", label: "sc-coder", screenCols: 60 }, 60).includes("cropped"),
+    "an exact fit was called cropped");
+});
+
+test("AN UNKNOWN WIDTH CLAIMS NOTHING, rather than assuming 80", () => {
+  // 0 is what an older daemon and a piped process report. Inventing a width would let the title
+  // announce a crop that may not exist, or hide one that does.
+  assert.ok(!paneTitle({ id: "p1", label: "sc-coder", screenCols: 0 }, 60).includes("cropped"));
+  assert.ok(!paneTitle({ id: "p1", label: "sc-coder" }, 60).includes("cropped"));
+});
+
 console.log("console-view.test.js: all assertions passed");

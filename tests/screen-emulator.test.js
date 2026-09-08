@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdtempSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -137,6 +137,61 @@ test("resize follows the producer, and a disposed screen ignores it", async () =
   assert.doesNotThrow(() => e.resize({ cols: 20, rows: 2 }));
 });
 
+test("COLOUR SURVIVES THE ROUND TRIP, read back off the REAL cell API", async () => {
+  // `screen-style.mjs` is tested with literals; this is the half that can only be checked against the
+  // package -- that the attributes it reads are the ones a real cell actually reports.
+  const e = await screen({ cols: 40, rows: 2 });
+  await e.write(`${ESC}[1;1H${ESC}[32mgreen${ESC}[0m plain ${ESC}[1;31mBOLD${ESC}[0m`);
+  const [row] = e.rows({ color: true });
+  assert.ok(row.startsWith(`${ESC}[0;32;49mgreen`), `green was lost: ${JSON.stringify(row)}`);
+  assert.ok(row.includes(`${ESC}[0;1;31;49mBOLD`), `bold red was lost: ${JSON.stringify(row)}`);
+  e.dispose();
+});
+
+test("NEGATIVE CONTROL: without colour the row carries NO escapes at all", async () => {
+  // The default, and it has to stay the default: `panes.mjs` guarantees a composed view emits exactly
+  // what its inputs carried, so a piped or `--once` render must not gain escapes because a process
+  // happened to use colour.
+  const e = await screen({ cols: 40, rows: 2 });
+  await e.write(`${ESC}[1;1H${ESC}[32mgreen${ESC}[0m`);
+  const [mono] = e.rows();
+  assert.ok(!mono.includes(ESC), `an uncoloured row carried escapes: ${JSON.stringify(mono)}`);
+  assert.ok(mono.startsWith("green"), "the text was lost along with the colour");
+  e.dispose();
+});
+
+test("NO ROW ENDS WITH A STYLE STILL OPEN, or it colours the pane beside it", async () => {
+  // `sideBySide` puts the dashboard's text immediately after this row on the same physical line. A
+  // style left open runs straight into it -- and on the last row, into the operator's shell prompt
+  // after the view exits.
+  //
+  // THE LAST SGR IS WHAT DECIDES IT, not the last characters. A style can legitimately close in the
+  // MIDDLE of a row -- the cells after the coloured text are plain, so the reset lands there and
+  // spaces follow it. My first version asserted the row ENDED with a reset and failed on exactly that
+  // correct case, which is the assertion describing a stricter rule than the one that matters.
+  const e = await screen({ cols: 20, rows: 3 });
+  await e.write(`${ESC}[1;1H${ESC}[41mred background to the edge`);
+  const sgr = new RegExp(ESC + "\[[0-9;]*m", "g");
+  for (const row of e.rows({ color: true })) {
+    const codes = row.match(sgr);
+    if (!codes) continue;
+    assert.equal(codes.at(-1), `${ESC}[0m`,
+      `a row left its style open: ${JSON.stringify(row)}`);
+  }
+  e.dispose();
+});
+
+test("a style is emitted ONCE PER RUN, not once per cell", async () => {
+  // The cost argument, measured rather than asserted: ten identical coloured cells must produce one
+  // escape, not ten. Per-cell escapes are kilobytes per row, redrawn every refresh, per pane.
+  const e = await screen({ cols: 30, rows: 2 });
+  await e.write(`${ESC}[1;1H${ESC}[32m${"g".repeat(10)}${ESC}[0m`);
+  const [row] = e.rows({ color: true });
+  const opens = row.split(`${ESC}[0;32;49m`).length - 1;
+  assert.equal(opens, 1, `the style was re-emitted ${opens} times for one run`);
+  e.dispose();
+});
+
 // ── the ABSENT arm, in a child process where the package genuinely cannot be resolved ────────────
 
 test("PHYSICAL ABSENCE: with the package unresolvable, create() returns null rather than throwing", () => {
@@ -144,8 +199,22 @@ test("PHYSICAL ABSENCE: with the package unresolvable, create() returns null rat
   // there. That is the machine an operator has before `npm install`, and the whole point of making
   // this dependency optional -- the view must degrade to the notice that names `aify-env attach`,
   // never crash the daemon that is running their fleet.
+  // ITS LOCAL IMPORTS COME TOO. This module gained `./screen-style.mjs` when colour landed, and
+  // copying it alone made the absent arm fail for the WRONG REASON -- an unresolvable relative import
+  // rather than an unresolvable package. The test then proved nothing about optionality while looking
+  // like it had caught something. Both files, and the list is asserted below so a third import cannot
+  // silently reintroduce the same false failure.
   const dir = mkdtempSync(path.join(tmpdir(), "aify-env-absent-"));
+  const LOCAL_IMPORTS = ["screen-style.mjs"];
+  const source = readFileSync(MODULE, "utf8");
+  const needed = [...source.matchAll(/from "\.\/([\w.-]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(needed.sort(), [...LOCAL_IMPORTS].sort(),
+    "screen-emulator.mjs imports a local module this test does not copy, so the absent arm would fail "
+    + "on a missing relative path rather than on the missing package");
   copyFileSync(MODULE, path.join(dir, "screen-emulator.mjs"));
+  for (const name of LOCAL_IMPORTS) {
+    copyFileSync(path.join(HERE, "..", "lib", name), path.join(dir, name));
+  }
   const url = pathToFileURL(path.join(dir, "screen-emulator.mjs")).href;
   const script = `import("${url}").then(async (m) => {
     const loaded = await m.loadEmulator();
