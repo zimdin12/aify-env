@@ -718,4 +718,43 @@ test("a follower whose start REJECTS does not reject into the render loop", asyn
   assert.equal(s.pane().status, "failed");
 });
 
+// ── the only recovery a dead stream has ──────────────────────────────────────────────────────────
+//
+// THE FOLLOWER NEVER RECONNECTS, and that is deliberate rather than missing: the daemon answers a new
+// subscription with a full REPLAY, so reconnecting into a live emulator would write the same bytes a
+// second time -- a duplicate line in a log, but in a SCREEN it is a cursor somewhere nobody asked
+// for. The same corruption class the baseline rule and the conceal latch exist to prevent.
+//
+// SO THE RECOVERY IS THE OPERATOR'S `p`, and this pins it. Hiding the pane drops the follower and
+// showing it builds a fresh one, which starts a fresh subscription with a fresh replay into a fresh
+// screen -- correct by construction, and reachable with a key the hint line already names.
+//
+// WITHOUT THIS TEST that recovery is an accident of how `syncProcesses` derives its target. A change
+// there could leave a failed pane with no way back except restarting the view, and nothing would say
+// so: the pane would keep showing its honest reason for ever.
+
+test("HIDING AND SHOWING THE PANE REBUILDS A DEAD FOLLOWER, which is the only way back", () => {
+  let built = 0;
+  const dead = (id) => ({
+    id, status: "failed", reason: "the stream ended without an exit",
+    start() {}, stop() {}, lines: () => [], paneProblem: () => "",
+  });
+  const s = new ConsoleSession({ endpoint: "http://x", makeFollower: (id) => { built += 1; return dead(id); } });
+  s.noteViewport({ columns: 160 });
+  s.syncProcesses([{ id: "p1", label: "alpha" }]);
+  s.handleInput(String.fromCharCode(13));           // attach reveals the pane and opens a stream
+  assert.equal(built, 1, "positive control: attaching did not open a stream at all");
+  const first = s.follower;
+  assert.equal(s.pane().status, "failed", "the pane does not report the dead stream");
+
+  s.handleInput(String.fromCharCode(29));           // Ctrl+] back to the list
+  s.handleInput("p");                               // hide
+  s.syncProcesses([{ id: "p1", label: "alpha" }]);
+  s.handleInput("p");                               // show
+  s.syncProcesses([{ id: "p1", label: "alpha" }]);
+
+  assert.equal(built, 2, "showing the pane again did not open a new stream");
+  assert.notEqual(s.follower, first, "the pane came back holding the SAME dead follower");
+});
+
 console.log("console-session.test.js: all assertions passed");
