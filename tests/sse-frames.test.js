@@ -11,6 +11,9 @@ import {
   FRAME_EXIT,
   FRAME_OUTPUT,
   FRAME_UNREADABLE,
+  dataFrame,
+  exitFrame as writeExitFrame,
+  namedFrame,
   parseFrame,
   readFrames,
 } from "../lib/sse-frames.mjs";
@@ -183,3 +186,71 @@ test("keep-alive blank lines between frames do not invent empty output", () => {
 });
 
 console.log("sse-frames.test.js: all assertions passed");
+
+// -- WRITING, and the round trip that holds the two halves to each other --------------------------
+//
+// THE WRITERS MOVED IN HERE ON 2026-09-08. They were comments inside the route, then briefly a
+// separate module, and neither could be held to the parser above: this file's own header used to
+// DESCRIBE the wire format in prose, which is two copies of one fact with a route between them. The
+// round-trip test below is the thing that makes them one.
+
+test("A NEWLINE IN THE OUTPUT DOES NOT END THE FRAME, which is why the payload is encoded", () => {
+  // The writer's side of the rule the parser above already depends on. A newline is the delimiter, so
+  // writing output raw would split one chunk into two frames -- and a process printing a BLANK LINE
+  // would emit a frame terminator in the middle of its own output.
+  const frame = dataFrame(`first${LF}${LF}second`);
+  assert.equal(frame.split(FRAME_END).length, 2, "the output ended the frame early");
+});
+
+test("A NAMED FRAME IS INVISIBLE to a consumer that reads only `data:` as output", () => {
+  // The compatibility argument this protocol adds facts under: `exit` arrived this way, and so does
+  // the `meta` frame that tells a console the producer's geometry.
+  const frame = namedFrame("meta", { cols: 132, rows: 40, truncated: false });
+  assert.ok(frame.startsWith(`event: meta${LF}`), `a named frame must lead with its name: ${frame}`);
+});
+
+test("`signal` IS OMITTED RATHER THAN SENT EMPTY, so 'nothing killed it' stays distinguishable", () => {
+  // An empty string is a THIRD state a consumer has to interpret, and the one it would most likely
+  // read as "killed by something I have no name for". The parser above asserts the reading half.
+  const clean = JSON.parse(writeExitFrame(0, "").split(LF)[1].slice("data: ".length));
+  assert.deepEqual(clean, { code: 0 });
+});
+
+test("EVERYTHING THIS FILE WRITES, THIS FILE READS BACK -- byte for byte, one byte at a time", () => {
+  // THE AGREEMENT TEST, and the reason the two halves are neighbours. Each assertion above pins one
+  // side of the format; only this one fails when they drift APART. It feeds the writers' own output
+  // through the reader a byte at a time, so no chunking can hide a disagreement.
+  const awkward = [
+    "plain",
+    `two${LF}lines`,
+    `a blank line${LF}${LF}in the middle`,
+    'quotes " and backslashes \ and a colon: here',
+    "data: not actually a frame",
+    `event: exit${LF}data: {"code":0}`,   // output that LOOKS like an exit frame
+  ];
+  const wire = awkward.map(dataFrame).join("") + writeExitFrame(null, "SIGKILL");
+
+  let carry = "";
+  const got = [];
+  for (const ch of wire) {
+    const step = readFrames(carry, ch);
+    carry = step.carry;
+    got.push(...step.frames);
+  }
+  assert.equal(carry, "", "the stream did not end on a frame boundary");
+  assert.deepEqual(got.slice(0, -1).map((f) => f.type), awkward.map(() => FRAME_OUTPUT),
+    "written output came back as something other than output");
+  assert.deepEqual(got.slice(0, -1).map((f) => f.text), awkward,
+    "a payload did not survive the round trip");
+  assert.deepEqual(got.at(-1), { type: FRAME_EXIT, code: null, signal: "SIGKILL" });
+});
+
+test("NEGATIVE CONTROL: the round trip can FAIL, so passing it means something", () => {
+  // If the reader accepted anything, the agreement above would hold against a broken writer. A frame
+  // written WITHOUT encoding is exactly the mistake that rule exists to prevent, and the reader must
+  // refuse it rather than quietly returning half a chunk.
+  const raw = `data: two${LF}lines${FRAME_END}`;
+  const { frames } = readFrames("", raw);
+  assert.notDeepEqual(frames.map((f) => f.text), [`two${LF}lines`],
+    "an unencoded payload round-tripped, so the encoding rule is not actually enforced");
+});
