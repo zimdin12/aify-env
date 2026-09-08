@@ -149,31 +149,44 @@ function bufferedRows(text, { width = 80, height = 24 } = {}) {
   return buffer.view({ height, width });
 }
 
-test("A REAL PAINTED CAPTURE RENDERS THROUGH THE EMULATOR", async () => {
+//: WHAT THE CAPTURE ACTUALLY PAINTS, measured from it: one row of text at row index 25, which is
+//: where `ESC[26;1H` puts it. Asserting the CONTENT and the POSITION is what separates a renderer
+//: from a stub -- review passed the previous version of these tests with a fake whose `rows()`
+//: always returned the plain arm's expected answer, because every painted assertion here was
+//: "nonempty", "no ESC" or "different from the line buffer", and a constant satisfies all three.
+const CAPTURE_ROW = 25;
+const CAPTURE_TEXT = "thinking with high effort";
+
+test("A REAL PAINTED CAPTURE RENDERS THROUGH THE EMULATOR", async (t) => {
   // NOTHING HAS EVER DONE THIS. Every other emulator test in this suite writes escape sequences by
   // hand; this fixture is what a working agent actually sent, and until now it stopped at the line
   // buffer. A renderer proven only against sequences someone wrote to exercise it is proven against
   // its author's expectations.
-  const rendered = await renderedRows(decodedText());
-  if (rendered === null) return;                  // @xterm/headless is optional and may be absent
+  const rendered = await renderedRows(decodedText(), { rows: 32 });
+  if (rendered === null) return t.skip("@xterm/headless is not installed; nothing was rendered");
 
-  assert.ok(rendered.length > 0, "the emulator produced no rows from a real capture");
   const screen = rendered.join(String.fromCharCode(10));
   assert.ok(!screen.includes(ESC),
     "an ESC byte survived into the RENDERED screen; the emulator printed a control sequence "
     + "instead of obeying it");
-  assert.ok(!screen.includes("\\u001b"),
-    "the literal six characters reached the rendered screen, which is a missing JSON.parse");
+
+  // THE POSITION IS THE CURSOR EFFECT. `ESC[26;1H` is one-based, so the text belongs on row 25 and
+  // nowhere else -- a renderer that ignored positioning would put it on row 0.
+  assert.ok(rendered[CAPTURE_ROW].includes(CAPTURE_TEXT),
+    `row ${CAPTURE_ROW} does not carry the captured status text; it reads `
+    + `${JSON.stringify(rendered[CAPTURE_ROW])}`);
+  assert.ok(rendered.slice(0, CAPTURE_ROW).every((row) => row.trim() === ""),
+    "text landed above the row the capture addresses, so cursor positioning was not obeyed");
 });
 
-test("THE EMULATOR AND THE LINE BUFFER DISAGREE ON A PAINTED STREAM", async () => {
+test("THE EMULATOR AND THE LINE BUFFER DISAGREE ON A PAINTED STREAM", async (t) => {
   // THE WHOLE POINT OF THE BLOCK, stated as something that can fail. If a real painted capture
   // rendered identically through both paths, the emulator would be doing nothing and B1-B5 would be
   // decoration. `ESC[1C` alone guarantees a difference: the line buffer keeps the sequence, a
   // terminal moves the cursor and shows a gap.
   const text = decodedText();
-  const rendered = await renderedRows(text);
-  if (rendered === null) return;
+  const rendered = await renderedRows(text, { rows: 32 });
+  if (rendered === null) return t.skip("@xterm/headless is not installed; nothing was rendered");
 
   const buffered = bufferedRows(text);
   assert.notDeepEqual(rendered, buffered,
@@ -181,7 +194,7 @@ test("THE EMULATOR AND THE LINE BUFFER DISAGREE ON A PAINTED STREAM", async () =
     + "the emulator is not interpreting anything");
 });
 
-test("AND THEY AGREE ON A STREAM THAT DOES NOT PAINT", async () => {
+test("AND THEY AGREE ON A STREAM THAT DOES NOT PAINT", async (t) => {
   // B3'S STATED CONTRACT, and the positive control for the test above: without it, a "renderer"
   // that mangled everything would satisfy the disagreement. A process that only prints lines must
   // look the same either way -- that is what "the line-buffer path stays byte-identical for
@@ -200,7 +213,7 @@ test("AND THEY AGREE ON A STREAM THAT DOES NOT PAINT", async () => {
   const CRLF = String.fromCharCode(13) + String.fromCharCode(10);
   const plain = ["alpha", "beta", "gamma"].join(CRLF) + CRLF;
   const rendered = await renderedRows(plain);
-  if (rendered === null) return;
+  if (rendered === null) return t.skip("@xterm/headless is not installed; nothing was rendered");
 
   const trim = (list) => list.map((row) => row.replace(/\s+$/, "")).filter((row) => row !== "");
   assert.deepEqual(trim(rendered), trim(bufferedRows(plain)),

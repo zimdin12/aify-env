@@ -241,9 +241,12 @@ test("BOTH CADENCES REACH THE VIEW, because a knob nothing passes has no hand on
 });
 
 test("AND AN UNSET PANE CADENCE LEAVES THE VIEW'S OWN DEFAULT ALONE", async () => {
-  // NEGATIVE CONTROL for the forwarding above, and a design point: passing `undefined` through would
-  // OVERRIDE `startDashboard`'s default with undefined and disable the coalescing timer. Pinning a
-  // second copy of 80 here would be the forked-constant shape this repo keeps removing.
+  // NEGATIVE CONTROL for the forwarding above, and a design point stated correctly this time:
+  // `startDashboard` takes `paneRepaintMs = 80` as a DESTRUCTURING default, so passing `undefined`
+  // would select 80 as well -- my first version of this comment claimed it would disable the timer,
+  // which is simply wrong. The reason to omit the property is that a caller who did not choose a
+  // cadence should not appear to have chosen one, and pinning a second copy of 80 here would be the
+  // forked-constant shape this repo keeps removing.
   const s = spy();
   await startDaemonView({
     endpoint: "e", registryPath: "r", stdout: tty(), stdin: tty(), start: s.start,

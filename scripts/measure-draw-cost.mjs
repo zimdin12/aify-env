@@ -38,7 +38,10 @@ function processRow(i, nonce) {
   return {
     id: `proc-${i}`,
     label: `agent-${i}`,
-    title: `claude — working on something ${i}${nonce}`,
+    // THE NONCE LEADS. Appended, it sat in the part of the title the 132-column clip removes,
+    // so every changing frame was rejected for missing content the renderer had correctly
+    // cropped. A per-frame witness has to survive the layout it is checked against.
+    title: `${nonce}claude — working on something ${i}`,
     status: i % 4 === 0 ? "exited" : "running",
     pid: 10000 + i,
     startedAt: new Date(Date.now() - i * 60000).toISOString(),
@@ -58,15 +61,28 @@ function health(processCount, nonce) {
 /** `nonceFor` decides whether each frame's text repeats or is new. */
 function fakeFetch(processCount, nonceFor) {
   let frame = 0;
-  return async () => {
-    const body = health(processCount, nonceFor(frame));
-    frame += 1;
+  //: WHAT THE LAST FRAME WAS ASKED TO DRAW. The changing arm's nonce differs per call, so a frame
+  //: that carries it is THAT frame -- which no constant answer can satisfy. Review passed 328 calls
+  //: by returning a fixed string containing six expected markers; a per-frame expectation is the
+  //: only shape that closes it.
+  //: OWNED BY THE RENDER, not by the request. `collectSnapshot` makes TWO requests per frame -- the
+  //: environment's /health and each registered service's -- so a counter incremented here advanced
+  //: twice per render and the "expected" nonce had never been drawn. A per-request counter is not a
+  //: per-frame identity, which is the same noun confusion the transport probes were retracted for.
+  const state = { nonce: nonceFor(0) };
+  const fetchImpl = async () => {
+    const body = health(processCount, state.nonce);
     const text = JSON.stringify(body);
     return { ok: true, status: 200, json: async () => body, text: async () => text, body: null };
   };
+  fetchImpl.nextFrame = () => { state.nonce = nonceFor(frame); frame += 1; return state.nonce; };
+  fetchImpl.lastNonce = () => state.nonce;
+  return fetchImpl;
 }
 
 async function drawOnce(fetchImpl, count) {
+  // ONE NONCE PER FRAME, chosen before the render and read back after it.
+  if (fetchImpl.nextFrame) fetchImpl.nextFrame();
   let text = "";
   await startDashboard({
     endpoint: ENDPOINT, registryPath: REGISTRY_PATH,
@@ -77,18 +93,22 @@ async function drawOnce(fetchImpl, count) {
     // input, and one an injected fetch does not close. (External review of c74927a.)
     readCredentialStore: () => [],
   });
-  // A FRAME IS ONLY A SAMPLE IF IT DREW THE ROSTER, and "the roster" is more than one marker.
-  // Review returned exactly `agent-0` from every call -- no rows, no layout, no title -- and it took
-  // full credit. So: several DISTINCT labels that the viewport can actually hold, plus the width the
-  // frame was asked to draw at.
+  // A FRAME IS ONLY A SAMPLE IF IT DREW *THIS* FRAME, and that is not a constant predicate.
   //
-  // BOUNDED BY THE VIEWPORT, not by the roster size: 40 rows cannot show 80 agents, so checking
+  // Review defeated two versions of this: one marker, then six. Any fixed answer containing the
+  // expected strings passed 328 calls and took full credit. So the check is now INPUT-DEPENDENT --
+  // the changing arm gives every row a nonce that differs per call, and a frame has to carry the
+  // nonce it was asked for. A constant cannot satisfy an expectation that changes every time.
+  //
+  // BOUNDED BY THE VIEWPORT, not by the roster size: 40 rows cannot show 80 agents, so requiring
   // every label would fail for a reason that is not a defect. The first few are always on screen.
   const visible = Math.min(count, 6);
   const missing = [];
   for (let i = 0; i < visible; i += 1) {
     if (!text.includes(`agent-${i}`)) missing.push(`agent-${i}`);
   }
+  const nonce = fetchImpl.lastNonce ? fetchImpl.lastNonce() : "";
+  if (count > 0 && nonce && !text.includes(nonce)) missing.push(`this frame's nonce ${nonce}`);
   const drewRoster = count === 0 || missing.length === 0;
   return { bytes: text.length, drewRoster, missing };
 }
