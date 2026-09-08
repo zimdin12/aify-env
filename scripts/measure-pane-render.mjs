@@ -38,6 +38,7 @@ import { fileURLToPath } from "node:url";
 
 import { FRAME_OUTPUT, FRAME_UNREADABLE, readFrames } from "../lib/sse-frames.mjs";
 import { loadEmulator, ScreenEmulator } from "../lib/screen-emulator.mjs";
+import { receiptFor, receiptLines } from "./execution-receipt.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CAPTURE = join(HERE, "..", "tests", "fixtures", "claude-console-sse.raw.txt");
@@ -239,6 +240,21 @@ if (!deps) {
   process.exit(1);
 }
 
+// WHAT IS ACTUALLY BEING TIMED, bound to the source it claims to come from. The same block the
+// draw probe carries, for the same reason: an import line says where the NAME came from and
+// nothing about the OBJECT that runs, and every figure below is a cost attributed to that
+// object. The run refuses rather than publishing if the chain does not close.
+//
+// IT BINDS `ScreenEmulator`, NOT xterm. The class is this repo's; `@xterm/headless` under it is
+// a third-party package with its own provenance question, and one receipt does not answer both.
+const RECEIPT = await receiptFor(ScreenEmulator, new URL("../lib/screen-emulator.mjs", import.meta.url).href);
+if (!RECEIPT.declaredHere) {
+  process.stderr.write(`NOTHING IS PUBLISHED: the ${RECEIPT.name} this file imported does not `
+    + `appear in ${RECEIPT.module}, so these figures would describe something other than that `
+    + `module's emulator.${LF}`);
+  process.exit(1);
+}
+
 const CHUNK = capturedFrame();
 // The geometries a console pane actually gets: the dashboard's own default, a wide terminal, and the
 // 132x26 the operator's live PTYs report.
@@ -330,6 +346,10 @@ if (refusals.length) {
   console.log(`${checked.length} of ${PANES.length} panes are tall enough to show the capture's own `
     + `row ${CAPTURE_ROW} and all of them carry its text there; `
     + `${tooShort.map((p) => `${p.cols}x${p.rows}`).join(", ")} cannot and is not counted as a check.`);
+  console.log("");
+  for (const line of receiptLines(RECEIPT)) console.log(line);
+  console.log("  NOT PROVEN  that this class was the one used. Nothing in-process can say so; what");
+  console.log("              is established is that the imported object IS the module's own body.");
   console.log("");
   console.log("WITHDRAWN: \"one repaint is a fifth of its budget\". That summed the write, the plain "
     + "extraction and the coloured one, and the real path does none of that: `output-follower.mjs` "
