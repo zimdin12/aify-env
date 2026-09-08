@@ -335,3 +335,46 @@ test("A META FRAME THAT WRITES NOTHING STILL REPORTS, because it changes what ma
     + "changes what the pane may draw and nothing would redraw",
   );
 });
+
+test("A BACKLOG NOTHING WILL READ IS RELEASED, not held for the life of the follower", async () => {
+  // Bytes that arrive while the emulator is loading are HELD so they can be replayed into it. If no
+  // screen ever arrives -- the package is absent, or the pane was hidden while the import ran --
+  // nothing will ever read them, and only the success path used to empty the queue.
+  //
+  // STOPPING DURING THE IMPORT is the reachable half of that condition; the absent half shares the
+  // same branch, which is why they were merged into one.
+  const f = follow([outputFrame("held-1"), outputFrame("held-2")]);
+  const started = f.start();
+  // Stop while the emulator import is still in flight -- the window this is about.
+  f.stop();
+  await started;
+  await f.applying;
+  await new Promise((r) => setImmediate(r));
+
+  assert.deepEqual(f.pending, [],
+    `the follower is still holding ${f.pending.length} queued event(s) that no screen will read`);
+  // AND NO SCREEN WAS INSTALLED FOR A PANE THAT IS GONE. Asserting only on `pending` cannot say
+  // this: draining the backlog INTO a screen empties it too, so a follower that ignored `stopped`
+  // and installed one anyway satisfied the line above.
+  assert.equal(f.screen, null,
+    "a screen was installed for a pane that had already been hidden; it outlives what asked for it");
+});
+
+test("A BACKLOG THE SCREEN WILL READ IS NOT DISCARDED", async () => {
+  // POSITIVE CONTROL. A follower that simply threw its backlog away on every path would satisfy the
+  // test above and lose every byte that arrived before the emulator finished loading -- which is the
+  // whole reason the queue exists.
+  const f = follow([outputFrame("kept-1")]);
+  await f.start();
+  // THE IMPORT RESOLVES AFTER `start()` RETURNS, so one await of `applying` captures a chain that
+  // predates the backlog replay. Wait for the screen to exist, then for its queue to drain.
+  for (let i = 0; i < 200 && !f.screen; i += 1) await new Promise((r) => setTimeout(r, 5));
+  await f.applying;
+
+  // ASSERTED ON THE SCREEN, not the buffer. `pending` feeds the SCREEN; the buffer is filled
+  // separately by `applyFrame`, so its content survives the backlog being discarded entirely -- and
+  // a mutant that threw the backlog away on every path passed a buffer-based assertion.
+  assert.ok(f.screen, "no emulator was installed, so this control proves nothing about the backlog");
+  assert.ok(f.screen.rows().join("\n").includes("kept-1"),
+    "output held during the emulator import never reached the screen it was held for");
+});
