@@ -38,9 +38,11 @@ const FRAMES = 40;
 const COLUMNS = 132;
 const ROWS = 40;
 
-// THE FRAME IS PARSED, not searched. Colour and cursor moves are removed first, then the text is
-// split into the lines the renderer laid out -- a line is the unit a row is bound to below.
-const ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]/g;
+// THE FRAME IS PARSED, not searched: it is split into the lines the renderer laid out, and a line
+// is the unit a row is bound to below.
+//: EVERY escape, not only the CSI ones: a frame this renderer draws contains none of either,
+//: so the check is "is there an escape here at all" rather than a vocabulary to keep current.
+const ESCAPES = /\u001b(?:\[[0-9;?]*[ -\/]*[@-~]|[@-Z\\-_])?/g;
 const NEWLINE = /\r?\n/;
 //: THE SHAPE `freshToken` MINTS, so a marker can be recognised without knowing which one it is.
 //: That is what makes "no marker but this frame's" checkable at all: a scan that only knew the
@@ -173,6 +175,17 @@ async function drawOnce(fetchImpl, count) {
   //   correct rows plus an EXTRA token this run never issued       REFUSED, foreign marker
   //   a correctly laid-out dynamic renderer                        PUBLISHED, as it must be
   //
+  // AND TWO MORE, 2026-09-09, because the round above closed only the boundaries it was shown:
+  //
+  //   six rows labelled agent-0WRONG, agent-1WRONG ...             REFUSED, agent-0 not found
+  //   six rows labelled _agent-0, _agent-1 ...                     REFUSED, agent-0 not found
+  //   correct rows, then the viewport ERASED with ESC[2J ESC[H     REFUSED, an escape in the frame
+  //   the correctly laid-out dynamic renderer, again               PUBLISHED
+  //
+  // The first two are the identity boundaries: the right side excluded only DIGITS and the left
+  // omitted UNDERSCORE, so both leaked. The third is the erase, and it is the one that changes what
+  // this file believes a frame is -- see the note beside `ESCAPES`.
+  //
   // The last is the control against over-tightening: a check that had stopped admitting CORRECT
   // output would be a worse defect than the one being fixed, and invisible from a run that only
   // tries carriers.
@@ -187,13 +200,32 @@ async function drawOnce(fetchImpl, count) {
   // it a correct render IS the same text every frame and nothing here separates that from a cache
   // of one. It is unpredictable rather than fixed -- generated per run, so nothing written in
   // advance can contain it.
-  // NORMALIZED ONCE, AND EVERYTHING BELOW READS THE NORMALIZED FORM. The row checks stripped ANSI
-  // and the marker check searched the RAW text, which is a hole review walked through: a retired
-  // token split internally by `ESC[31m` is absent from the raw bytes and plainly VISIBLE once the
-  // escapes are removed. 164 frames carried one that way and published.
-  const normalized = text.replace(ANSI, "");
-  const lines = normalized.split(NEWLINE);
+  // THE FRAME FORMAT IS PLAIN TEXT AND NEWLINES, AND AN ESCAPE IS REFUSED RATHER THAN STRIPPED.
+  //
+  // MEASURED, NOT ASSUMED, 2026-09-09: a real frame from this renderer at this configuration
+  // contains ZERO CSI sequences and no other ESC -- 2,335 bytes of text and newlines at ten
+  // processes. So an escape in a frame is not something the thing under measurement produces, and
+  // the honest response is to refuse the frame and say so.
+  //
+  // STRIPPING THEM WAS TWO HOLES, both walked through by review. A retired token split internally by
+  // `ESC[31m` was absent from the raw bytes and plainly visible once the escapes were removed; 164
+  // frames carried one and published. And stripping treats ERASE and CURSOR MOVES as though they
+  // were styling -- so six correct rows followed by `ESC[2J` and `ESC[H` published eight numeric
+  // rows, while the same bytes interpreted at 132x40 leave a screen with no non-blank line on it.
+  // A membership test over stripped text is not a statement about the final viewport.
+  //
+  // REFUSING RATHER THAN INTERPRETING is deliberate. Interpreting would need an emulator -- an
+  // optional dependency in this repo -- to answer a question this renderer never poses. If it ever
+  // starts emitting escapes, this refuses and names them, which is the failure everyone wants.
   const missing = [];
+  const escapes = text.match(ESCAPES) || [];
+  if (escapes.length) {
+    const named = JSON.stringify(escapes[0]).split(String.fromCharCode(27)).join("ESC");
+    missing.push(`${escapes.length} escape sequence(s) in a frame this renderer draws without any, `
+      + `starting ${named} -- refused rather than stripped, because stripping treats an erase as `
+      + "decoration");
+  }
+  const lines = text.split(NEWLINE);
   // PHYSICAL LINES, not painted ones. Filtering the blanks out first was a hole review walked
   // straight through: forty empty lines inserted between the rows changed no label and no token,
   // took the frame to 46 physical lines, and still passed -- a frame three viewports tall that the
@@ -217,9 +249,12 @@ async function drawOnce(fetchImpl, count) {
   const claimedBy = new Map();
   for (let i = 0; i < visible; i += 1) {
     const label = `agent-${i}`;
-    // DELIMITED: not preceded by a word character or a dash, and not followed by another digit.
-    // `agent-0` must not match inside `agent-000`.
-    const identity = new RegExp(`(?<![A-Za-z0-9-])${label}(?![0-9])`);
+    // DELIMITED ON BOTH SIDES, and the first version leaked on each of them differently. The
+    // right boundary excluded only DIGITS, so `agent-0WRONG` matched `agent-0`; the left excluded letters,
+    // digits and dashes but not UNDERSCORE, so `_agent-0` matched too. Review published eight rows
+    // through each. \\w covers the underscore and the whole word class, and a dash is added because these
+    // labels contain one: `agent-0` must not match inside `agent-000`, `agent-0WRONG` or `_agent-0`.
+    const identity = new RegExp(`(?<![\\w-])${label}(?![\\w-])`);
     const at = lines.reduce((found, line, index) => (identity.test(line) ? [...found, index] : found), []);
     if (!at.length) { missing.push(label); continue; }
     if (at.length > 1) { missing.push(`${label} is on ${at.length} lines, so the frame is not a roster`); continue; }
@@ -234,12 +269,12 @@ async function drawOnce(fetchImpl, count) {
   }
   // NO MARKER BUT THIS FRAME'S, which is what line 225 has always claimed and what the retired-only
   // scan did not check. Review published with an EXTRA `~fffffffffe~` that this run never issued, so
-  // it was in no retired set and nothing looked for it. Every marker-shaped run in the normalized
+  // it was in no retired set and nothing looked for it. Every marker-shaped run in the
   // frame must be the current token; a retired one is named as retired because that is the more
   // useful message, but an unissued one is refused just the same.
   if (nonce) {
     const retired = new Set(fetchImpl.retiredNonces ? fetchImpl.retiredNonces() : []);
-    const foreign = [...new Set((normalized.match(MARKER) || []).filter((mark) => mark !== nonce))];
+    const foreign = [...new Set((text.match(MARKER) || []).filter((mark) => mark !== nonce))];
     if (foreign.length) {
       const named = foreign.slice(0, 3)
         .map((mark) => (retired.has(mark) ? `${mark} (retired)` : `${mark} (never issued)`));
