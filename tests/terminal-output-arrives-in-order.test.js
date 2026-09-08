@@ -183,3 +183,41 @@ test("AND A SERVICE THAT ANSWERS INSTANTLY DOES NOT COALESCE", async () => {
     `five chunks against an instant service became ${calls.length} POST(s); coalescing is supposed `
     + "to be what a SLOW service costs, not a delay every console pays");
 });
+
+test("A THROWING log() DOES NOT STRAND THE PENDING OUTPUT — the net the re-drain hook exists to be", async () => {
+  // THE MODULE SAYS THIS AND NOTHING TESTED IT. `output-sender.mjs` keeps TWO drain mechanisms -- the
+  // `while (state.pending)` loop and a post-settle re-drain hook -- and its own comment records that
+  // either alone passes every other test here, measured. It keeps the hook as a net under one case
+  // the loop cannot cover: an exception escaping the `while`, whose only source today is `log()`,
+  // which is a CALLER'S function this module has no business assuming about.
+  //
+  // A claim in a comment is not a guarantee. This is that case, driven: `log()` throws on the drop
+  // notice, and the output queued behind it still has to arrive. Without the hook the `while` exits
+  // through the exception with `pending` unsent, and the console silently stops.
+  //
+  // IT IS ALSO THE MUTATION-PROOF THE COMMENT ASKED FOR: delete the hook and this test is the one
+  // that goes red, which is what makes "kept anyway" a decision rather than an accident.
+  const { post, calls, gates } = controllablePost();
+  let threw = 0;
+  const sender = createOutputSender({
+    post,
+    log: () => { threw += 1; throw new Error("a caller's logger blew up"); },
+  });
+
+  // Overflow the buffer so the NEXT drain reports dropped characters -- that report is the only call
+  // to `log()` on the success path, so it is how a caller's throw gets inside the loop.
+  sender.send("t1", "x");                       // starts the first POST, which we hold open
+  await settle();
+  sender.send("t1", "y".repeat(MAX_PENDING_CHARS + 10));
+  await settle();
+
+  gates[0].resolve({ ok: true });                // the drain resumes, hits the drop notice, throws
+  await settle();
+  await settle();
+
+  assert.equal(threw, 1, "the drop notice must have been attempted, or this tests nothing");
+  assert.ok(calls.length >= 2,
+    `the output queued behind the throwing log() was never posted: ${calls.length} call(s)`);
+  const delivered = calls.slice(1).map((call) => call.body.output).join("");
+  assert.ok(delivered.includes("y"), "the pending chunk was dropped when the logger threw");
+});
