@@ -36,6 +36,7 @@
 //
 // Run: node scripts/measure-xterm-write.mjs
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +54,9 @@ const ESC = String.fromCharCode(27);
 const WRITES = 60;
 //: WHAT THE COMMITTED CAPTURE DECODES TO. Pinned so a truncated, empty or malformed fixture
 //: cannot be measured as though it were the real frame.
+//: The committed artifact itself, so "a real captured frame" is an identity claim this file can
+//: actually make. Shape alone (the two counts below) is satisfied by a same-shape substitution.
+const CAPTURE_SHA256 = "fc91c6c072b40b8d00af0e89e59a115415783d2ce2773b138d5d9b3cfe4efe1c";
 const CAPTURE_FRAMES = 7;
 const CAPTURE_CHARS = 562;
 const CALLBACK_TIMEOUT_MS = 2000;
@@ -66,13 +70,23 @@ const CALLBACK_TIMEOUT_MS = 2000;
  * that is only the marker is not a capture.
  */
 function realFrame() {
-  const raw = readFileSync(CAPTURE, "utf8");
+  // THE RAW BYTES, hashed before anything is decoded. The frame and character counts pin the
+  // capture's SHAPE, and a same-shape substitution passes them -- but these files claim this is the
+  // frame a working agent actually sent, which is an identity claim about the committed artifact.
+  // Replacing the fixture is a legitimate thing to do; it is a one-line edit here that says so.
+  const rawBytes = readFileSync(CAPTURE);
+  const digest = createHash("sha256").update(rawBytes).digest("hex");
+  const raw = rawBytes.toString("utf8");
   // `carry`, NOT `rest`. The first version of this guard destructured a field `readFrames` does not
   // return, so the unconsumed-capture check read `undefined` on every run and could never fire.
   const { frames, carry } = readFrames("", raw);
   const output = frames.filter((frame) => frame?.type === FRAME_OUTPUT);
   const text = output.map((frame) => frame.text).join("");
   const problems = [];
+  if (digest !== CAPTURE_SHA256) {
+    problems.push(`the capture is not the committed artifact: sha256 ${digest.slice(0, 16)}... `
+      + `against the expected ${CAPTURE_SHA256.slice(0, 16)}...`);
+  }
   // UNREADABLE FRAMES FIRST, before anything is filtered away. `readFrames` reports them explicitly,
   // and filtering for FRAME_OUTPUT discarded that report -- so a committed capture with one broken
   // frame appended still decoded to the expected seven frames and 562 characters, and published.
