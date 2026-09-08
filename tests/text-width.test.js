@@ -262,17 +262,24 @@ test("a cached key does not hold on to the string it was sliced out of", () => {
   const seen = JSON.parse(done.stdout);
   assert.equal(seen.entries, 32, "the probe cached a different number of entries than it reports on");
 
-  // POSITIVE CONTROL that the probe allocated what it claims: without this, a probe that built no
-  // parents at all would report a tiny retention and pass for the wrong reason.
-  assert.equal(seen.parentBytes, 32 * 1024 * 1024 * 2, "the probe did not allocate the parents");
+  // THE POPULATION IS ASSERTED FROM WHAT THE PROBE ACTUALLY BUILT, not from the constants that were
+  // meant to produce it. The first version of this compared a reported constant against the same
+  // constant written out again, and external review showed that cutting the probe's repeat count to
+  // 30 still satisfied every predicate here while building no large parents at all.
+  assert.equal(seen.parentBytes, seen.parentUnitsBuilt * 2, "the probe's own arithmetic disagrees");
+  assert.ok(seen.parentUnitsBuilt >= 32 * 1024 * 1024,
+    `the probe built ${seen.parentUnitsBuilt} units of parent text; there is nothing large enough `
+    + "here for the cache to have retained, so a pass would mean nothing");
+  assert.ok(seen.sliceUnitsCached <= 32 * 200,
+    `the probe cached ${seen.sliceUnitsCached} units; the keys are supposed to be small slices`);
 
   // The owned keys are ~2 bytes a unit plus map overhead. A tenth of one parent is far below the
   // 40MB the defect held and far above anything the keys themselves need, so this discriminates
   // without depending on an exact allocator.
-  const ceiling = 1024 * 1024 * 2 / 10;
+  const ceiling = (seen.parentBytes / 32) / 10;
   assert.ok(
     seen.attributableBytes < ceiling,
-    `the cache retained ${seen.attributableBytes} bytes for ${seen.logicalUnits} units of text; `
-    + "it is holding the parents of the strings it was given",
+    `the cache retained ${seen.attributableBytes} bytes for ${seen.sliceUnitsCached} units of `
+    + "cached text; it is holding the parents of the strings it was given",
   );
 });
