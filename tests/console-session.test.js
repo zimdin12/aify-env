@@ -600,7 +600,14 @@ test("A CONFIRMED STOP FOLLOWS THE AGENT IT WAS OPENED ON, not the cursor", () =
     "a row above the target exiting moved the stop onto a different agent");
 
   const reordered = armed(three());
-  reordered.syncProcesses(procs("charlie", "bravo", "alpha"));
+  // THE TARGET MUST ACTUALLY MOVE, and this permutation was chosen wrongly the first time: reversing
+  // [alpha, bravo, charlie] leaves bravo at index 1, so the arm passed against code that read the
+  // cursor. Review pointed that out. Asserted here rather than assumed, because a control that cannot
+  // move the row proves nothing about following it.
+  const after = procs("charlie", "alpha", "bravo");
+  assert.notEqual(after.findIndex((row) => row.id === "bravo"), 1,
+    "this permutation leaves the target at its old index, so the arm cannot fail");
+  reordered.syncProcesses(after);
   assert.equal(reordered.handleInput("y").perform.process.id, "bravo",
     "a reorder moved the stop onto a different agent");
 
@@ -650,13 +657,18 @@ test("CANCELLING HANDS OUT NOTHING", () => {
   assert.equal(s.focus.mode, "dashboard");
 });
 
-test("A NON-DESTRUCTIVE CHOICE NEEDS NO YES, so the guard is not refusing everything", () => {
+test("A NON-DESTRUCTIVE CHOICE NEEDS NO YES, and attach is PERFORMED rather than handed out", () => {
+  // It used to be reported as `chose:attach` for a caller to act on, and no caller knew how -- so the
+  // menu's own default did nothing. The router carries it out itself, because it is the one action
+  // that moves the keyboard and touches no process.
   const s = shownSession([]);
   s.syncProcesses(procs("alpha"));
   s.handleInput("m");
   const chosen = s.handleInput(ENTER);     // `attach` is the resting choice
-  assert.equal(chosen.perform.action, "attach");
-  assert.equal(chosen.perform.process.id, "alpha");
+  assert.equal(chosen.action, "attach", "attach was handed out instead of performed");
+  assert.equal(chosen.perform, null, "attach reached an executor that does not know what it means");
+  assert.equal(s.focus.mode, "pty");
+  assert.equal(s.selected.id, "alpha");
 });
 
 test("THE PROCESS IS RESOLVED WHEN THE ACTION IS, not looked up later", () => {

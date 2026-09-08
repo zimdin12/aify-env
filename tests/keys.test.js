@@ -183,6 +183,20 @@ test("`y` IS THE ONLY YES, and it does not leak into the next state", () => {
   }
 });
 
+test("CHOOSING ATTACH FROM THE MENU ACTUALLY ATTACHES", () => {
+  // It was an INERT OFFER: the router handed `chose:attach` to the caller, every executor handles
+  // `stop`, and none of them knows what attaching means -- so `m`, Enter, then typing did nothing.
+  // An offer that does nothing is worse than an offer that is absent.
+  //
+  // The same transition Enter makes from the dashboard, including revealing the pane: typing into one
+  // nobody can see is not a feature, whichever key got you there.
+  const opened = routeKey("m", menu()).state;
+  const chosen = routeKey(String.fromCharCode(13), opened);
+  assert.equal(chosen.action, "attach", "the menu reported a choice instead of performing it");
+  assert.equal(chosen.state.mode, "pty");
+  assert.equal(chosen.state.paneHidden, false, "it attached to a pane nobody can see");
+});
+
 test("ATTACH NEEDS NO CONFIRMATION, so the guard is not just refusing everything", () => {
   // The control for the tests above. A menu that confirmed every action would satisfy them all while
   // making the common case tedious enough that an operator stops reading the prompt.
@@ -193,8 +207,10 @@ test("ATTACH NEEDS NO CONFIRMATION, so the guard is not just refusing everything
   const opened = routeKey("m", menu()).state;
   assert.equal(ALL_ACTIONS[opened.menuAt], "attach", "attach is no longer the resting choice");
   const chosen = routeKey(ENTER, opened);
-  assert.equal(chosen.action, "chose:attach");
-  assert.equal(chosen.state.mode, "dashboard");
+  // ATTACH IS PERFORMED RATHER THAN REPORTED -- see the test above. What matters here is that it
+  // needed no `y` on the way.
+  assert.equal(chosen.action, "attach");
+  assert.equal(chosen.state.mode, "pty");
 });
 
 test("THE MENU'S CURSOR IS ITS OWN, and the process selection never moves under it", () => {
