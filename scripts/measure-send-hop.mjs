@@ -47,7 +47,21 @@ class ReceivingService {
       req.on("end", () => {
         // STAMPED WHEN THE BODY IS COMPLETE, which is when the service could first act on it.
         // Stamping on the first byte would credit the hop for work still on the wire.
-        this.arrivals.push({ at: process.hrtime.bigint(), body: raw });
+        //
+        // AND DECODED, NOT SEARCHED. The first version kept the raw text and asked whether it
+        // CONTAINED a marker, so a body that was nothing but markers, or was not JSON at all,
+        // counted as a delivery -- the collector was matching a substring, not a chunk. The
+        // envelope is parsed here and the arrival carries the terminal it was addressed to and the
+        // output field alone, so everything downstream is asking about the payload the sender
+        // actually posted.
+        let output = null;
+        let terminalId = null;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.output === "string") output = parsed.output;
+          terminalId = decodeURIComponent(String(req.url || "").split("/")[2] || "");
+        } catch { output = null; }
+        this.arrivals.push({ at: process.hrtime.bigint(), output, terminalId, undecodable: output === null });
         res.writeHead(200, { "content-type": "application/json" });
         res.end('{"ok":true}');
       });
@@ -64,13 +78,24 @@ class ReceivingService {
     return new Promise((resolve) => this.server.close(resolve));
   }
 
-  /** The first arrival whose body contains this marker, or null. Content, never order or time. */
+  /** Arrivals whose DECODED output carries this marker, for the terminal it was posted to. */
+  carrying(marker) {
+    return this.arrivals.filter((arrival) => arrival.output !== null
+      && arrival.terminalId === TERMINAL
+      && arrival.output.includes(marker));
+  }
+
+  /** The first such arrival, or null. Content and address, never order or time. */
   firstCarrying(marker) {
-    return this.arrivals.find((arrival) => arrival.body.includes(marker)) || null;
+    return this.carrying(marker)[0] || null;
   }
 
   carries(marker) {
     return this.firstCarrying(marker) !== null;
+  }
+
+  get undecodable() {
+    return this.arrivals.filter((arrival) => arrival.undecodable).length;
   }
 }
 
@@ -84,6 +109,9 @@ class Arm {
     this.sentAt = new Map();
     this.requests = 0;
     this.postMs = [];
+    this.answerMs = [];
+    this.completedPosts = 0;
+    this.failedPosts = 0;
   }
 
   async run(port) {
@@ -92,20 +120,32 @@ class Arm {
     const ownPort = await service.listen();
     const sender = createOutputSender({
       post: async (terminalId, body) => {
-        // MEASURED, NOT REQUESTED. `delay(5)` on this host is ~15.6ms -- the platform's timer
-        // granularity -- so the arm labels below would overstate their own precision if they
-        // reported what was asked for. The span actually taken is what the table prints.
-        const postStarted = process.hrtime.bigint();
+        // TWO INTERVALS, NAMED APART, because the first version reported one and called it the
+        // other. It timed the WHOLE call -- including the injected hold, which sleeps BEFORE the
+        // request is issued -- and printed it in a column headed "service". That is the caller's
+        // post duration, not the service's answer time, and the "about twice the service's answer
+        // time" conclusion drawn from it named an interval nothing here measured. Review
+        // demonstrated it by moving only the hold to after the response: the 50ms arm went from
+        // 101.8ms age against a 51.0ms column to 51.8ms against 51.0ms, and the same sentence still
+        // read "about twice" beside 1.02x.
+        const callStarted = process.hrtime.bigint();
         if (this.postDelayMs) await delay(this.postDelayMs);
+        const issuedAt = process.hrtime.bigint();
         this.requests += 1;
         const response = await fetch(`http://127.0.0.1:${ownPort}/terminals/${terminalId}/output`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
         });
-        if (!response.ok) throw new Error(`service answered ${response.status}`);
+        if (!response.ok) {
+          this.failedPosts += 1;
+          throw new Error(`service answered ${response.status}`);
+        }
         await response.text();
-        this.postMs.push(Number(process.hrtime.bigint() - postStarted) / 1e6);
+        const now = process.hrtime.bigint();
+        this.postMs.push(Number(now - callStarted) / 1e6);      // the caller's whole post
+        this.answerMs.push(Number(now - issuedAt) / 1e6);       // request issued -> response read
+        this.completedPosts += 1;
       },
       status: "attached",
     });
@@ -133,6 +173,10 @@ class Arm {
       this.ages.push(Number(arrival.at - sentAt) / 1e6);
     }
     this.ages.sort((a, b) => a - b);
+    // ONCE, NOT AT LEAST ONCE. A chunk that appears in two arrivals was delivered twice, which is a
+    // different world from the one being measured, and taking `[0]` and moving on would hide it.
+    this.duplicated = [...this.sentAt.keys()].filter((m) => service.carrying(m).length > 1).length;
+    this.undecodable = service.undecodable;
     // THE NEGATIVE CONTROL, in this arm and against this arm's own server: a marker shaped exactly
     // like the others but never handed to the sender must not be found.
     this.foreignFound = service.carries(`<${this.label}-never-sent>`);
@@ -164,12 +208,17 @@ const ARMS = [
   // A talking agent: a chunk as fast as the loop will hand one over.
   new Arm({ label: "busy", chunks: 400, gapMs: 0 }),
 ];
-// THE SERVICE'S SPEED IS THE HOP'S LATENCY, and this sweep is what turns that from an argument
-// about the code into a measurement. Coalescing holds new chunks while a POST is in flight, so a
-// chunk's age is dominated by how long the service takes to answer -- not by anything aify-env does.
+// HOW LONG A POST TAKES IS THE HOP'S LATENCY, and this sweep measures that relationship. Coalescing
+// holds new chunks while a POST is in flight, so a chunk's age rises with the post's duration.
+//
+// THE HOLD IS THE CALLER'S, NOT THE SERVICE'S, and an earlier version of this comment said the
+// opposite. `delay()` runs BEFORE `fetch`, so it lands in the `post` column and never in `answer` --
+// which is exactly why `answer` stays at about 2ms across every row of the sweep. Reading the sweep
+// as "the service got slower" was the mis-naming review caught.
+//
 // The 20ms member doubles as the positive control: it MUST exceed the delay it was given.
 const DELAY_SWEEP = [0, 5, 20, 50].map((postDelayMs) => new Arm({
-  label: `service +${postDelayMs}ms`, chunks: 40, gapMs: 0, postDelayMs,
+  label: `hold +${postDelayMs}ms`, chunks: 40, gapMs: 0, postDelayMs,
 }));
 const CONTROL_DELAY_MS = 20;
 const CONTROL = DELAY_SWEEP.find((arm) => arm.postDelayMs === CONTROL_DELAY_MS);
@@ -184,19 +233,24 @@ if (!CONTROL) {
 }
 
 const rows = ["HOP TWO: send() accepted a chunk -> the service has its bytes",
-  "  arm                       chunks   requests   service    p50 ms    p95 ms    max ms",
-  "                                                   p50 ms                              "];
+  "  arm                       chunks   requests  post p50  answer p50    p50 ms    p95 ms    max ms",
+  "                                               (whole    (issued ->    <-- the chunk's age -->  ",
+  "                                                call)     response)                             "];
 const refusals = [];
 
 for (const arm of [...ARMS, ...DELAY_SWEEP]) {
   await arm.run();
   if (arm === DELAY_SWEEP[0]) {
     rows.push("");
-    rows.push("  HOW LONG THE SERVICE TAKES TO ANSWER, and what that does to a chunk's age:");
+    rows.push("  HOW LONG A POST TAKES, and what that does to a chunk's age. The hold is applied");
+    rows.push("  BEFORE the request is issued, so it lands in `post` and not in `answer` -- which is");
+    rows.push("  why `answer` stays flat at about 2ms across every row below:");
   }
-  const servicePost = percentile([...arm.postMs].sort((a, b) => a - b), 0.5);
+  const wholePost = percentile([...arm.postMs].sort((a, b) => a - b), 0.5);
+  const answer = percentile([...arm.answerMs].sort((a, b) => a - b), 0.5);
   rows.push(`  ${arm.label.padEnd(22)}  ${String(arm.chunks).padStart(7)}  `
-    + `${String(arm.requests).padStart(9)}  ${servicePost.toFixed(2).padStart(7)}  `
+    + `${String(arm.requests).padStart(9)}  ${wholePost.toFixed(2).padStart(8)}  `
+    + `${answer.toFixed(2).padStart(10)}  `
     + `${percentile(arm.ages, 0.5).toFixed(3).padStart(8)}  `
     + `${percentile(arm.ages, 0.95).toFixed(3).padStart(8)}  `
     + `${(arm.ages.at(-1) ?? NaN).toFixed(3).padStart(8)}`);
@@ -207,6 +261,25 @@ for (const arm of [...ARMS, ...DELAY_SWEEP]) {
   if (arm.foreignFound) {
     refusals.push(`${arm.label}: a marker that was NEVER SENT was found in what the service `
       + `received, so this collector cannot tell present from absent`);
+  }
+  if (arm.duplicated) {
+    refusals.push(`${arm.label}: ${arm.duplicated} chunk(s) arrived in more than one request, so `
+      + `"the request that carried it" is not a single thing and these ages are not attributable`);
+  }
+  if (arm.undecodable) {
+    refusals.push(`${arm.label}: ${arm.undecodable} request body(ies) could not be decoded as the `
+      + `sender's envelope, so what arrived is not what this probe claims to be timing`);
+  }
+  // EVERY POST ACCOUNTED FOR. The sender CATCHES a failed post and carries on by design, so a run
+  // against a service answering 500 to everything completed no posts, timed nothing, and published
+  // exit 0 with NaN in every column. A benchmark whose subject never succeeded is not a slow
+  // benchmark, it is not a benchmark.
+  if (arm.failedPosts) {
+    refusals.push(`${arm.label}: ${arm.failedPosts} post(s) FAILED, and the sender swallows those `
+      + `by design -- so these figures describe only the ones that happened to work`);
+  }
+  if (!arm.completedPosts) {
+    refusals.push(`${arm.label}: no post completed at all`);
   }
   if (!arm.ages.length) refusals.push(`${arm.label}: no chunk was aged at all`);
   if (arm.ages.some((ms) => !Number.isFinite(ms))) {
@@ -234,23 +307,33 @@ if (refusals.length) {
     + `sent was not found; and a post delayed 20ms showed up as `
     + `${controlP50.toFixed(1)}ms.`);
   console.log("");
-  // THE RELATIONSHIP, COMPUTED FROM THE SWEEP rather than left for a reader to notice. A chunk that
-  // arrives while a POST is in flight waits for that POST to finish AND for the next one to
-  // complete, so its age is about twice the service's answer time. The arm LABELS are what was
-  // requested; the `service p50` column is what was measured, and on this host they differ because
-  // its timer granularity is ~15.6ms.
-  const ratios = DELAY_SWEEP.filter((arm) => arm.requests <= 2 && arm.postMs.length).map((arm) => {
-    const service = percentile([...arm.postMs].sort((a, b) => a - b), 0.5);
-    return percentile(arm.ages, 0.5) / service;
-  });
-  if (ratios.length) {
-    const spread = ratios.map((r) => r.toFixed(2)).join(", ");
-    console.log(`A CHUNK'S AGE IS ABOUT TWICE THE SERVICE'S ANSWER TIME (${spread}x across the `
-      + `coalescing arms): it waits for the POST in flight to finish and then for its own to `
-      + `complete. aify-env's own contribution is the ${percentile(ARMS[1].ages, 0.5).toFixed(2)}ms `
-      + `the busy arm shows against a service that answers immediately. So this hop is not a fixed `
-      + `cost -- it TRACKS how fast the service answers, which is a single-worker event loop shared `
-      + `by every console on the host.`);
+  // WHAT THE SWEEP SHOWS, and what an earlier version of this line claimed it showed.
+  //
+  // WITHDRAWN: "a chunk's age is about twice the SERVICE'S ANSWER TIME", and with it "the sender is
+  // not the problem". The injected hold sleeps BEFORE the request is issued, and a chunk's age ends
+  // when the server has the complete body -- so the column that ratio was taken against was the
+  // caller's WHOLE post, not the service answering. Review moved only the hold to after the
+  // response and the 50ms arm went from 101.8ms age against 51.0ms to 51.8ms against 51.0ms: the
+  // same sentence, still reading "about twice", now beside 1.02x. A ratio whose denominator is
+  // whichever interval the instrument happened to time is not a mechanism.
+  //
+  // WHAT SURVIVES is narrower and is still the useful part: a chunk's age RISES WITH HOW LONG A
+  // POST TAKES, because coalescing holds new chunks while one is in flight. The sweep shows that
+  // relationship; it does not establish which part of a post's duration causes it, and this file no
+  // longer says.
+  const held = DELAY_SWEEP.filter((arm) => arm.requests <= 2 && arm.postMs.length);
+  if (held.length) {
+    const shape = held.map((arm) => {
+      const post = percentile([...arm.postMs].sort((a, b) => a - b), 0.5);
+      return `${post.toFixed(0)}ms post -> ${percentile(arm.ages, 0.5).toFixed(0)}ms age`;
+    }).join(", ");
+    console.log(`A CHUNK'S AGE RISES WITH HOW LONG A POST TAKES (${shape}), because coalescing `
+      + `holds new chunks while one is in flight. WHICH PART of a post's duration drives it is NOT `
+      + `established here: this probe's own hold sleeps before the request is issued, so its "post" `
+      + `column is the caller's whole call and not the service answering.`);
+    console.log(`Against a service that answers immediately the busy arm's age is `
+      + `${percentile(ARMS[1].ages, 0.5).toFixed(2)}ms over ${ARMS[1].chunks} chunks -- which is `
+      + `what this hop costs when nothing is holding it, and is not an attribution of the lag.`);
   }
   console.log("WHAT THIS IS NOT: a real pty feeding a real service over a real network. The sender "
     + "and the receiver are one process on loopback, so this is the hop's own cost and queueing, "
