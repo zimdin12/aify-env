@@ -134,7 +134,9 @@ function answering({ status = 200, body = {}, throws = false, notJson = false } 
 test("POSITIVE CONTROL: the startable list is read from the daemon", async () => {
   const f = answering({ body: { agents: [{ id: "ef-tester", status: "available" }], problem: "" } });
   const answer = await listStartableAgents({ endpoint: "http://127.0.0.1:8802/", fetchImpl: f.impl });
-  assert.deepEqual(answer, { agents: [{ id: "ef-tester", status: "available" }], problem: "" });
+  // `service` TRAVELS WITH THE ANSWER so the view can say who it is waiting on without the host
+  // knowing any service's name. Empty here because this fake body declared none.
+  assert.deepEqual(answer, { agents: [{ id: "ef-tester", status: "available" }], problem: "", service: "" });
   assert.equal(f.calls[0].url, "http://127.0.0.1:8802/agents/startable");
   assert.equal(f.calls[0].redirect, "manual");
 });

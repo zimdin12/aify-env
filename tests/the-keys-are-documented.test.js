@@ -218,3 +218,43 @@ test("THE HINT NEVER EXCEEDS THE TERMINAL, which is what a wrapped row costs her
     assert.ok(width(hint) <= columns, `at ${columns} columns the hint is ${width(hint)} wide`);
   }
 });
+
+// ── the host tier names no service, including in what it prints ──────────────────────────────────
+//
+// `docs/AIFY_ENV_BOUNDARY.md` puts service knowledge inside a service PLUGIN and nowhere else: the
+// host runs processes for whoever asked and does not know who that is. The operator's own ruling,
+// 2026-08-24: "aify-env should not ask stuff from aify-comms, there should not be requirement, it is
+// not aify-env's concern."
+//
+// THE START LIST IS THE FIRST FEATURE THAT STRAINS THAT, and the operator asked for it by name --
+// through the plugin, which is the sanctioned route. The plugin knows the service; the host reaches
+// its capability by CAPABILITY name and never by service name.
+//
+// AND THE VIEW BROKE IT ANYWAY, in one string. `asking aify-comms…` was hardcoded in the renderer --
+// which is the host tier -- so a second `aify-` service offering the same capability would have been
+// announced under the wrong name, in the most confusing direction: naming the service that is NOT
+// the one failing to answer. The name now travels with the answer.
+
+test("THE WAIT NAMES WHOEVER ANSWERED, and nobody when it was not told", () => {
+  const named = renderDashboard(SNAPSHOT, {
+    columns: 200, color: false, keys: { enabled: true, canQuit: true },
+    view: { rows: SNAPSHOT.processes, selected: 0, mode: "start", query: "",
+      start: { agents: [], at: 0, problem: "", asked: false, service: "some-other-service" } },
+  }).join("\n");
+  assert.match(named, /asking some-other-service…/,
+    "the renderer did not use the name it was given");
+  // SCOPED TO THE SENTENCE, not to the frame. `aify-comms` appears legitimately elsewhere on screen
+  // -- it is the `service` column of a process this host is running, which is data the daemon was
+  // handed rather than a name it knows. Asserting on the whole frame confused the two and failed
+  // against a correct fix.
+  assert.doesNotMatch(named, /asking aify-comms/, "the host tier hardcodes a service name in its own output");
+
+  // A capability that did not say produces an UNATTRIBUTED wait, never a guess.
+  const unnamed = renderDashboard(SNAPSHOT, {
+    columns: 200, color: false, keys: { enabled: true, canQuit: true },
+    view: { rows: SNAPSHOT.processes, selected: 0, mode: "start", query: "",
+      start: { agents: [], at: 0, problem: "", asked: false } },
+  }).join("\n");
+  assert.match(unnamed, /asking…/);
+  assert.doesNotMatch(unnamed, /asking [a-z]/, "a service was invented for a capability that named none");
+});

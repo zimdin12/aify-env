@@ -216,7 +216,9 @@ test("POSITIVE CONTROL: the agents are drawn, with the cursor on the chosen row"
 });
 
 test("AN UNANSWERED LIST SAYS SO, rather than claiming there is nothing to start", () => {
-  const asking = drawn({ agents: [], at: 0, problem: "", asked: false });
+  // NAMED FROM THE ANSWER, never from the renderer: the host tier knows no service's name, so the
+  // capability supplies it and an answer that omits it produces an unattributed wait.
+  const asking = drawn({ agents: [], at: 0, problem: "", asked: false, service: "aify-comms" });
   assert.match(asking, /asking aify-comms/);
   assert.doesNotMatch(asking, /nothing to start/);
   // POSITIVE CONTROL: an ANSWERED empty list does say there is nothing.

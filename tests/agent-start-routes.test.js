@@ -148,3 +148,22 @@ test("A CAPABILITY CANNOT BE THE PLUGIN'S OWN LIFECYCLE METHOD", async () => {
 });
 
 console.log("agent-start-routes.test.js: all assertions passed");
+
+test("THE ROUTE PASSES THE CAPABILITY'S OWN NAME THROUGH, and invents none", async () => {
+  // BOTH ENDS OF THE FIELD, because testing only the reader is how this project has been caught
+  // three times: a field with no reader, a guard whose input nothing writes, and a sender and reader
+  // pointed at different carriers.
+  //
+  // The view wants to say "asking aify-comms…" while it waits, and the HOST must not know that name
+  // -- `docs/AIFY_ENV_BOUNDARY.md` puts service knowledge in the plugin and nowhere else. So the name
+  // travels with the answer, and a capability that does not say produces an unattributed wait.
+  const named = { ...fakeAgents(), service: "some-other-service" };
+  const answer = await handleRequest({ method: "GET", path: "/agents/startable" }, deps({ agents: named }));
+  assert.equal(answer.body.service, "some-other-service");
+
+  const silent = await handleRequest({ method: "GET", path: "/agents/startable" }, deps({ agents: fakeAgents() }));
+  assert.equal(silent.body.service, "", "the route invented a service the capability never claimed");
+
+  const none = await handleRequest({ method: "GET", path: "/agents/startable" }, deps({ agents: null }));
+  assert.equal(typeof none.body.service, "string", "the 503 body changed shape, so a view has two to render");
+});

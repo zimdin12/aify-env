@@ -594,3 +594,13 @@ test("THE CAPABILITY IS SCOPED TO THIS HOST'S MACHINE, which is the only scope i
   assert.deepEqual((await plugin.capabilities.agents.list()).agents.map((a) => a.id), ["mine"]);
   await plugin.stop();
 });
+
+test("THE PLUGIN NAMES ITSELF ON THE CAPABILITY, because the host tier cannot", () => {
+  // The producer end of the same field. `docs/AIFY_ENV_BOUNDARY.md` says the host knows about no
+  // service; the plugin is the only tier that knows which one this is, so it is the only tier that
+  // can supply the name a view puts on screen while it waits.
+  const { plugin } = makePlugin(fakeApi());
+  assert.equal(plugin.capabilities.agents.service, "aify-comms");
+  // AND IT IS THE PLUGIN'S OWN NAME, not a second spelling of it that could drift.
+  assert.equal(plugin.capabilities.agents.service, plugin.name);
+});
