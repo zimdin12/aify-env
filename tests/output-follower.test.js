@@ -378,3 +378,42 @@ test("A BACKLOG THE SCREEN WILL READ IS NOT DISCARDED", async () => {
   assert.ok(f.screen.rows().join("\n").includes("kept-1"),
     "output held during the emulator import never reached the screen it was held for");
 });
+
+test("A REJECTED SCREEN CREATION ALSO RELEASES THE BACKLOG", async () => {
+  // The third way no screen ever arrives. `create()` resolves null for an absent package, but the
+  // emulator's constructor and the Unicode addon can REJECT after the module has loaded -- so this
+  // is a distinct path, and "no screen will ever read the backlog" is true of it too.
+  //
+  // The creator is injected for the same reason `fetchImpl` is: a real emulator will not fail to
+  // build on demand, and the failure paths are the ones worth testing.
+  //: HELD OPEN until this test releases it. A creation that rejects immediately resolves before the
+  //: output frames are consumed, so `screenOpening` is already false when `#paint` runs and NOTHING
+  //: enters the backlog -- which is how the first version of this test passed against a follower that
+  //: never cleared it.
+  let explode;
+  const creating = new Promise((_, reject) => { explode = reject; });
+
+  const f = new OutputFollower({
+    endpoint: "http://127.0.0.1:8802",
+    id: "abc-p1",
+    fetchImpl: fakeStream([META_FRAME, outputFrame("held-1"), outputFrame("held-2")]),
+    createScreen: () => creating,
+  });
+  await f.start();
+
+  // THE PRECONDITION, ASSERTED. Without this the test can stop being about a backlog without saying so.
+  assert.ok(f.pending.length > 0,
+    "no output was held while the screen was being created, so this test is not about a backlog");
+
+  explode(new Error("the addon exploded"));
+  await creating.catch(() => {});
+  for (let i = 0; i < 200 && f.screenOpening; i += 1) await new Promise((r) => setTimeout(r, 5));
+  await f.applying;
+
+  assert.equal(f.screen, null, "a screen was installed although creating one rejected");
+  assert.deepEqual(f.pending, [],
+    `a rejected creation left ${f.pending.length} queued event(s) that nothing will ever read`);
+  // AND THE PANE STILL HAS THE OUTPUT. The line buffer is filled by `applyFrame`, independently of
+  // the emulator, so a failed screen must not cost the operator the bytes.
+  assert.match(f.buffer.view({ height: 5, width: 40 }).join(""), /held-1/);
+});
