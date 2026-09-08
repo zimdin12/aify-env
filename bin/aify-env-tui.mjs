@@ -85,6 +85,9 @@ const view = await startDashboard({
   columns: process.stdout.columns || 100,
   color: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
   intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),
+  // SEPARATE FROM THE REFRESH INTERVAL, because they bound different costs: `intervalMs`
+  // bounds an HTTP round trip, this bounds a render while a console is open.
+  paneRepaintMs: Number(process.env.AIFY_PANE_REPAINT_MS || 80),
   probeTimeoutMs: Number(process.env.AIFY_PROBE_TIMEOUT_MS || 1500),
   agentsTimeoutMs: Number(process.env.AIFY_AGENTS_TIMEOUT_MS || 6000),
 });

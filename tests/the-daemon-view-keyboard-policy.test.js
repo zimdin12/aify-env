@@ -222,3 +222,33 @@ test("the notices ring and the terminal size are handed to the view", async () =
   assert.equal(s.calls[0].rows, 51);
   assert.equal(s.calls[0].columns, 133);
 });
+
+test("BOTH CADENCES REACH THE VIEW, because a knob nothing passes has no hand on it", async () => {
+  // `intervalMs` bounds an HTTP round trip; `paneRepaintMs` bounds a RENDER while a console is open.
+  // They are separate costs and the operator tunes both through the daemon, so both have to arrive.
+  //
+  // NEITHER WAS TESTED. `intervalMs` has been forwarded since this view existed with nothing
+  // checking it, and `paneRepaintMs` was reaching `startDashboard` from its own default only -- a
+  // reader with no writer, which is the same defect as a field with no reader from the other side.
+  const s = spy();
+  await startDaemonView({
+    endpoint: "e", registryPath: "r", stdout: tty(), stdin: tty(), start: s.start,
+    intervalMs: 4321, paneRepaintMs: 77,
+  });
+  assert.equal(s.calls.length, 1, "no view was started, so the assertions below prove nothing");
+  assert.equal(s.calls[0].intervalMs, 4321, "the refresh interval did not reach the view");
+  assert.equal(s.calls[0].paneRepaintMs, 77, "the pane repaint interval did not reach the view");
+});
+
+test("AND AN UNSET PANE CADENCE LEAVES THE VIEW'S OWN DEFAULT ALONE", async () => {
+  // NEGATIVE CONTROL for the forwarding above, and a design point: passing `undefined` through would
+  // OVERRIDE `startDashboard`'s default with undefined and disable the coalescing timer. Pinning a
+  // second copy of 80 here would be the forked-constant shape this repo keeps removing.
+  const s = spy();
+  await startDaemonView({
+    endpoint: "e", registryPath: "r", stdout: tty(), stdin: tty(), start: s.start,
+  });
+  assert.equal(s.calls.length, 1);
+  assert.ok(!("paneRepaintMs" in s.calls[0]),
+    "an unset pane cadence was forwarded anyway, overriding the view's own default with undefined");
+});

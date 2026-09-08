@@ -77,12 +77,20 @@ async function drawOnce(fetchImpl, count) {
     // input, and one an injected fetch does not close. (External review of c74927a.)
     readCredentialStore: () => [],
   });
-  // A FRAME IS ONLY A SAMPLE IF IT DREW THE ROSTER. This counted BYTES and nothing else, so a frame
-  // that rendered an error banner, or a header and no rows, would time fast and read as an
-  // improvement. Review found exactly this class twice in this repo's transport probes; applying it
-  // here before it has to be found a third time.
-  const drewRoster = count === 0 || text.includes("agent-0");
-  return { bytes: text.length, drewRoster };
+  // A FRAME IS ONLY A SAMPLE IF IT DREW THE ROSTER, and "the roster" is more than one marker.
+  // Review returned exactly `agent-0` from every call -- no rows, no layout, no title -- and it took
+  // full credit. So: several DISTINCT labels that the viewport can actually hold, plus the width the
+  // frame was asked to draw at.
+  //
+  // BOUNDED BY THE VIEWPORT, not by the roster size: 40 rows cannot show 80 agents, so checking
+  // every label would fail for a reason that is not a defect. The first few are always on screen.
+  const visible = Math.min(count, 6);
+  const missing = [];
+  for (let i = 0; i < visible; i += 1) {
+    if (!text.includes(`agent-${i}`)) missing.push(`agent-${i}`);
+  }
+  const drewRoster = count === 0 || missing.length === 0;
+  return { bytes: text.length, drewRoster, missing };
 }
 
 async function timeFrames(processCount, nonceFor) {
@@ -109,24 +117,38 @@ const ARMS = [
 ];
 
 let failures = 0;
-console.log(`one frame at 132x40, averaged over ${FRAMES} (plus one warm-up, discarded)`);
+const LF = String.fromCharCode(10);
+const rows = [];
+const header = (`one frame at 132x40, averaged over ${FRAMES} (plus one warm-up, discarded)`);
 for (const [label, nonceFor] of ARMS) {
-  console.log(`\n${label}`);
-  console.log("  processes    ms/frame    bytes written    frames/s one core could draw");
+  rows.push(`${LF}${label}`);
+  rows.push("  processes    ms/frame    bytes written    frames/s one core could draw");
   for (const count of [10, 20, 40, 80]) {
     const { ms, bytesPerFrame, rejected } = await timeFrames(count, nonceFor);
-    console.log(
-      `  ${String(count).padStart(9)}  ${ms.toFixed(2).padStart(9)}  ${String(bytesPerFrame).padStart(15)}`
-      + `  ${Math.round(1000 / ms).toString().padStart(28)}`
-      + (rejected ? `   REJECTED ${rejected} frame(s) that drew no roster` : ""),
-    );
-    if (rejected) failures += rejected;
+    // HELD, NOT PRINTED. A refusal after the rows cannot retract them, and review demonstrated
+    // exactly that: 328 empty calls, eight numeric rows on stdout, "nothing is published", exit 0.
+    rows.push(`  ${String(count).padStart(9)}  ${ms.toFixed(2).padStart(9)}  `
+      + `${String(bytesPerFrame).padStart(15)}  ${Math.round(1000 / ms).toString().padStart(28)}`);
+    if (rejected) {
+      failures += rejected;
+      process.stderr.write(`  ${label} / ${count} processes: REJECTED ${rejected} frame(s) that `
+        + `drew no roster${LF}`);
+    }
   }
 }
 
-console.log(
-  failures === 0
-    ? `\nEvery frame drew the roster it was given, so the figures above are renders.`
-    : `\nNOTHING ABOVE IS PUBLISHED: ${failures} frame(s) timed without drawing the roster, so those`
-      + ` samples measured something other than a render.`,
-);
+// NOTHING REACHES stdout UNLESS EVERY FRAME DREW ITS ROSTER. A refusal printed after the rows
+// cannot retract them: review ran the exact body with 328 empty calls and got eight numeric rows,
+// "nothing is published", and exit 0 -- so an automated caller saw a successful run with figures in
+// it. That was this script carrying over its sibling's DISCLAIMER instead of its GATING.
+if (failures === 0) {
+  console.log(header);
+  for (const row of rows) console.log(row);
+  console.log(`${LF}Every frame drew the roster it was given, so the figures above are renders.`);
+} else {
+  process.stderr.write(
+    `${LF}NOTHING IS PUBLISHED: ${failures} frame(s) timed without drawing the roster, so those`
+    + ` samples measured something other than a render. Per-arm rejections are above.${LF}`,
+  );
+  process.exitCode = 1;
+}

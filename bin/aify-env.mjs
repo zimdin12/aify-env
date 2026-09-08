@@ -772,6 +772,9 @@ server.listen(port, HOST, async () => {
     notices: NOTICES,
     enabled: !NO_DASHBOARD,
     intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),
+    // SEPARATE FROM THE REFRESH INTERVAL, because they bound different costs: `intervalMs`
+    // bounds an HTTP round trip, this bounds a render while a console is open.
+    paneRepaintMs: Number(process.env.AIFY_PANE_REPAINT_MS || 80),
     color: !process.env.NO_COLOR,
   });
   stopDashboard = view.stop;
