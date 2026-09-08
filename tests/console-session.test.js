@@ -34,11 +34,19 @@ const procs = (...ids) => ids.map((id) => ({ id, label: `label-${id}` }));
 
 //: Every action, because these tests exercise the whole menu. A real caller declares only what it
 //: can perform -- `aify-env` cannot restart a managed agent -- and the default is attach alone.
-const session = (log) => new ConsoleSession({
-  endpoint: "http://x",
-  makeFollower: recordingFollower(log),
-  actions: ["attach", "restart", "stop"],
-});
+const session = (log) => {
+  const s = new ConsoleSession({
+    endpoint: "http://x",
+    makeFollower: recordingFollower(log),
+    actions: ["attach", "restart", "stop"],
+  });
+  // A TERMINAL WIDE ENOUGH TO DRAW A PANE. Drawability now gates RESOURCES as well as input -- a pane
+  // the compositor refuses to draw is one nobody is reading -- so a session that never reports a
+  // viewport opens no stream at all. The tests that deliberately exercise a narrow or unreported
+  // terminal set their own.
+  s.noteViewport({ columns: 100 });
+  return s;
+};
 
 //: A session whose console is OPEN, on a terminal wide enough to draw it. The pane defaults to
 //: HIDDEN and a hidden pane opens no follower, so every test about stream lifecycle needs one that
@@ -286,6 +294,36 @@ test("but when the ATTACHED process itself goes, the keyboard fails CLOSED", () 
   assert.equal(s.focus.mode, "dashboard", "the keyboard stayed inside a pane whose process is gone");
 });
 
+test("A PANE THE TERMINAL CANNOT DRAW OPENS NO STREAM EITHER", () => {
+  // `paneHidden` says the operator does not want it; `canDrawPane` says the terminal cannot show it.
+  // BOTH mean nobody is reading, and gating on the flag alone left a narrow terminal opening a
+  // connection and filling a buffer for a pane the compositor refuses to draw. Measured at 79
+  // columns, one under the minimum.
+  const log = [];
+  const s = session(log);
+  s.noteViewport({ columns: 79 });
+  s.syncProcesses(procs("alpha"));
+  s.handleInput("p");
+  assert.deepEqual(log, [], `a stream opened for an undrawable pane: ${log.join(", ")}`);
+});
+
+test("WIDENING OPENS IT AND NARROWING CLOSES IT, so the gate is not one-way", () => {
+  // Without re-deriving on a viewport change, an operator who resized to FIX a too-narrow pane would
+  // get one that stayed empty for ever -- the gate would refuse once and never reconsider.
+  const log = [];
+  const s = session(log);
+  s.noteViewport({ columns: 79 });
+  s.syncProcesses(procs("alpha"));
+  s.handleInput("p");
+  assert.deepEqual(log, []);
+
+  s.noteViewport({ columns: 120 });
+  assert.deepEqual(log, ["start:alpha"], "widening did not open the stream it had been refusing");
+
+  s.noteViewport({ columns: 79 });
+  assert.deepEqual(log, ["start:alpha", "stop:alpha"], "narrowing left the stream running");
+});
+
 // -- the hidden pane costs nothing ---------------------------------------------------------------
 
 test("A HIDDEN PANE OPENS NO FOLLOWER, because a stream nobody is reading is pure cost", () => {
@@ -433,7 +471,9 @@ test("AN UNREPORTED VIEWPORT FAILS CLOSED, because a guard that passes on missin
   // A caller that never says how wide it is cannot be shown to be drawable, and the failure mode of
   // guessing wrong is blind typing into a live agent. Refusing loudly is the recoverable direction:
   // a caller that forgets to report loses attach visibly, rather than gaining invisible input.
-  const s = session([]);
+  // BUILT WITHOUT THE HELPER, which now reports a width of its own -- this test is precisely about a
+  // caller that reports none.
+  const s = new ConsoleSession({ endpoint: "http://x", makeFollower: recordingFollower([]) });
   s.syncProcesses(procs("alpha"));
   assert.equal(s.handleInput(String.fromCharCode(13)).action, "attach-refused");
   assert.equal(s.focus.mode, "dashboard");
@@ -602,6 +642,7 @@ test("a follower whose start REJECTS does not reject into the render loop", asyn
     makeFollower: () => ({ status: "failed", exit: null,
       start: async () => { throw new Error("refused"); }, stop: () => {}, lines: () => [] }),
   });
+  s.noteViewport({ columns: 100 });   // drawability gates resources, so a stream needs a terminal
   assert.doesNotThrow(() => s.syncProcesses(procs("a")));
   await new Promise((r) => setImmediate(r));
   s.handleInput("p");

@@ -7,12 +7,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DEFAULT_MAX_LINES, PaneBuffer, splitChunk } from "../lib/pane-buffer.mjs";
+import { DEFAULT_MAX_LINES, MAX_LINE_COLUMNS, PaneBuffer, splitChunk } from "../lib/pane-buffer.mjs";
 
 //: Control characters by CODE POINT. Typing them into source makes the file grep as binary --
 //: including the comment saying so, which this repo has been caught by before.
 const ESC = String.fromCharCode(27);
 const LF = String.fromCharCode(10);
+const CR = String.fromCharCode(13);
 
 // -- splitChunk ----------------------------------------------------------------------------------
 
@@ -288,6 +289,40 @@ test("a screen is clipped to the pane, like every other row", () => {
   const rows = ["r1", "r2", "r3", "r4", "r5"];
   const view = buffer.view({ height: 3, width: 40, screen: { rows, problem: "" } });
   assert.deepEqual(view, ["r1", "r2", "r3"]);
+});
+
+
+// -- an unterminated line is bounded too ----------------------------------------------------------
+
+test("A LINE THAT NEVER ENDS IS CAPPED, because maxLines bounds LINES and not bytes", () => {
+  // MEASURED BY REVIEW: 100,000 code units retained with `maxLines: 1`. A coding agent painting a
+  // screen is exactly this shape -- cursor moves and carriage returns, newlines rarely -- so it is
+  // the ordinary case for the thing this pane exists to show, not a pathological one.
+  const buffer = new PaneBuffer({ maxLines: 1 });
+  buffer.append("x".repeat(100_000));
+  assert.equal(buffer.carry.text.length, MAX_LINE_COLUMNS,
+    `an unterminated line retained ${buffer.carry.text.length} code units`);
+});
+
+test("THE COLUMN KEEPS COUNTING PAST THE CAP, which is what makes discarding safe", () => {
+  // Truncating the TEXT is only correct if the position is still honest: a repaint returns to column
+  // 0 and overwrites from there, and it has to land exactly where it would have.
+  const buffer = new PaneBuffer({ maxLines: 2 });
+  buffer.append("x".repeat(100_000));
+  assert.equal(buffer.carry.col, 100_000, "the column stopped counting, so a repaint would misplace");
+
+  buffer.append(`${CR}REPAINTED`);
+  assert.match(buffer.view({ height: 2, width: 20 })[0], /^REPAINTED/,
+    "a carriage-return repaint did not land at column 0");
+});
+
+test("NEGATIVE CONTROL: an ordinary line is untouched by the cap", () => {
+  // The cap is far past any terminal width. If it were reachable by normal output it would be
+  // corrupting every console instead of bounding a pathological one.
+  const buffer = new PaneBuffer();
+  buffer.append(`a normal line${LF}`);
+  assert.deepEqual(buffer.view({ height: 2, width: 40 }), ["a normal line"]);
+  assert.ok(MAX_LINE_COLUMNS > 1000, "the cap is narrow enough to reach in ordinary use");
 });
 
 console.log("pane-buffer.test.js: all assertions passed");
