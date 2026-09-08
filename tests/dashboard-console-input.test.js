@@ -345,3 +345,61 @@ test("A FRAME THAT WAS NEVER WRITTEN IS NOT CACHED AS DRAWN", async () => {
 });
 
 console.log("dashboard-console-input.test.js: all assertions passed");
+
+test("A KEYSTROKE REDRAWS WITHOUT ASKING THE DAEMON ANYTHING", async () => {
+  // Every branch of the key handler used to end in a full collect, so moving the cursor one row
+  // re-asked for the whole world before the screen moved. MEASURED at 1 + N requests per keystroke,
+  // N being the registered services -- 2 on a host running aify-comms, and it grows with the
+  // registry. A key changes the SELECTION, which no request can report.
+  //
+  // THE ROSTER IT DRAWS MAY BE UP TO `intervalMs` OLD, deliberately. That is what the refresh timer
+  // is for, and it is what every other terminal view shows between refreshes.
+  const health = [];
+  const input = new FakeInput();
+  const view = await start(input, {
+    fetchImpl: async (url) => {
+      if (!String(url).includes("/output")) health.push(String(url));
+      return fakeFetch([{ id: "p1", label: "one" }, { id: "p2", label: "two" }])(url);
+    },
+  });
+  await new Promise((r) => setImmediate(r));
+
+  const afterFirstFrame = health.length;
+  assert.ok(afterFirstFrame > 0, "the first frame asked the daemon nothing; the probe is not wired");
+
+  for (let i = 0; i < 5; i += 1) input.emit("data", DOWN);
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(health.length, afterFirstFrame,
+    `five keystrokes issued ${health.length - afterFirstFrame} request(s); a key changes the `
+    + "selection and the daemon has nothing to say about it");
+
+  // AND A RESIZE, which is the same claim about geometry rather than selection. A mutant that made
+  // this path collect again SURVIVED until it was asserted -- four call sites were changed and only
+  // two were covered.
+  view.resize({ columns: 100, rows: 30 });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(health.length, afterFirstFrame,
+    `a resize issued ${health.length - afterFirstFrame} request(s); the geometry changed, not the `
+    + "roster");
+  view.stop();
+});
+
+test("THE REFRESH TIMER STILL COLLECTS, which is the only thing that ever asks", async () => {
+  // NEGATIVE CONTROL for the test above. If redraws had simply stopped collecting altogether, that
+  // test would pass and the view would show its first frame for ever. Something must still ask.
+  const health = [];
+  const input = new FakeInput();
+  const { stop } = await start(input, {
+    intervalMs: 5,
+    fetchImpl: async (url) => {
+      if (!String(url).includes("/output")) health.push(String(url));
+      return fakeFetch([{ id: "p1", label: "one" }])(url);
+    },
+  });
+  const afterFirstFrame = health.length;
+  await new Promise((r) => setTimeout(r, 60));
+  stop();
+  assert.ok(health.length > afterFirstFrame,
+    "the refresh timer asked the daemon nothing; the view would show its first frame for ever");
+});

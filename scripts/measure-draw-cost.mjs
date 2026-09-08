@@ -22,9 +22,14 @@
 //
 // Run: node scripts/measure-draw-cost.mjs
 
+import { fileURLToPath } from "node:url";
+
 import { startDashboard } from "../lib/dashboard.mjs";
 
-const REGISTRY_PATH = new URL("./measure-draw-cost.registry.json", import.meta.url).pathname;
+// `fileURLToPath`, not `.pathname`: on Windows the latter yields a leading-slash "/C:/..."
+// that `readFile` cannot open, and the registry read fails into an empty service list --
+// which silently removed a probe from the count this script exists to make.
+const REGISTRY_PATH = fileURLToPath(new URL("./measure-draw-cost.registry.json", import.meta.url));
 const ENDPOINT = "http://127.0.0.1:8802";
 const FRAMES = 40;
 
