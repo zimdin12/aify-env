@@ -54,7 +54,7 @@ const fakeFetch = (processes) => async (url) => {
         // the pane shows the refusal notice, and input is correctly declined -- so a fixture that
         // omits it is testing a configuration this version does not produce.
         yield encoder.encode(`event: meta${LF}data: ${JSON.stringify(
-          { cols: 80, rows: 24, truncated: false, replayBytes: 65536 })}${LF}${LF}`);
+          { cols: 80, rows: 24, truncated: false, resized: false, replayBytes: 65536 })}${LF}${LF}`);
         yield encoder.encode(`data: ${JSON.stringify("ready")}${LF}${LF}`);
         // Held open, like the real one: a console stream ends when the process does.
         await new Promise(() => {});

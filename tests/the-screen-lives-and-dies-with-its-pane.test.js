@@ -74,7 +74,7 @@ function followingSlowly(first, ...rest) {
 }
 
 const META = (over = {}) => namedFrame("meta", {
-  cols: 40, rows: 6, truncated: false, replayBytes: 65536, ...over,
+  cols: 40, rows: 6, truncated: false, resized: false, replayBytes: 65536, ...over,
 });
 
 test("POSITIVE CONTROL: the emulator is installed, so these tests are not measuring its absence", async () => {
@@ -304,7 +304,7 @@ test("A LATER meta RESIZES THE SCREEN, so the reconstruction follows the produce
   const f = following(
     META({ cols: 132, rows: 40 }),
     dataFrame(`${ESC}[1;1Hbefore`),
-    namedFrame("meta", { cols: 80, rows: 24, truncated: false, replayBytes: 65536 }),
+    namedFrame("meta", { cols: 80, rows: 24, truncated: false, resized: false, replayBytes: 65536 }),
     dataFrame(`${ESC}[2;1Hafter`),
   );
   await f.start();
@@ -324,7 +324,7 @@ test("A RESIZE AFTER THE SCREEN EXISTS ALSO FOLLOWS, which is the ordinary case"
   const f = followingSlowly(
     META({ cols: 132, rows: 40 }),
     dataFrame(`${ESC}[1;1Hbefore`),
-    namedFrame("meta", { cols: 80, rows: 24, truncated: false, replayBytes: 65536 }),
+    namedFrame("meta", { cols: 80, rows: 24, truncated: false, resized: false, replayBytes: 65536 }),
   );
   await f.start();
   await settle();

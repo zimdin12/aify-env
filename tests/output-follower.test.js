@@ -85,7 +85,7 @@ test("a null frame changes nothing", () => {
  * Tests that are ABOUT missing or malformed metadata build their own stream and say so.
  */
 const META_FRAME = `event: meta${LF}data: ${JSON.stringify(
-  { cols: 80, rows: 24, truncated: false, replayBytes: 65536 })}${FRAME_END}`;
+  { cols: 80, rows: 24, truncated: false, resized: false, replayBytes: 65536 })}${FRAME_END}`;
 
 const follow = (pieces, options = {}) => new OutputFollower({
   endpoint: "http://127.0.0.1:8802",

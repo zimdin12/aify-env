@@ -48,6 +48,10 @@ function fakeTerminal({ cols = 132, rows = 40 } = {}) {
     cols,
     rows,
     onData: (fn) => handlers.push(fn),
+    //: SO A TEST CAN MAKE THE PROCESS PRODUCE. Without this nothing here can drive output through
+    //: the runner's own buffer accounting, and a test about what the replay window holds would have
+    //: to assert nothing -- which is the shape that manufactures confidence.
+    emit(text) { for (const fn of handlers) fn(text); },
     onExit: () => {},
     write: () => {},
     kill: () => {},
@@ -217,3 +221,75 @@ test("NEGATIVE CONTROL: a subscriber that wants no geometry still gets its outpu
 });
 
 console.log("the-feed-declares-what-a-screen-needs.test.js: all assertions passed");
+
+// ── the geometry the replay was written at, which is not always the geometry it is replayed at ───
+//
+// A late subscriber receives the retained text plus the CURRENT cols and rows. If the PTY was resized
+// after those bytes were written, those two facts were never true at the same moment -- and the meta
+// frame reported both honestly while saying nothing about that.
+//
+// MEASURED against the real parser: 60 characters and an `O` at 80 columns, then a resize to 40. The
+// terminal reflows to one row; the same bytes replayed into a 40-column emulator put the `O` on row
+// two. `screen-emulator.test.js` holds that oracle comparison.
+
+test("A RESIZE INSIDE THE REPLAY WINDOW IS DECLARED", async () => {
+  const terminal = fakeTerminal({ cols: 132, rows: 40 });
+  const runner = new Runner({ openTerminal: () => terminal });
+  const handle = await runner.start(speaksAndStays("hello"));
+  try {
+    // POSITIVE CONTROL: before any resize the retained bytes were written at the size reported.
+    assert.equal(runner.streamMeta(handle.id).resized, false,
+      "a process that has never been resized reported a moved geometry");
+    assert.deepEqual(runner.resize(handle.id, 80, 24), { ok: true });
+    assert.equal(runner.streamMeta(handle.id).resized, true,
+      "a resize the PTY accepted was not declared to subscribers");
+  } finally {
+    await runner.stop(handle.id).catch(() => {});
+  }
+});
+
+test("A REFUSED RESIZE DECLARES NOTHING, because the geometry did not move", async () => {
+  // The same ordering the announcement already follows: nothing may be reported until the pty has
+  // actually taken it. A rejected argument and a pty that threw are both "the size is unchanged".
+  const terminal = fakeTerminal({ cols: 132, rows: 40 });
+  const runner = new Runner({ openTerminal: () => terminal });
+  const handle = await runner.start(speaksAndStays("hello"));
+  try {
+    assert.equal(runner.resize(handle.id, -1, 24).ok, false);
+    assert.equal(runner.streamMeta(handle.id).resized, false, "a rejected argument moved the geometry");
+    terminal.resize = () => { throw new Error("the pty refused"); };
+    assert.equal(runner.resize(handle.id, 90, 28).ok, false);
+    assert.equal(runner.streamMeta(handle.id).resized, false, "a resize the PTY refused was declared");
+  } finally {
+    await runner.stop(handle.id).catch(() => {});
+  }
+});
+
+test("IT IS A WINDOW QUESTION AND NOT A LATCH, or one console resize costs a pane for ever", async () => {
+  // A boolean set for good would refuse the pane for the whole life of any process whose web console
+  // had ever been opened -- and an agent may go a very long time without emitting the RIS that would
+  // clear it. What matters is narrower: whether the RETAINED window straddles the resize. Once it has
+  // scrolled out of the replay buffer, every byte a subscriber receives was written at the size it is
+  // told about, and the answer goes back to sound on its own.
+  const terminal = fakeTerminal({ cols: 132, rows: 40 });
+  const runner = new Runner({ openTerminal: () => terminal, replayBytes: 64 });
+  const handle = await runner.start(speaksAndStays(""));
+  try {
+    terminal.emit("before the resize");
+    assert.deepEqual(runner.resize(handle.id, 80, 24), { ok: true });
+    assert.equal(runner.streamMeta(handle.id).resized, true,
+      "positive control: the resize was never declared, so nothing below is being tested");
+
+    // PAST THE CAP, so the resize is no longer inside anything a subscriber would be sent. 64 bytes
+    // of replay and 160 bytes of output leaves the moment of the resize well off the front.
+    for (let i = 0; i < 10; i += 1) terminal.emit("y".repeat(16));
+    assert.equal(runner.streamMeta(handle.id).resized, false,
+      "the resize scrolled out of the replay window and the feed still calls the geometry moved");
+    // AND THE REPLAY IS NOW HONESTLY TRUNCATED, which is the other half of the same accounting: if
+    // this were false the bytes had not actually overflowed and the assertion above proved nothing.
+    assert.equal(runner.streamMeta(handle.id).truncated, true,
+      "the buffer never overflowed, so the window never moved past the resize");
+  } finally {
+    await runner.stop(handle.id).catch(() => {});
+  }
+});

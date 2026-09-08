@@ -256,11 +256,31 @@ test("A META FRAME ROUND-TRIPS, and it did NOT when the writer shipped without t
   // The agreement test below existed and did not catch it, because it checked the frame's PREFIX and
   // never fed one back through the parser. A field is not shipped until BOTH ends are proven.
   const { frames } = readFrames("", namedFrame("meta", {
-    cols: 132, rows: 40, truncated: true, replayBytes: 65536,
+    cols: 132, rows: 40, truncated: true, resized: false, replayBytes: 65536,
   }));
   assert.deepEqual(frames, [{
-    type: FRAME_META, cols: 132, rows: 40, truncated: true, replayBytes: 65536,
+    type: FRAME_META, cols: 132, rows: 40, truncated: true, resized: false, replayBytes: 65536,
   }]);
+});
+
+test("A META FRAME THAT DOES NOT MENTION A RESIZE IS READ AS ONE, not as a stable geometry", () => {
+  // THE SAME FAIL-CLOSED RULE `truncated` FOLLOWS, and it has to be, because the two say the same
+  // thing about the same replay: these bytes cannot rebuild the positioned screen. A daemon too old
+  // to send the field is exactly the daemon whose resizes nobody was tracking, so silence must not
+  // read as "the geometry held".
+  //
+  // MEASURED against the real parser: 60 characters and an `O` written at 80 columns, then a resize
+  // to 40. The terminal reflows and shows one row; the same bytes replayed into a 40-column emulator
+  // put the `O` on row two. Both screens are coherent and only one is what the process sees.
+  const [silent] = readFrames("", namedFrame("meta", { cols: 132, rows: 40, truncated: false })).frames;
+  assert.equal(silent.resized, true, "a frame that said nothing about a resize was read as saying none happened");
+  for (const value of ["no", null, 0, ""]) {
+    const [odd] = readFrames("", namedFrame("meta", { cols: 1, rows: 1, truncated: false, resized: value })).frames;
+    assert.equal(odd.resized, true, `${JSON.stringify(value)} was read as a claim that geometry held`);
+  }
+  // POSITIVE CONTROL: a literal `false` IS a claim, and is believed.
+  const [claimed] = readFrames("", namedFrame("meta", { cols: 1, rows: 1, truncated: false, resized: false })).frames;
+  assert.equal(claimed.resized, false);
 });
 
 test("meta NUMBERS ARE COERCED ONCE, here, and zero survives as a real answer", () => {

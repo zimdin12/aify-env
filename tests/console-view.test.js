@@ -245,3 +245,65 @@ test("A PARTIAL INSTALL IS SAID, because it measures columns differently", () =>
 });
 
 console.log("console-view.test.js: all assertions passed");
+
+// ── a qualification cut in half is worse than one that is absent ─────────────────────────────────
+//
+// MEASURED BY REVIEW AT THE SUPPORTED WIDTH. A 132-column agent at Unicode 6, in an 80-column
+// terminal, gives the pane 40 columns -- and the title read `... cropped · unic`. The version and
+// the sentence explaining what it means were both gone, so the one line telling the operator their
+// columns may be wrong said nothing at all while looking like it had said something.
+//
+// THE LABEL ABSORBS THE LOSS NOW. An agent's name is identifiable from a few characters beside the
+// row that was just selected; "this screen may be measured wrongly" is not recoverable from a
+// fragment. And the warning that says the screen may be WRONG outranks the note that says it is
+// merely PARTIAL, so the crop note is dropped first.
+
+const PARTIAL = { status: "running", label: "sc-coder-gpt", screenCols: 132, screenUnicode: "6" };
+
+test("THE UNICODE WARNING SURVIVES EVERY WIDTH A PANE IS DRAWN AT, whole or not at all", () => {
+  // 40 columns is the pane's real width in an 80-column terminal, which is the documented minimum.
+  for (const width of [30, 36, 40, 50, 60, 80, 120]) {
+    const title = paneTitle(PARTIAL, width);
+    assert.match(title, /unicode 6/, `at ${width} columns the warning was lost: ${JSON.stringify(title)}`);
+    // AND NEVER A FRAGMENT OF ONE. Checked by requiring the title to END on a COMPLETE
+    // qualification rather than by hunting for partial words -- a fragment is anything that is not
+    // one of these, and enumerating what is allowed cannot miss a shape nobody thought of.
+    const COMPLETE = [
+      " · unicode 6, columns may differ",
+      " · unicode 6",
+      " · 132 cols, cropped",
+      " · 132c cropped",
+    ];
+    assert.ok(COMPLETE.some((phrase) => title.endsWith(phrase)),
+      `at ${width} columns the title does not end on a whole qualification: ${JSON.stringify(title)}`);
+    assert.ok(title.length <= width, `at ${width} columns the title is ${title.length} long`);
+  }
+});
+
+test("THE CROP NOTE IS DROPPED BEFORE THE WARNING IS, because they say different things", () => {
+  // Cropped means the right-hand side is missing, which the operator can see. Unicode 6 means every
+  // column after a wide character is in the wrong place, which they cannot.
+  const narrow = paneTitle(PARTIAL, 30);
+  assert.match(narrow, /unicode 6/);
+  assert.doesNotMatch(narrow, /cropped/, "the crop note was kept at a width where the warning had to shrink");
+  // POSITIVE CONTROL: given room, both appear in full.
+  const wide = paneTitle(PARTIAL, 120);
+  assert.match(wide, /unicode 6, columns may differ/);
+  assert.match(wide, /132 cols, cropped/);
+});
+
+test("THE AGENT IS STILL NAMED, so the header does not become a warning with no subject", () => {
+  for (const width of [30, 40, 60, 120]) {
+    assert.match(paneTitle(PARTIAL, width), /sc-coder/, `at ${width} columns the label disappeared`);
+  }
+});
+
+test("NEGATIVE CONTROL: a healthy pane gains no furniture", () => {
+  // Every assertion above is about text being PRESENT. A title that always appended a warning would
+  // satisfy them and put a permanent caveat on every pane on the host.
+  const healthy = { status: "running", label: "sc-coder-gpt", screenCols: 40, screenUnicode: "11" };
+  const title = paneTitle(healthy, 60);
+  assert.doesNotMatch(title, /unicode/);
+  assert.doesNotMatch(title, /cropped/);
+  assert.match(title, /sc-coder-gpt/);
+});

@@ -419,3 +419,31 @@ test("NEGATIVE CONTROL: an ordinary coloured log is still drawn as a log", async
   assert.match(shown, /red/);
   assert.match(shown, /grey/, "palette colour 8 was mistaken for a conceal");
 });
+
+test("A LATE SUBSCRIBER'S GEOMETRY: the retained bytes and the current size are not one moment", async () => {
+  // THE ORACLE COMPARISON THAT PRODUCED THE RULE. The daemon hands a new subscriber the retained text
+  // plus the CURRENT cols and rows -- and if the PTY was resized after those bytes were written,
+  // those two facts were never true together.
+  //
+  // Both screens below are coherent. That is what makes this dangerous: nothing about the
+  // reconstruction looks wrong, and `truncated: false` is honest, so every gate written for the
+  // truncation case passes it.
+  const bytes = `${"X".repeat(60)}O`;          // one row at 80 columns, two at 40
+
+  const oracle = await screen({ cols: 80, rows: 6 });
+  await oracle.write(bytes);
+  oracle.resize?.(40, 6);
+  const seen = oracle.rows().map((r) => r.trimEnd());
+  oracle.dispose();
+
+  const rebuilt = await screen({ cols: 40, rows: 6 });
+  await rebuilt.write(bytes);
+  const replayed = rebuilt.rows().map((r) => r.trimEnd());
+  rebuilt.dispose();
+
+  assert.notDeepEqual(replayed, seen,
+    "the two screens agree, so replaying into a changed geometry would be safe after all and this rule is unnecessary");
+  // AND THE DIFFERENCE IS CONTENT, not spacing: the `O` is on a row the real screen does not have.
+  assert.ok(replayed.filter(Boolean).length > seen.filter(Boolean).length,
+    `the reconstruction did not gain a row: ${JSON.stringify(replayed)} vs ${JSON.stringify(seen)}`);
+});

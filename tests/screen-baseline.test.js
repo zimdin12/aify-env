@@ -117,3 +117,47 @@ test("the reason is written for an operator, not for a protocol reader", () => {
 });
 
 console.log("screen-baseline.test.js: all assertions passed");
+
+// ── the geometry moved under the bytes ───────────────────────────────────────────────────────────
+//
+// A late subscriber is handed the retained text plus the CURRENT size, and if the PTY was resized
+// after those bytes were written, the two never described the same moment.
+//
+// MEASURED against the real parser, 2026-09-08: 60 characters and an `O` written at 80 columns, then
+// a resize to 40. The terminal reflows and shows ONE row; replaying the same bytes into a 40-column
+// emulator puts the `O` on row two. Both screens are coherent; only one is what the process sees.
+// `screen-emulator.test.js` holds that oracle comparison. This pins the RULE it produced.
+
+test("A DECLARED RESIZE IS NOT SOUND, whatever the history says about completeness", () => {
+  // The case review found is a COMPLETE history: nothing lost, `truncated: false` honest, and the
+  // reconstruction still wrong. So this cannot be an alternative to completeness -- soundness needs
+  // both, and a stream satisfying one is not sound.
+  assert.equal(baselineIsSound({ truncated: false, resized: true }, false), false);
+  assert.equal(baselineIsSound({ truncated: true, resized: true }, false), false);
+  // POSITIVE CONTROL: the same complete history with a stable geometry IS sound.
+  assert.equal(baselineIsSound({ truncated: false, resized: false }, false), true);
+});
+
+test("A FULL REPAINT CLEARS A MOVED GEOMETRY, like every other reason to wait", () => {
+  // Once the process throws its screen away and draws it again, it draws at the size it has NOW --
+  // so what the earlier bytes were written at stops bearing on what is displayed. Without this the
+  // console would be permanently unsound for any agent whose web terminal had ever been resized.
+  assert.equal(baselineIsSound({ truncated: false, resized: true }, true), true);
+  assert.equal(baselineProblem({ truncated: false, resized: true }, true), "");
+});
+
+test("THE REASON NAMES THE RESIZE, because 'output was dropped' would send an operator to the wrong place", () => {
+  const said = baselineProblem({ truncated: false, resized: true }, false);
+  assert.match(said, /resized/);
+  assert.doesNotMatch(said, /dropped/, "a resize was reported as lost output");
+  assert.match(said, /waiting/i);
+  // AND TRUNCATION STILL SAYS ITS OWN THING, so the two causes stay distinguishable.
+  assert.match(baselineProblem({ truncated: true, resized: false }, false), /dropped/);
+});
+
+test("SILENCE ABOUT A RESIZE IS NOT A CLAIM THAT NONE HAPPENED", () => {
+  // The parser fails closed to `true`, so this is the shape a daemon too old to report it produces.
+  // Asserted here as well because a future edit could make `baselineIsSound` read the field itself.
+  assert.equal(baselineIsSound({ truncated: false, resized: undefined }, false), true,
+    "this function trusts what the parser hands it; the failing-closed happens there");
+});
