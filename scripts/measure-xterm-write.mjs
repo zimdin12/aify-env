@@ -386,14 +386,15 @@ if (refusals.length) {
   const latencies = ARMS.map((arm) => percentile(arm.ms, 0.5));
   const spread = Math.max(...latencies) - Math.min(...latencies);
   if (spread < 2) {
-    // OBSERVATIONAL, NOT AN ATTRIBUTION. The earlier version named this host's ~15.6ms timer
-    // granularity whenever the spread was small -- and review's zero-delay control published
-    // 0.1/0.1/0.2/0.4ms under a sentence calling 0.1ms that granularity. Agreement between the arms
-    // says the reading does not depend on payload size; it does not say what the reading IS.
-    // LEVELS AND SPREAD, AND NOTHING INFERRED FROM THEM. The previous sentence said the column
-    // "does not vary with payload size" -- which is still an inference, and a wrong one: review's
-    // control charged costs that DO depend on size and printed 0.1/0.1/0.2/0.4ms, a fourfold change
-    // inside a small absolute spread. A small spread is a small spread.
+    // LEVELS AND SPREAD, AND NOTHING INFERRED FROM THEM. A small spread is a small spread.
+    //
+    // TWO INFERENCES HAVE BEEN WITHDRAWN FROM THIS BRANCH AND NEITHER SURVIVES ABOVE. The first
+    // named this host's ~15.6ms timer granularity whenever the spread was small; review's
+    // zero-delay control published 0.1/0.1/0.2/0.4ms under a sentence calling 0.1ms that
+    // granularity. The second replaced it with "the reading does not depend on payload size", and
+    // the SAME control refutes that one too: those four numbers are a fourfold change in a small
+    // absolute spread, so agreement in millisecond terms is not independence from size. What is
+    // printed below is the levels, the spread and the payloads, and no reading of them.
     console.log(`LATENCY LEVELS: ${latencies.map((ms) => ms.toFixed(3)).join(", ")}ms `
       + `(spread ${spread.toFixed(3)}ms) across payloads of `
       + `${ARMS.map((arm) => arm.bytes).join(", ")} bytes. What this column measures is not `

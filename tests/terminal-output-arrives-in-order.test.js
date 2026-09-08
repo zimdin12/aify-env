@@ -185,25 +185,22 @@ test("AND A SERVICE THAT ANSWERS INSTANTLY DOES NOT COALESCE", async () => {
 });
 
 test("A THROWING log() IS CONTAINED — a caller's logger cannot strand output or reject unhandled", async () => {
-  // THE MODULE SAYS THIS AND NOTHING TESTED IT. `output-sender.mjs` keeps TWO drain mechanisms -- the
-  // `while (state.pending)` loop and a post-settle re-drain hook -- and its own comment records that
-  // either alone passes every other test here, measured. It keeps the hook as a net under one case
-  // the loop cannot cover: an exception escaping the `while`, whose only source today is `log()`,
-  // which is a CALLER'S function this module has no business assuming about.
+  // WHAT THIS TEST PINS: a caller's `log()` is a CALLER'S function, and `output-sender.mjs` has no
+  // business assuming it returns. It throws here on the drop notice; the output queued behind it
+  // still has to arrive, and nothing may reject with nobody to hand the rejection to -- every
+  // caller invokes `drain` as `void drain(terminalId)`, so an escaping throw is an unhandled
+  // rejection in the daemon.
   //
-  // A claim in a comment is not a guarantee. This is that case, driven: `log()` throws on the drop
-  // notice, and the output queued behind it still has to arrive. Without the hook the `while` exits
-  // through the exception with `pending` unsent, and the console silently stops.
+  // THE OWNING MUTATION: revert the drop notice to a direct `log()` and exactly this test fails,
+  // with an unhandledRejection, while the other seven pass.
   //
-  // WHAT THIS TEST IS, AND WHAT IT IS NOT. It is a LOGGER-CONTAINMENT test. An earlier version of
-  // this comment claimed deleting the re-drain hook would turn it red, which is false: review
-  // deleted only the hook and all eight tests passed, and the module's own comment already says
-  // either mechanism alone covers every scenario here. The hook's necessity is not what this pins,
-  // and inventing machinery to make that claim true would be building a test around a sentence
-  // rather than around a behaviour.
-  //
-  // What it DOES pin, and what the mutation shows: reverting the drop notice to a direct `log()`
-  // makes exactly this test fail with an unhandledRejection while the other seven pass.
+  // AND WHAT IT DOES NOT PIN, because an earlier version of this comment said otherwise for two
+  // rounds. It claimed deleting the re-drain hook would turn this test red. That is false and
+  // review measured it: with the hook deleted and nothing else changed, all eight tests pass. The
+  // module's own comment already recorded that either drain mechanism alone covers every scenario
+  // in this file, so the claim contradicted a measurement six lines from where it was written.
+  // Building machinery to make that sentence true would be writing a test around a sentence
+  // instead of around a behaviour, and it was not done.
   const { post, calls, gates } = controllablePost();
   let threw = 0;
   const sender = createOutputSender({
