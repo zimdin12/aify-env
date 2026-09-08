@@ -253,6 +253,30 @@ test("A TRUNCATED REPLAY IS REFUSED WITH NO SCREEN AT ALL, which is the case wit
   f.stop();
 });
 
+test("UNKNOWN METADATA REFUSES TOO, and this reverses a call I made", async () => {
+  // I let a stream with NO `meta` keep the raw path, reasoning that a daemon older than this feature
+  // should degrade rather than go blank, and asked review to check that asymmetry. It answered with
+  // the witness that settles it: the complete-history oracle CONCEALS the synthetic token and the
+  // no-meta follower PRINTED it. Compatibility is not a reason to disclose.
+  //
+  // AND TWO OF THE THREE ARMS WERE NOT OLD DAEMONS AT ALL. A `meta` frame carrying `null` or an array
+  // is rejected as unreadable by the parser, which leaves `meta` null -- so MALFORMED metadata took
+  // the same permissive path as an absent one.
+  for (const [label, frames] of [
+    ["no meta at all", [dataFrame("SYNTHETIC_HIDDEN")]],
+    ["meta null", [namedFrame("meta", null), dataFrame("SYNTHETIC_HIDDEN")]],
+    ["meta as an array", [namedFrame("meta", [1, 2]), dataFrame("SYNTHETIC_HIDDEN")]],
+    ["meta as a string", [namedFrame("meta", "80x24"), dataFrame("SYNTHETIC_HIDDEN")]],
+  ]) {
+    const f = following(...frames);
+    await f.start();
+    await settle();
+    const shown = f.lines({ height: 6, width: 60 }).join(" ");
+    assert.ok(!shown.includes("SYNTHETIC_HIDDEN"), `${label} disclosed it: ${shown}`);
+    f.stop();
+  }
+});
+
 test("NEGATIVE CONTROL: a COMPLETE log is still shown, or the fix has removed the feature", async () => {
   // The refusal above is only correct because it is narrow. A complete history has lost nothing, so
   // its bytes mean what they say and the pane prints them.

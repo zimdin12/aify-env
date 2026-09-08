@@ -74,10 +74,23 @@ test("a null frame changes nothing", () => {
 
 // -- OutputFollower ------------------------------------------------------------------------------
 
+/**
+ * A stream that leads with the `meta` frame the daemon actually sends.
+ *
+ * WITHOUT IT THESE FIXTURES ARE AN OLD DAEMON, and an unknown history now REFUSES rather than showing
+ * its bytes -- the disclosure boundary, decided after review demonstrated a no-meta stream printing
+ * concealed text. A fixture that omits meta is testing a configuration this version does not produce,
+ * so it gets the notice instead of the output and every assertion about content fails.
+ *
+ * Tests that are ABOUT missing or malformed metadata build their own stream and say so.
+ */
+const META_FRAME = `event: meta${LF}data: ${JSON.stringify(
+  { cols: 80, rows: 24, truncated: false, replayBytes: 65536 })}${FRAME_END}`;
+
 const follow = (pieces, options = {}) => new OutputFollower({
   endpoint: "http://127.0.0.1:8802",
   id: "abc-p1",
-  fetchImpl: fakeStream(pieces, options),
+  fetchImpl: fakeStream([META_FRAME, ...pieces], options),
 });
 
 test("it reads output off the stream into the pane", async () => {
