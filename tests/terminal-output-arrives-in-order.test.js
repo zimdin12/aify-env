@@ -184,7 +184,7 @@ test("AND A SERVICE THAT ANSWERS INSTANTLY DOES NOT COALESCE", async () => {
     + "to be what a SLOW service costs, not a delay every console pays");
 });
 
-test("A THROWING log() DOES NOT STRAND THE PENDING OUTPUT — the net the re-drain hook exists to be", async () => {
+test("A THROWING log() IS CONTAINED — a caller's logger cannot strand output or reject unhandled", async () => {
   // THE MODULE SAYS THIS AND NOTHING TESTED IT. `output-sender.mjs` keeps TWO drain mechanisms -- the
   // `while (state.pending)` loop and a post-settle re-drain hook -- and its own comment records that
   // either alone passes every other test here, measured. It keeps the hook as a net under one case
@@ -195,8 +195,15 @@ test("A THROWING log() DOES NOT STRAND THE PENDING OUTPUT — the net the re-dra
   // notice, and the output queued behind it still has to arrive. Without the hook the `while` exits
   // through the exception with `pending` unsent, and the console silently stops.
   //
-  // IT IS ALSO THE MUTATION-PROOF THE COMMENT ASKED FOR: delete the hook and this test is the one
-  // that goes red, which is what makes "kept anyway" a decision rather than an accident.
+  // WHAT THIS TEST IS, AND WHAT IT IS NOT. It is a LOGGER-CONTAINMENT test. An earlier version of
+  // this comment claimed deleting the re-drain hook would turn it red, which is false: review
+  // deleted only the hook and all eight tests passed, and the module's own comment already says
+  // either mechanism alone covers every scenario here. The hook's necessity is not what this pins,
+  // and inventing machinery to make that claim true would be building a test around a sentence
+  // rather than around a behaviour.
+  //
+  // What it DOES pin, and what the mutation shows: reverting the drop notice to a direct `log()`
+  // makes exactly this test fail with an unhandledRejection while the other seven pass.
   const { post, calls, gates } = controllablePost();
   let threw = 0;
   const sender = createOutputSender({
