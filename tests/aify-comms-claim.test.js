@@ -241,3 +241,13 @@ test("NO report failure can throw out of a pass, over every status the pass send
   }
 });
 
+
+test("a root of / admits every absolute workspace", () => {
+  // A daemon started from / advertised "/" as its only root and refused every spawn with
+  // "outside this environment's advertised roots": normalise() stripped the trailing slash, "/"
+  // became "", and the empty base read as "no root". The separator rule beside it must survive.
+  assert.equal(workspaceWithinRoots("/home/dev/projects/blei-cms", ["/"]), true);
+  assert.equal(workspaceWithinRoots("/", ["/"]), true);
+  assert.equal(workspaceWithinRoots("/home/dev/projects/blei-cms", ["/home/dev", "/"]), true);
+  assert.equal(workspaceWithinRoots("/home/bob", ["/home/bo"]), false);
+});
