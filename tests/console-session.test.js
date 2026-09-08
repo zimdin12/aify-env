@@ -374,6 +374,64 @@ test("AN UNREPORTED VIEWPORT FAILS CLOSED, because a guard that passes on missin
   assert.equal(s.focus.mode, "dashboard");
 });
 
+// -- the actions menu hands work OUT ---------------------------------------------------------------
+
+const ENTER = String.fromCharCode(13);
+const DOWN_ = String.fromCharCode(27) + "[B";
+
+test("A DESTRUCTIVE ACTION REACHES THE CALLER ONLY AFTER A YES", () => {
+  // The end of the safety chain. `keys.mjs` turns a destructive choice into a question; this proves
+  // the caller -- the thing that would actually kill a worker -- is handed nothing until `y`.
+  const s = shownSession([]);
+  s.syncProcesses(procs("alpha", "bravo"));
+  s.handleInput(DOWN_);
+  s.handleInput("m");
+  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);   // to `stop`
+
+  const asked = s.handleInput(ENTER);
+  assert.equal(asked.perform, null, "the caller was handed a stop before it was confirmed");
+  assert.equal(asked.action, "confirm:stop");
+
+  const done = s.handleInput("y");
+  assert.equal(done.perform.action, "stop");
+  assert.equal(done.perform.process.id, "bravo", "the action named the wrong agent");
+});
+
+test("CANCELLING HANDS OUT NOTHING", () => {
+  const s = shownSession([]);
+  s.syncProcesses(procs("alpha", "bravo"));
+  s.handleInput("m");
+  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);
+  s.handleInput(ENTER);
+  const cancelled = s.handleInput("n");
+  assert.equal(cancelled.perform, null);
+  assert.equal(cancelled.action, "confirm-cancel");
+  assert.equal(s.focus.mode, "dashboard");
+});
+
+test("A NON-DESTRUCTIVE CHOICE NEEDS NO YES, so the guard is not refusing everything", () => {
+  const s = shownSession([]);
+  s.syncProcesses(procs("alpha"));
+  s.handleInput("m");
+  const chosen = s.handleInput(ENTER);     // `attach` is the resting choice
+  assert.equal(chosen.perform.action, "attach");
+  assert.equal(chosen.perform.process.id, "alpha");
+});
+
+test("THE PROCESS IS RESOLVED WHEN THE ACTION IS, not looked up later", () => {
+  // Reading it afterwards would let the list move underneath -- the row-shift defect on the one path
+  // that ends work. The handed-out object is the process itself, not an index to resolve later.
+  const s = shownSession([]);
+  s.syncProcesses(procs("alpha", "bravo", "charlie"));
+  s.handleInput(DOWN_);
+  s.handleInput("m");
+  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);
+  s.handleInput(ENTER);
+  const done = s.handleInput("y");
+  assert.equal(done.perform.process.id, "bravo");
+  assert.equal(done.perform.process.label, "label-bravo", "an id was handed over without its row");
+});
+
 test("stop() closes the stream and is safe twice", () => {
   const log = [];
   const s = shownSession(log);

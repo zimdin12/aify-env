@@ -191,4 +191,70 @@ test("a handler that throws does not take the view down", async () => {
   stop();
 });
 
+
+test("A CONFIRMED ACTION REACHES onAction, through the real key path", async () => {
+  // The end of the chain, driven the way an operator drives it: keystrokes into the live view, and a
+  // handler that would be the thing actually killing a worker. Nothing between here and `keys.mjs` is
+  // mocked, so the confirmation cannot be bypassed by a seam this test invented.
+  const performed = [];
+  const input = new FakeInput();
+  const { stop } = await startDashboard({
+    endpoint: "http://127.0.0.2:1",
+    registryPath: "/nonexistent/services.json",
+    write: () => {},
+    clearScreen: false,
+    intervalMs: 60_000,
+    input,
+    onAction: (p) => performed.push(p),
+    fetchImpl: async () => ({
+      ok: true, status: 200, body: null,
+      json: async () => ({ processes: [{ id: "p1", label: "alpha" }, { id: "p2", label: "bravo" }] }),
+    }),
+    readFile: () => { throw new Error("no registry"); },
+  });
+  await new Promise((r) => setImmediate(r));
+
+  const DOWN_ = String.fromCharCode(27) + "[B";
+  input.emit("data", DOWN_);          // select bravo
+  input.emit("data", "m");            // open the menu
+  input.emit("data", DOWN_);          // restart
+  input.emit("data", DOWN_);          // stop
+  input.emit("data", String.fromCharCode(13));
+  assert.deepEqual(performed, [], "a stop reached the handler before it was confirmed");
+
+  input.emit("data", "y");
+  await new Promise((r) => setImmediate(r));
+  stop();
+
+  assert.equal(performed.length, 1, `expected one action, got ${performed.length}`);
+  assert.equal(performed[0].action, "stop");
+  assert.equal(performed[0].process.id, "p2", "the action named the wrong agent");
+});
+
+test("NEGATIVE CONTROL: with no handler the menu is inert and nothing throws", async () => {
+  // The honest default while handlers are being built: the operator sees what is coming, nothing
+  // happens, and nothing pretends to have happened. A `data` listener that threw here would take the
+  // whole view down on a keypress.
+  const input = new FakeInput();
+  const { stop } = await startDashboard({
+    endpoint: "http://127.0.0.2:1",
+    registryPath: "/nonexistent/services.json",
+    write: () => {},
+    clearScreen: false,
+    intervalMs: 60_000,
+    input,
+    fetchImpl: async () => ({
+      ok: true, status: 200, body: null,
+      json: async () => ({ processes: [{ id: "p1", label: "alpha" }] }),
+    }),
+    readFile: () => { throw new Error("no registry"); },
+  });
+  await new Promise((r) => setImmediate(r));
+  assert.doesNotThrow(() => {
+    input.emit("data", "m");
+    input.emit("data", String.fromCharCode(13));
+  });
+  stop();
+});
+
 console.log("dashboard-console-input.test.js: all assertions passed");

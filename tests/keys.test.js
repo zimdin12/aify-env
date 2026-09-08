@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DETACH, initialFocus, reconcileFocus, routeKey } from "../lib/keys.mjs";
+import { DETACH, MENU_ACTIONS, initialFocus, needsConfirming, reconcileFocus, routeKey } from "../lib/keys.mjs";
 
 const ESC = String.fromCharCode(27);
 const UP = `${ESC}[A`;
@@ -39,6 +39,124 @@ test("when the last process goes, the pane closes rather than pointing at nothin
 
 test("reconciling keeps pty mode while there is still something to show", () => {
   assert.equal(reconcileFocus(pty(0, 3), 3).mode, "pty");
+});
+
+// ── the actions menu ────────────────────────────────────────────────────────────
+//
+// THE SAFETY ARGUMENT, not a convenience one. Stop kills a live worker mid-turn and restart discards
+// its context. On 2026-07-02 a sweep over a live ops UI fired real Stop controls and killed three
+// workers, so neither may be one keystroke away on a list navigated with arrows. Two deliberate steps
+// to reach a destructive action, and a third to confirm it.
+
+const ENTER = String.fromCharCode(13);
+const menu = (selected = 1, count = 3) => ({ mode: "dashboard", selected, count, query: "", paneHidden: true });
+
+test("POSITIVE CONTROL: `m` opens the menu on a real selection", () => {
+  const opened = routeKey("m", menu());
+  assert.equal(opened.state.mode, "menu");
+  assert.equal(opened.action, "menu-open");
+  assert.equal(opened.state.menuAt, 0);
+});
+
+test("NOTHING SELECTED OPENS NOTHING, because the actions all name a process", () => {
+  // A menu offering to stop nothing is a menu whose first item is a lie.
+  assert.equal(routeKey("m", { mode: "dashboard", selected: -1, count: 0 }).state.mode, "dashboard");
+  assert.equal(routeKey("m", { mode: "dashboard", selected: 0, count: 0 }).state.mode, "dashboard");
+});
+
+test("STOP IS NEVER REPORTED FROM ONE KEYSTROKE -- it becomes a QUESTION", () => {
+  // The whole point. The caller cannot see `stop` until a `y` has been pressed, so there is no path
+  // where a menu keystroke alone ends somebody's work.
+  let state = routeKey("m", menu()).state;
+  while (MENU_ACTIONS[state.menuAt] !== "stop") state = routeKey(DOWN, state).state;
+  const chosen = routeKey(ENTER, state);
+  assert.equal(chosen.action, "confirm:stop", "choosing stop reported it as done");
+  assert.equal(chosen.state.mode, "confirm");
+
+  const done = routeKey("y", chosen.state);
+  assert.equal(done.action, "confirmed:stop");
+  assert.equal(done.state.mode, "dashboard");
+});
+
+test("ANYTHING THAT IS NOT YES IS NO, because a guard whose default is 'do it' is not a guard", () => {
+  // An operator who mistypes at a stop prompt must get the harmless outcome.
+  const asking = { mode: "confirm", confirming: "stop", selected: 1, count: 3, menuAt: 0 };
+  for (const key of ["n", "N", DETACH, "q", "j", "1", " ", ENTER, UP]) {
+    const answer = routeKey(key, asking);
+    assert.equal(answer.action, "confirm-cancel", `${JSON.stringify(key)} was treated as a yes`);
+    assert.equal(answer.state.mode, "dashboard");
+    assert.equal(answer.state.confirming, null);
+  }
+});
+
+test("`y` IS THE ONLY YES, and it does not leak into the next state", () => {
+  const asking = { mode: "confirm", confirming: "restart", selected: 1, count: 3, menuAt: 0 };
+  for (const yes of ["y", "Y"]) {
+    const answer = routeKey(yes, asking);
+    assert.equal(answer.action, "confirmed:restart");
+    assert.equal(answer.state.confirming, null, "the pending action outlived its answer");
+  }
+});
+
+test("ATTACH NEEDS NO CONFIRMATION, so the guard is not just refusing everything", () => {
+  // The control for the tests above. A menu that confirmed every action would satisfy them all while
+  // making the common case tedious enough that an operator stops reading the prompt.
+  assert.equal(needsConfirming("attach"), false);
+  assert.equal(needsConfirming("stop"), true);
+  assert.equal(needsConfirming("restart"), true);
+
+  const opened = routeKey("m", menu()).state;
+  assert.equal(MENU_ACTIONS[opened.menuAt], "attach", "attach is no longer the resting choice");
+  const chosen = routeKey(ENTER, opened);
+  assert.equal(chosen.action, "chose:attach");
+  assert.equal(chosen.state.mode, "dashboard");
+});
+
+test("THE MENU'S CURSOR IS ITS OWN, and the process selection never moves under it", () => {
+  // `selected` indexes the PROCESS list. If an arrow moved it while a menu was open, `stop` would
+  // apply to whichever row the cursor had drifted onto -- the row-shift P1 in a new costume.
+  let state = routeKey("m", menu(1, 3)).state;
+  for (let i = 0; i < 5; i += 1) state = routeKey(DOWN, state).state;
+  assert.equal(state.selected, 1, "the process selection moved while the menu was open");
+  assert.equal(state.count, 3);
+});
+
+test("the menu wraps, like every other list on this screen", () => {
+  let state = routeKey("m", menu()).state;
+  assert.equal(state.menuAt, 0);
+  state = routeKey(UP, state).state;
+  assert.equal(state.menuAt, MENU_ACTIONS.length - 1, "moving up from the top did not wrap");
+});
+
+test("EVERY OTHER KEY IS SWALLOWED, so the list behind the menu cannot be acted on", () => {
+  // A menu that let `q` quit or a digit jump would act on the list while the operator was reading it.
+  const opened = routeKey("m", menu()).state;
+  for (const key of ["q", "1", "g", "p", "x"]) {
+    const result = routeKey(key, opened);
+    assert.equal(result.action, null, `${key} did something while a menu was open`);
+    assert.equal(result.state.mode, "menu");
+  }
+});
+
+test("Ctrl+] CLOSES THE MENU, which is the one way back from every mode", () => {
+  const closed = routeKey(DETACH, routeKey("m", menu()).state);
+  assert.equal(closed.action, "menu-close");
+  assert.equal(closed.state.mode, "dashboard");
+});
+
+test("Ctrl+C STILL INTERRUPTS from inside a menu, because it stops the environment", () => {
+  // The daemon renders this view in the terminal it was started from. A modal that swallowed Ctrl+C
+  // would take away the operator's way of stopping the whole thing.
+  assert.equal(routeKey(CTRL_C, routeKey("m", menu()).state).action, "interrupt");
+});
+
+test("CONFIRMATION IS DERIVED FROM A PROPERTY, not from a second list", () => {
+  // Every destructive action in the menu must be covered. A list typed twice is one somebody adds to
+  // once -- and the half they forget is the half that skips the prompt.
+  for (const action of MENU_ACTIONS) {
+    if (action === "attach") continue;
+    assert.equal(needsConfirming(action), true, `${action} is in the menu and needs no confirmation`);
+  }
 });
 
 // ── the pane toggle ─────────────────────────────────────────────────────────────────

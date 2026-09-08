@@ -59,6 +59,64 @@ test("THE ACTIVITY DOT'S COLUMN IS NAMED, so a grey circle is not read as 'offli
   assert.ok(idle.includes("\u25cb"), `a process silent for five minutes is not marked as quiet: ${idle}`);
 });
 
+// -- the actions menu ----------------------------------------------------------------------------
+
+const FLEET = [
+  { id: "p1", pid: 1, service: "s", terminal: true, uptimeMs: 1000, label: "alpha" },
+  { id: "p2", pid: 2, service: "s", terminal: true, uptimeMs: 1000, label: "bravo" },
+  { id: "p3", pid: 3, service: "s", terminal: true, uptimeMs: 1000, label: "charlie" },
+];
+const withKeys = (view) => renderDashboard(
+  { ...SNAPSHOT, processes: FLEET, nowMs: Date.now() },
+  { keys: { enabled: true, canQuit: true }, view: { rows: FLEET, query: "", ...view } },
+).join("\n");
+
+test("THE MENU NAMES THE AGENT IT WILL ACT ON", () => {
+  // "stop" with no subject is the shape of every incident where somebody ended the wrong thing, and
+  // the row it refers to may have scrolled out of the window by the time it is read.
+  const view = withKeys({ mode: "menu", selected: 1, menuAt: 0 });
+  assert.match(view, /actions for bravo/);
+  assert.match(view, /attach/);
+  assert.match(view, /restart/);
+  assert.match(view, /stop/);
+});
+
+test("THE TARGET COMES FROM THE FULL LIST, not the visible window", () => {
+  // `shown` is windowed around the selection, so indexing it with an absolute `selected` names the
+  // wrong agent the moment the table scrolls -- the row-shift defect again, on the one screen whose
+  // whole job is to say what it is about to stop.
+  const view = withKeys({ mode: "menu", selected: 2, menuAt: 0, window: { start: 1, end: 3 } });
+  assert.match(view, /actions for charlie/, "the menu named the wrong agent under a scrolled table");
+});
+
+test("THE CONFIRMATION STATES THE VERB AND THE SUBJECT, and how to refuse", () => {
+  const view = withKeys({ mode: "confirm", selected: 1, confirming: "stop" });
+  assert.match(view, /stop bravo\?/);
+  assert.match(view, /y to confirm, any other key cancels/);
+});
+
+test("`q quit` IS NOT OFFERED where q does not quit", () => {
+  // In a menu `q` is swallowed so the list behind cannot be acted on; at a confirmation it is one of
+  // the keys that CANCELS. Naming it in either would be a hint that lies -- which this file's own
+  // header says is how an operator learns to stop reading them.
+  assert.ok(!withKeys({ mode: "menu", selected: 0, menuAt: 0 }).includes("q quit"));
+  assert.ok(!withKeys({ mode: "confirm", selected: 0, confirming: "stop" }).includes("q quit"));
+  // POSITIVE CONTROL: it IS offered where it works, or this assertion would pass on a view that
+  // never mentions quitting at all.
+  assert.ok(withKeys({ mode: "dashboard", selected: 0 }).includes("q quit"));
+});
+
+test("the hints say what each mode actually accepts", () => {
+  assert.match(withKeys({ mode: "menu", selected: 0, menuAt: 0 }), /enter.{0,12}run it/);
+  assert.match(withKeys({ mode: "confirm", selected: 0, confirming: "stop" }), /y.{0,8}do it/);
+  assert.match(withKeys({ mode: "dashboard", selected: 0 }), /m.{0,10}actions/);
+});
+
+test("NEGATIVE CONTROL: no menu is drawn in ordinary dashboard mode", () => {
+  // Without this, a renderer that always drew the menu would satisfy every assertion above.
+  assert.ok(!withKeys({ mode: "dashboard", selected: 1 }).includes("actions for"));
+});
+
 test("registered services are listed with what they said about themselves", () => {
   const view = render();
   assert.match(view, /aify-comms/);
