@@ -29,6 +29,11 @@ function session(rows) {
       return { start: () => {}, stop: () => {}, status: "open", exit: null, lines: () => [] };
     },
   });
+  // A DRAWABLE TERMINAL AND AN OPEN CONSOLE. The pane defaults to hidden, a hidden pane opens no
+  // follower, and attaching is refused without a reported width -- so a file whose whole subject is
+  // WHICH PROCESS THE PANE FOLLOWS has to have a pane in the first place.
+  s.noteViewport({ columns: 100 });
+  s.handleInput("p");
   s.syncProcesses(rows);
   return { s, built };
 }

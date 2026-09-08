@@ -34,11 +34,21 @@ const procs = (...ids) => ids.map((id) => ({ id, label: `label-${id}` }));
 
 const session = (log) => new ConsoleSession({ endpoint: "http://x", makeFollower: recordingFollower(log) });
 
+//: A session whose console is OPEN, on a terminal wide enough to draw it. The pane defaults to
+//: HIDDEN and a hidden pane opens no follower, so every test about stream lifecycle needs one that
+//: is actually showing -- otherwise it would be asserting on a feature that is switched off.
+const shownSession = (log) => {
+  const s = session(log);
+  s.noteViewport({ columns: 100 });
+  s.handleInput("p");
+  return s;
+};
+
 // -- selection and follower lifecycle -------------------------------------------------------------
 
 test("the first process list opens a follower for the selection", () => {
   const log = [];
-  session(log).syncProcesses(procs("a", "b"));
+  shownSession(log).syncProcesses(procs("a", "b"));
   assert.deepEqual(log, ["start:a"]);
 });
 
@@ -46,7 +56,7 @@ test("AN UNCHANGED LIST DOES NOT CHURN THE STREAM", () => {
   // The refresh runs every couple of seconds. Re-opening on each one would abandon a connection per
   // tick and lose the buffer with it.
   const log = [];
-  const s = session(log);
+  const s = shownSession(log);
   s.syncProcesses(procs("a", "b"));
   s.syncProcesses(procs("a", "b"));
   s.syncProcesses(procs("a", "b"));
@@ -57,7 +67,7 @@ test("a list that changes AROUND the selection still does not churn it", () => {
   // Another process appearing or leaving is the normal case. What matters is the process UNDER the
   // selection, not the shape of the list.
   const log = [];
-  const s = session(log);
+  const s = shownSession(log);
   s.syncProcesses(procs("a", "b"));
   s.syncProcesses(procs("a", "b", "c"));
   s.syncProcesses(procs("a", "c"));
@@ -67,7 +77,7 @@ test("a list that changes AROUND the selection still does not churn it", () => {
 test("moving the selection CLOSES the old stream before opening the new one", () => {
   // Leaving it open keeps a connection and a growing buffer alive for a process nobody is watching.
   const log = [];
-  const s = session(log);
+  const s = shownSession(log);
   s.syncProcesses(procs("a", "b"));
   s.handleInput(DOWN);
   assert.deepEqual(log, ["start:a", "stop:a", "start:b"]);
@@ -77,7 +87,7 @@ test("THE PROCESS UNDER THE SELECTION CHANGING re-points the follower", () => {
   // The index stayed at 0 and the process there is a different one. Keying on the index rather than
   // the id would leave the pane showing output from a process that is no longer there.
   const log = [];
-  const s = session(log);
+  const s = shownSession(log);
   s.syncProcesses(procs("a", "b"));
   s.syncProcesses(procs("z", "b"));
   assert.deepEqual(log, ["start:a", "stop:a", "start:z"]);
@@ -85,7 +95,7 @@ test("THE PROCESS UNDER THE SELECTION CHANGING re-points the follower", () => {
 
 test("an empty list closes the stream and selects nothing", () => {
   const log = [];
-  const s = session(log);
+  const s = shownSession(log);
   s.syncProcesses(procs("a"));
   s.syncProcesses([]);
   assert.deepEqual(log, ["start:a", "stop:a"]);
@@ -264,6 +274,50 @@ test("but when the ATTACHED process itself goes, the keyboard fails CLOSED", () 
   assert.equal(s.focus.mode, "dashboard", "the keyboard stayed inside a pane whose process is gone");
 });
 
+// -- the hidden pane costs nothing ---------------------------------------------------------------
+
+test("A HIDDEN PANE OPENS NO FOLLOWER, because a stream nobody is reading is pure cost", () => {
+  // The operator asked for the console "only when shown". `pane()` returning null gated the DRAWING
+  // and nothing gated the RESOURCES: review reported it and I measured it -- with the pane hidden,
+  // `pane()` was null while `syncProcesses` opened a follower and set `watchedId`. On a host with
+  // agents streaming continuously that is an HTTP connection and a growing ring buffer for a pane
+  // that is not on screen.
+  const log = [];
+  const s = session(log);
+  s.noteViewport({ columns: 100 });
+  s.syncProcesses(procs("alpha", "bravo"));
+  assert.deepEqual(log, [], `a hidden pane opened ${log.join(", ")}`);
+  assert.equal(s.watchedId, null);
+});
+
+test("SHOWING IT opens one, and hiding it again closes it", () => {
+  // The positive control for the test above: a gate that never opened a follower at all would
+  // satisfy it and silently remove the console.
+  const log = [];
+  const s = session(log);
+  s.noteViewport({ columns: 100 });
+  s.syncProcesses(procs("alpha", "bravo"));
+  s.handleInput("p");
+  assert.deepEqual(log, ["start:alpha"], "showing the pane did not open a stream");
+  s.handleInput("p");
+  assert.deepEqual(log, ["start:alpha", "stop:alpha"], "hiding the pane left the stream running");
+  assert.equal(s.watchedId, null);
+});
+
+test("moving the selection while hidden still opens nothing", () => {
+  // Arrow keys keep working with the console closed -- the list is the point of the view -- and each
+  // move would otherwise open and close a stream for a pane nobody can see.
+  const log = [];
+  const s = session(log);
+  s.noteViewport({ columns: 100 });
+  s.syncProcesses(procs("alpha", "bravo", "charlie"));
+  s.handleInput(String.fromCharCode(27) + "[B");
+  s.handleInput(String.fromCharCode(27) + "[B");
+  assert.deepEqual(log, [], `moving while hidden opened ${log.join(", ")}`);
+  s.handleInput("p");
+  assert.deepEqual(log, ["start:charlie"], "showing the pane opened the wrong process");
+});
+
 // -- blind input ---------------------------------------------------------------------------------
 //
 // R8, and review's rerun found it live: at 79 columns `composeConsole` drops the pane entirely while
@@ -322,7 +376,7 @@ test("AN UNREPORTED VIEWPORT FAILS CLOSED, because a guard that passes on missin
 
 test("stop() closes the stream and is safe twice", () => {
   const log = [];
-  const s = session(log);
+  const s = shownSession(log);
   s.syncProcesses(procs("a"));
   s.stop();
   s.stop();

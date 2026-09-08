@@ -107,9 +107,16 @@ test("WITH `input` a process stream IS opened, which is what makes the test abov
     readFile: () => { throw new Error("no registry"); },
   });
   await new Promise((r) => setImmediate(r));
+  // OPEN THE CONSOLE FIRST, through the real key path. The pane defaults to hidden and a hidden pane
+  // opens no stream -- deliberately, because a stream nobody is reading is an HTTP connection and a
+  // growing buffer for a pane that is not on screen. Pressing `p` here makes this test stronger than
+  // it was: it now proves the whole chain from a keystroke to an opened stream, rather than assuming
+  // the stream opens by itself.
+  input.emit("data", "p");
+  await new Promise((r) => setImmediate(r));
   stop();
   assert.ok(asked.some((u) => u.includes("/processes/p1/output")),
-    `no stream was opened for the selection: ${asked.join(", ")}`);
+    `no stream was opened after opening the console: ${asked.join(", ")}`);
 });
 
 test("with `input` the terminal goes raw, and stop() GIVES IT BACK", async () => {
