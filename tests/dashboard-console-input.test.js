@@ -403,3 +403,155 @@ test("THE REFRESH TIMER STILL COLLECTS, which is the only thing that ever asks",
   assert.ok(health.length > afterFirstFrame,
     "the refresh timer asked the daemon nothing; the view would show its first frame for ever");
 });
+
+test("INPUT IS REFUSED WHILE THE FRAME ON SCREEN STILL SAYS CONNECTING", async () => {
+  // The stream is held closed so a frame is drawn while the follower is CONNECTING, then opened
+  // with no redraw in between. That is the exact window: status says streaming, the screen does not.
+  let openTheStream;
+  const gate = new Promise((resolve) => { openTheStream = resolve; });
+  const frames = [];
+  const sent = [];
+  const input = new FakeInput();
+
+  const { stop } = await start(input, {
+    write: (text) => frames.push(text),
+    onInput: (target, data) => sent.push([target?.id, data]),
+    fetchImpl: async (url) => {
+      if (String(url).includes("/output")) await gate;
+      return fakeFetch([{ id: "p1", label: "one" }, { id: "p2", label: "two" }])(url);
+    },
+  });
+
+  input.emit("data", ENTER);                       // attach; the follower's fetch is held
+  await new Promise((r) => setTimeout(r, 60));     // a frame lands, drawn while connecting
+
+  const drawnWhileConnecting = frames.join("");
+  assert.ok(drawnWhileConnecting.includes("connecting"),
+    "the pane never rendered a connecting frame; this test is not reproducing its own scenario");
+
+  openTheStream();
+  await new Promise((r) => setTimeout(r, 60));     // the stream opens. NOTHING redraws.
+
+  input.emit("data", "SYNTHETIC_TYPED");
+  stop();
+
+  assert.deepEqual(sent, [],
+    "a keystroke reached the process while the last frame written still said connecting; the "
+    + "operator is typing at a screen that has not caught up");
+});
+
+test("AND INPUT OPENS ONCE A STREAMING FRAME HAS ACTUALLY BEEN DRAWN", async () => {
+  // POSITIVE CONTROL for the refusal above. Without it, a gate that refused input for ever would
+  // pass that test, and the console would simply stop accepting keys.
+  const sent = [];
+  const input = new FakeInput();
+  const { stop } = await start(input, {
+    onInput: (target, data) => sent.push([target?.id, data]),
+  });
+  input.emit("data", ENTER);
+  await new Promise((r) => setTimeout(r, 120));    // the stream opens AND a frame is drawn from it
+  input.emit("data", "hello");
+  stop();
+  assert.deepEqual(sent, [["p1", "hello"]],
+    "input never became live even after a streaming frame was drawn");
+});
+
+test("PANE PROGRESS IS COALESCED, so a chatty producer does not redraw per chunk", async () => {
+  // A producer emitting hundreds of chunks must not cost hundreds of frames.
+  //
+  // THIS DRIVES THE REAL VIEW. An earlier version re-implemented the coalescing inline and counted
+  // its own timer, which is a test of the copy: a mutant that removed the real one survived it.
+  // Every chunk here carries DISTINCT text, so `frameUpdate` cannot suppress a redraw as unchanged
+  // and the count reflects scheduling rather than deduplication.
+  const CHUNKS = 200;
+  const frames = [];
+  const input = new FakeInput();
+  const encoder = new TextEncoder();
+
+  const view = await start(input, {
+    paneRepaintMs: 50,
+    write: (text) => frames.push(text),
+    fetchImpl: async (url) => {
+      if (!String(url).includes("/output")) {
+        return fakeFetch([{ id: "p1", label: "one" }])(url);
+      }
+      return {
+        ok: true,
+        status: 200,
+        body: (async function* body() {
+          yield encoder.encode(`event: meta${LF}data: ${JSON.stringify(
+            { cols: 80, rows: 24, truncated: false, resized: false, replayBytes: 65536 })}${LF}${LF}`);
+          for (let i = 0; i < CHUNKS; i += 1) {
+            yield encoder.encode(`data: ${JSON.stringify(`line-${i}${LF}`)}${LF}${LF}`);
+          }
+          await new Promise(() => {});
+        })(),
+      };
+    },
+  });
+
+  input.emit("data", ENTER);                     // attach, which opens the stream
+  await new Promise((r) => setTimeout(r, 250));  // several coalescing windows
+  const drawn = frames.length;
+  view.stop();
+
+  assert.ok(drawn > 0, "nothing was drawn at all; the stream never reached the pane");
+  assert.ok(drawn < CHUNKS / 4,
+    `${CHUNKS} chunks became ${drawn} frames; progress is not being coalesced, and a producer at `
+    + "full rate would redraw per chunk");
+});
+
+test("A SUPERSEDED FOLLOWER'S PROGRESS DRAWS NOTHING", async () => {
+  // A stream still draining after the operator moved on keeps reporting progress. Acting on it
+  // would draw one process's arrival into another process's pane. ConsoleSession binds each
+  // callback to the follower that owns it and compares identity before passing it on.
+  const { ConsoleSession } = await import("../lib/console-session.mjs");
+
+  const followers = [];
+  const drawn = [];
+  const session = new ConsoleSession({
+    onProgress: () => drawn.push(session.watchedId),
+    makeFollower: (id) => {
+      const follower = { id, status: "streaming", start: () => {}, stop: () => {}, pane: () => null };
+      followers.push(follower);
+      return follower;
+    },
+  });
+
+  // The follower follows the SELECTION, and only when a pane could actually be drawn.
+  session.noteViewport({ columns: 120 });
+  const rows = [{ id: "p1", label: "one" }, { id: "p2", label: "two" }];
+  // `paneHidden` defaults TRUE -- the console is opt-in -- and a hidden pane opens no follower.
+  session.focus = { ...session.focus, paneHidden: false };
+  session.syncProcesses(rows);
+  session.focus = { ...session.focus, selected: 1 };
+  session.syncProcesses(rows);
+  assert.equal(followers.length, 2,
+    `the session opened ${followers.length} follower(s); this test needs a superseded one`);
+
+  followers[1].onProgress();
+  assert.deepEqual(drawn, ["p2"], "the CURRENT follower's progress did not reach the view");
+
+  followers[0].onProgress();          // the superseded one, still draining
+  assert.deepEqual(drawn, ["p2"],
+    "a superseded follower's progress reached the view; it would draw p1's output into p2's pane");
+});
+
+test("PROGRESS THAT ARRIVES AFTER stop() DRAWS NOTHING", async () => {
+  // A stream can report progress while the view is tearing down, and a frame painted then lands
+  // over whatever the shutdown is printing. Both the pending timer and the flag are checked.
+  const frames = [];
+  const input = new FakeInput();
+  const view = await start(input, {
+    paneRepaintMs: 5,
+    write: (text) => frames.push(text),
+  });
+  input.emit("data", ENTER);
+  await new Promise((r) => setTimeout(r, 60));
+
+  view.stop();
+  const afterStop = frames.length;
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(frames.length, afterStop,
+    "a frame was written after stop(); it would land over the shutdown output");
+});
