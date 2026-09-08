@@ -157,6 +157,7 @@ test("quit and interrupt are reported SEPARATELY, not decided in here", () => {
 test("input meant for the process comes back as toPty, not written from in here", () => {
   const s = session([]);
   s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
+  s.notePaneRendered(true);           // ...and a frame that actually reached the screen
   s.syncProcesses(procs("a"));
   s.handleInput(String.fromCharCode(13)); // attach
   const { toPty } = s.handleInput("ls -la");
@@ -182,6 +183,7 @@ test("the pane says whether input is going to the process", () => {
   // An operator typing into a pane needs to know whether the keys land there or move the selection.
   const s = session([]);
   s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
+  s.notePaneRendered(true);           // ...and a frame that actually reached the screen
   s.syncProcesses(procs("a"));
   s.handleInput("p");
   assert.equal(s.pane().attached, false);
@@ -208,6 +210,7 @@ test("attaching opens the pane even when it was hidden", () => {
   // Otherwise Enter puts the keyboard inside a process whose output is not on screen.
   const s = session([]);
   s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
+  s.notePaneRendered(true);           // ...and a frame that actually reached the screen
   s.syncProcesses(procs("a"));
   assert.equal(s.pane(), null);
   s.handleInput(String.fromCharCode(13));
@@ -227,6 +230,7 @@ test("ATTACHMENT FOLLOWS THE PROCESS WHEN A ROW ABOVE IT DISAPPEARS", () => {
   const log = [];
   const s = session(log);
   s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
+  s.notePaneRendered(true);           // ...and a frame that actually reached the screen
   s.syncProcesses(procs("alpha", "bravo", "charlie"));
   s.handleInput(String.fromCharCode(27) + "[B");   // down to bravo
   s.handleInput(String.fromCharCode(13));           // attach
@@ -248,6 +252,7 @@ test("attachment survives a REORDER, not just a removal", () => {
   // an index means a different process the moment two swap.
   const s = session([]);
   s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
+  s.notePaneRendered(true);           // ...and a frame that actually reached the screen
   s.syncProcesses(procs("alpha", "bravo", "charlie"));
   s.handleInput(String.fromCharCode(27) + "[B");
   s.handleInput(String.fromCharCode(13));
@@ -265,6 +270,7 @@ test("but when the ATTACHED process itself goes, the keyboard fails CLOSED", () 
   // a process. A fix for the shift case that kept pty mode alive here would be worse than the bug.
   const s = session([]);
   s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
+  s.notePaneRendered(true);           // ...and a frame that actually reached the screen
   s.syncProcesses(procs("alpha", "bravo"));
   s.handleInput(String.fromCharCode(13));
   assert.equal(s.focus.mode, "pty");
@@ -353,11 +359,64 @@ test("RESIZING BELOW THE MINIMUM detaches an attachment that was legitimate", ()
   assert.equal(s.handleInput("hello").toPty, null);
 });
 
+test("NOTHING IS FORWARDED UNTIL A PANE FRAME ACTUALLY RENDERED", () => {
+  // `canDrawPane` proves the layout would PERMIT a pane. It cannot prove one was drawn, and review
+  // reproduced the difference: input forwarded while the follower was still connecting, after a 503
+  // or a 404, after the process exited, and into a one-row screen carrying only a header. In every
+  // one of those the operator is typing at something they cannot read.
+  //
+  // READINESS IS AN OBSERVATION, NOT A PREDICTION -- the whole correction in one line.
+  const s = session([]);
+  s.noteViewport({ columns: 120 });
+  s.syncProcesses(procs("alpha"));
+  s.handleInput(String.fromCharCode(13));
+  assert.equal(s.focus.mode, "pty", "attach is gated on width, so it may proceed optimistically");
+  assert.equal(s.handleInput("secret").toPty, null,
+    "a keystroke reached the process before any frame had rendered");
+
+  s.notePaneRendered(true);
+  assert.equal(s.handleInput("now").toPty, "now", "input never became live");
+});
+
+test("A STREAM THAT IS NOT LIVE TAKES NO INPUT, however well the pane renders", () => {
+  // A pane showing "connecting", an exit notice or a failure is a RENDERED frame and still not a
+  // place to type: the keys go nowhere and the screen does not move, which is indistinguishable from
+  // a frozen view.
+  for (const status of ["connecting", "exited", "failed"]) {
+    const s = new ConsoleSession({
+      endpoint: "http://x",
+      makeFollower: () => ({ status, exit: null, start: async () => {}, stop: () => {}, lines: () => [] }),
+    });
+    s.noteViewport({ columns: 120 });
+    s.notePaneRendered(true);
+    s.syncProcesses(procs("alpha"));
+    s.handleInput("p");
+    s.handleInput(String.fromCharCode(13));
+    assert.equal(s.handleInput("hello").toPty, null, `input was forwarded to a ${status} stream`);
+  }
+});
+
+test("A FRAME THAT STOPS RENDERING REVOKES THE ATTACHMENT", () => {
+  // The operator did not detach; the screen simply stopped carrying their agent. A failed display
+  // write leaves no attached-pane frame, and input must stop with it rather than keep flowing.
+  const s = shownSession([]);
+  s.noteViewport({ columns: 120 });
+  s.notePaneRendered(true);
+  s.syncProcesses(procs("alpha"));
+  s.handleInput(String.fromCharCode(13));
+  assert.equal(s.focus.mode, "pty");
+
+  s.notePaneRendered(false);
+  assert.equal(s.focus.mode, "dashboard", "the keyboard stayed inside a pane that stopped rendering");
+  assert.equal(s.handleInput("hello").toPty, null);
+});
+
 test("POSITIVE CONTROL: a wide enough terminal still attaches and forwards", () => {
   // Without this, a guard that refused everything would satisfy both tests above and silently remove
   // the feature.
   const s = session([]);
   s.noteViewport({ columns: 100 });
+  s.notePaneRendered(true);
   s.syncProcesses(procs("alpha"));
   assert.equal(s.handleInput(String.fromCharCode(13)).action, "attach");
   assert.equal(s.focus.mode, "pty");
@@ -395,6 +454,73 @@ test("A DESTRUCTIVE ACTION REACHES THE CALLER ONLY AFTER A YES", () => {
   const done = s.handleInput("y");
   assert.equal(done.perform.action, "stop");
   assert.equal(done.perform.process.id, "bravo", "the action named the wrong agent");
+});
+
+test("A CONFIRMED STOP FOLLOWS THE AGENT IT WAS OPENED ON, not the cursor", () => {
+  // THE ROW-SHIFT DEFECT FOR THE THIRD TIME THIS SESSION, and this one was EXPOSED BY MY OWN FIX:
+  // preserving `confirming` across a refresh kept the OPERATION and left the SUBJECT to be
+  // re-derived from `selected` at `y` time. Measured before the fix -- confirm stop for bravo, let
+  // alpha exit, press y, and charlie is stopped.
+  //
+  // The list refreshes every two seconds. Between choosing and confirming, it moves.
+  const armed = (rows) => {
+    const s = shownSession([]);
+    s.noteViewport({ columns: 120 });
+    s.notePaneRendered(true);
+    s.syncProcesses(rows);
+    s.handleInput(DOWN_);                                  // bravo
+    s.handleInput("m");
+    while (s.focus.menuAt !== 2) s.handleInput(DOWN_);      // stop
+    s.handleInput(ENTER);
+    return s;
+  };
+  const three = () => procs("alpha", "bravo", "charlie");
+
+  const removed = armed(three());
+  removed.syncProcesses(procs("bravo", "charlie"));
+  assert.equal(removed.handleInput("y").perform.process.id, "bravo",
+    "a row above the target exiting moved the stop onto a different agent");
+
+  const reordered = armed(three());
+  reordered.syncProcesses(procs("charlie", "bravo", "alpha"));
+  assert.equal(reordered.handleInput("y").perform.process.id, "bravo",
+    "a reorder moved the stop onto a different agent");
+
+  const inserted = armed(three());
+  inserted.syncProcesses(procs("delta", "alpha", "bravo", "charlie"));
+  assert.equal(inserted.handleInput("y").perform.process.id, "bravo",
+    "a new agent appearing above the target moved the stop");
+});
+
+test("IF THE TARGET ITSELF IS GONE, THE ACTION IS REFUSED rather than redirected", () => {
+  // A process that exited while its own stop was being confirmed does not need stopping, and the row
+  // that took its place did not consent to anything. Refusing is the only answer that is not somebody
+  // else's work ending.
+  const s = shownSession([]);
+  s.noteViewport({ columns: 120 });
+  s.notePaneRendered(true);
+  s.syncProcesses(procs("alpha", "bravo", "charlie"));
+  s.handleInput(DOWN_);
+  s.handleInput("m");
+  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);
+  s.handleInput(ENTER);
+
+  s.syncProcesses(procs("alpha", "charlie"));
+  assert.equal(s.handleInput("y").perform, null, "the stop was redirected to a surviving agent");
+});
+
+test("NEGATIVE CONTROL: an unchanged list still stops the agent it named", () => {
+  // Without this, refusing everything would satisfy both tests above and remove the feature.
+  const s = shownSession([]);
+  s.noteViewport({ columns: 120 });
+  s.notePaneRendered(true);
+  s.syncProcesses(procs("alpha", "bravo"));
+  s.handleInput(DOWN_);
+  s.handleInput("m");
+  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);
+  s.handleInput(ENTER);
+  s.syncProcesses(procs("alpha", "bravo"));
+  assert.equal(s.handleInput("y").perform.process.id, "bravo");
 });
 
 test("CANCELLING HANDS OUT NOTHING", () => {

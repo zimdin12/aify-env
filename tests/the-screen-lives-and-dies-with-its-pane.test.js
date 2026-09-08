@@ -217,6 +217,62 @@ test("A CHUNK IS JUDGED ONCE, or a replay can INVENT a reset that never arrived"
   f.stop();
 });
 
+test("A TRUNCATED SUFFIX IS REFUSED EVEN WHEN IT LOOKS LIKE A LOG", async () => {
+  // THE DISCLOSURE THAT SURVIVED THE FIRST BASELINE FIX. The gate lived inside `isPainting()`, so a
+  // retained suffix containing no cursor commands read as an ordinary log and the pane printed it
+  // RAW -- past the conceal handling and past the baseline. Reproduced by review: `ESC[8m` lost off
+  // the front, `SYNTHETIC_HIDDEN` in the surviving bytes, and the pane showed the secret.
+  //
+  // Absence of cursor commands says nothing about whether the bytes are a log: the SGR state that
+  // governs them fell off the front with everything else.
+  const f = following(META({ truncated: true }), dataFrame("SYNTHETIC_HIDDEN"));
+  await f.start();
+  await settle();
+  assert.equal(f.buffer.isPainting(), false, "precondition: this suffix reads as a log");
+  const shown = f.lines({ height: 6, width: 60 }).join(" ");
+  assert.ok(!shown.includes("SYNTHETIC_HIDDEN"), `the pane disclosed it: ${shown}`);
+  assert.match(shown, /waiting for the first full repaint/);
+  f.stop();
+});
+
+test("A TRUNCATED REPLAY IS REFUSED WITH NO SCREEN AT ALL, which is the case without an emulator", async () => {
+  // THE VERDICT HAS TO TRAVEL INDEPENDENTLY OF THE EMULATOR. It was originally built only when a
+  // screen existed, so a stream with no screen fell through to the raw log -- and there are two ways
+  // to have no screen: the optional package is not installed, or the process is PIPED and has no
+  // geometry to emulate. This drives the second, which is reachable on every machine.
+  //
+  // A piped process still emits SGR, and a truncated suffix still has an unknown SGR state, so the
+  // reasoning that refuses a terminal's suffix refuses this one too.
+  const f = following(META({ cols: 0, rows: 0, truncated: true }), dataFrame("SYNTHETIC_HIDDEN"));
+  await f.start();
+  await settle();
+  assert.equal(f.screen, null, "precondition: no emulator was built for a piped process");
+  const shown = f.lines({ height: 6, width: 60 }).join(" ");
+  assert.ok(!shown.includes("SYNTHETIC_HIDDEN"), `the pane disclosed it with no screen: ${shown}`);
+  assert.match(shown, /waiting/);
+  f.stop();
+});
+
+test("NEGATIVE CONTROL: a COMPLETE log is still shown, or the fix has removed the feature", async () => {
+  // The refusal above is only correct because it is narrow. A complete history has lost nothing, so
+  // its bytes mean what they say and the pane prints them.
+  const f = following(META({ truncated: false }), dataFrame("ordinary complete log"));
+  await f.start();
+  await settle();
+  assert.match(f.lines({ height: 6, width: 60 }).join(" "), /ordinary complete log/);
+  f.stop();
+});
+
+test("NEGATIVE CONTROL: a piped process with a complete history still shows its output", async () => {
+  // No terminal, no screen, nothing lost -- the case the line buffer models correctly and always has.
+  const f = following(META({ cols: 0, rows: 0, truncated: false }), dataFrame("piped output"));
+  await f.start();
+  await settle();
+  assert.equal(f.screen, null, "an emulator was built for something with no terminal");
+  assert.match(f.lines({ height: 6, width: 60 }).join(" "), /piped output/);
+  f.stop();
+});
+
 test("STOP DISPOSES THE SCREEN, so it cannot outlive its pane", async () => {
   const f = following(META());
   await f.start();

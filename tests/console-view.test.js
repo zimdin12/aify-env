@@ -11,6 +11,7 @@ import {
   MIN_COLUMNS_FOR_PANE,
   composeConsole,
   paneTitle,
+  paneWillBeDrawn,
   statusMark,
 } from "../lib/console-view.mjs";
 import { CONNECTING, EXITED, FAILED, GONE, STREAMING } from "../lib/output-follower.mjs";
@@ -182,6 +183,30 @@ test("AN UNKNOWN WIDTH CLAIMS NOTHING, rather than assuming 80", () => {
   // announce a crop that may not exist, or hide one that does.
   assert.ok(!paneTitle({ id: "p1", label: "sc-coder", screenCols: 0 }, 60).includes("cropped"));
   assert.ok(!paneTitle({ id: "p1", label: "sc-coder" }, 60).includes("cropped"));
+});
+
+
+test("paneWillBeDrawn IS THE ONE ANSWER both the compositor and the reporter ask", () => {
+  // It exists because two places were deriving "did a pane get drawn" independently, and they
+  // disagree exactly where it matters: below the minimum width the SESSION still has a pane to show
+  // and the COMPOSITOR draws none. A reporter reading `session.pane()` would call that a rendered
+  // frame and let keystrokes flow into a process with nothing on screen.
+  const pane = { id: "p1", label: "alpha", lines: () => ["x"] };
+  assert.equal(paneWillBeDrawn(pane, 120), true);
+  assert.equal(paneWillBeDrawn(pane, 79), false, "79 is one under the minimum and must draw nothing");
+  assert.equal(paneWillBeDrawn(null, 120), false, "no pane to draw is not a drawn pane");
+  assert.equal(paneWillBeDrawn(pane, 0), false);
+});
+
+test("the compositor AGREES with the predicate, which is the point of having one", () => {
+  // If they could disagree, the predicate would be a third opinion rather than the single answer.
+  const pane = { id: "p1", label: "alpha", lines: () => ["pane-body"] };
+  const left = ["dashboard-row"];
+  for (const columns of [40, 79, 80, 120]) {
+    const composed = composeConsole({ dashboardLines: left, pane, columns, rows: 10 }).join(String.fromCharCode(10));
+    assert.equal(composed.includes("pane-body"), paneWillBeDrawn(pane, columns),
+      `at ${columns} columns the compositor and the predicate disagree`);
+  }
 });
 
 console.log("console-view.test.js: all assertions passed");

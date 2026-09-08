@@ -9,6 +9,8 @@
 // because it happened to be imported would be doing IO nobody asked for.
 
 import assert from "node:assert/strict";
+
+const LF = String.fromCharCode(10);
 import test from "node:test";
 import { EventEmitter } from "node:events";
 
@@ -33,13 +35,35 @@ class FakeInput extends EventEmitter {
 }
 
 /** A daemon that answers the one call collectSnapshot makes, with the given processes. */
-const fakeFetch = (processes) => async (url) => ({
-  ok: true,
-  status: 200,
-  json: async () => (String(url).includes("/health")
-    ? { version: "0.0.0", processes }
-    : { processes }),
-});
+/**
+ * The daemon's answers, including a REAL output stream for the console.
+ *
+ * THE STREAM MATTERS NOW. Input is gated on the follower being LIVE as well as on a pane frame
+ * having rendered -- a pane showing "connecting", an exit notice or a failure is a rendered frame
+ * and still not a place to type. A fake that answered `/output` with JSON left every follower stuck
+ * at `connecting`, so a test about FORWARDING was exercising a stream that never opened.
+ */
+const fakeFetch = (processes) => async (url) => {
+  if (String(url).includes("/output")) {
+    const encoder = new TextEncoder();
+    return {
+      ok: true,
+      status: 200,
+      body: (async function* body() {
+        yield encoder.encode(`data: ${JSON.stringify("ready")}${LF}${LF}`);
+        // Held open, like the real one: a console stream ends when the process does.
+        await new Promise(() => {});
+      })(),
+    };
+  }
+  return {
+    ok: true,
+    status: 200,
+    json: async () => (String(url).includes("/health")
+      ? { version: "0.0.0", processes }
+      : { processes }),
+  };
+};
 
 const start = (input, extra = {}) => startDashboard({
   endpoint: "http://127.0.0.2:1",
@@ -169,6 +193,15 @@ test("keys meant for a process are HANDED BACK, not written from inside the view
   const input = new FakeInput();
   const { stop } = await start(input, { onInput: (target, data) => sent.push([target?.id, data]) });
   input.emit("data", ENTER);   // attach
+  // A FRAME HAS TO LAND FIRST, and this await is the test being honest rather than a workaround.
+  // Input is gated on a pane frame having actually RENDERED -- not on the layout permitting one --
+  // so a synchronous burst outruns the screen and is refused. At human typing speed the draw
+  // triggered by the attach lands long before the next keystroke; this reproduces that, and a burst
+  // that beats the frame is exactly the case the gate exists to refuse.
+  // Long enough for the stream to OPEN, not just for a microtask: `start()` is deliberately not
+  // awaited by the session (a render loop must not block on a connection), so the follower reaches
+  // `streaming` a few tasks later.
+  await new Promise((r) => setTimeout(r, 30));
   input.emit("data", "hello");
   stop();
   assert.deepEqual(sent, [["p1", "hello"]]);
