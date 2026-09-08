@@ -24,6 +24,11 @@ const follower = () => ({ start() {}, stop() {}, status: "open", exit: null, lin
 const session = (rows) => {
   const built = [];
   const s = new ConsoleSession({ makeFollower: (id) => { built.push(id); return follower(); } });
+  // A DRAWABLE TERMINAL, because attaching is refused without one. `canDrawPane` fails closed on an
+  // unreported width: a session that cannot show a pane must not forward keys into a live PTY, and a
+  // caller that forgets to report loses attach VISIBLY rather than gaining invisible input. Every
+  // test in this file drives the keyboard, so every one of them needs a terminal to drive it on.
+  s.noteViewport({ columns: 100 });
   s.syncProcesses(rows);
   return { s, built };
 };

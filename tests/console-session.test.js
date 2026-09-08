@@ -146,6 +146,7 @@ test("quit and interrupt are reported SEPARATELY, not decided in here", () => {
 
 test("input meant for the process comes back as toPty, not written from in here", () => {
   const s = session([]);
+  s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
   s.syncProcesses(procs("a"));
   s.handleInput(String.fromCharCode(13)); // attach
   const { toPty } = s.handleInput("ls -la");
@@ -170,6 +171,7 @@ test("the pane carries what the composer needs, including the follower's own sta
 test("the pane says whether input is going to the process", () => {
   // An operator typing into a pane needs to know whether the keys land there or move the selection.
   const s = session([]);
+  s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
   s.syncProcesses(procs("a"));
   s.handleInput("p");
   assert.equal(s.pane().attached, false);
@@ -195,6 +197,7 @@ test("THE PANE IS HIDDEN UNTIL ASKED FOR, so the agent list gets the whole scree
 test("attaching opens the pane even when it was hidden", () => {
   // Otherwise Enter puts the keyboard inside a process whose output is not on screen.
   const s = session([]);
+  s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
   s.syncProcesses(procs("a"));
   assert.equal(s.pane(), null);
   s.handleInput(String.fromCharCode(13));
@@ -213,6 +216,7 @@ test("ATTACHMENT FOLLOWS THE PROCESS WHEN A ROW ABOVE IT DISAPPEARS", () => {
   // screen announces it. Testing only the removal of the ATTACHED process misses this whole class.
   const log = [];
   const s = session(log);
+  s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
   s.syncProcesses(procs("alpha", "bravo", "charlie"));
   s.handleInput(String.fromCharCode(27) + "[B");   // down to bravo
   s.handleInput(String.fromCharCode(13));           // attach
@@ -233,6 +237,7 @@ test("attachment survives a REORDER, not just a removal", () => {
   // Same defect, no removal at all: the daemon lists processes in whatever order it holds them, and
   // an index means a different process the moment two swap.
   const s = session([]);
+  s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
   s.syncProcesses(procs("alpha", "bravo", "charlie"));
   s.handleInput(String.fromCharCode(27) + "[B");
   s.handleInput(String.fromCharCode(13));
@@ -249,6 +254,7 @@ test("but when the ATTACHED process itself goes, the keyboard fails CLOSED", () 
   // so the keyboard goes back to the dashboard where a keystroke moves a cursor instead of reaching
   // a process. A fix for the shift case that kept pty mode alive here would be worse than the bug.
   const s = session([]);
+  s.noteViewport({ columns: 100 });   // this test attaches, so it needs a drawable terminal
   s.syncProcesses(procs("alpha", "bravo"));
   s.handleInput(String.fromCharCode(13));
   assert.equal(s.focus.mode, "pty");
@@ -256,6 +262,62 @@ test("but when the ATTACHED process itself goes, the keyboard fails CLOSED", () 
 
   s.syncProcesses(procs("bravo"));
   assert.equal(s.focus.mode, "dashboard", "the keyboard stayed inside a pane whose process is gone");
+});
+
+// -- blind input ---------------------------------------------------------------------------------
+//
+// R8, and review's rerun found it live: at 79 columns `composeConsole` drops the pane entirely while
+// `routeKey` goes on forwarding every keystroke to the process. The operator types into an agent with
+// NO SCREEN ON THEM. That is the same defect as the P1 above wearing different clothes -- input
+// reaching a process the operator is not looking at -- and it is why `paneHidden` alone cannot be the
+// gate: the compositor can refuse to draw a pane the session thinks is showing.
+
+test("A TOO-NARROW TERMINAL REFUSES THE ATTACH rather than typing blind", () => {
+  // 79 is one column under the pane's minimum, which is the exact width review reproduced at.
+  const s = session([]);
+  s.noteViewport({ columns: 79 });
+  s.syncProcesses(procs("alpha"));
+  const { action } = s.handleInput(String.fromCharCode(13));
+  assert.notEqual(s.focus.mode, "pty",
+    "attached on a terminal too narrow to draw the pane -- every keystroke would go somewhere unseen");
+  assert.equal(action, "attach-refused");
+  const { toPty } = s.handleInput("rm -rf /");
+  assert.equal(toPty, null, "input was forwarded to a process with no screen on it");
+});
+
+test("RESIZING BELOW THE MINIMUM detaches an attachment that was legitimate", () => {
+  // The operator attaches on a wide terminal and then narrows the window. Nothing about the session
+  // changed; the compositor simply stopped drawing the pane. Input must stop with it.
+  const s = session([]);
+  s.noteViewport({ columns: 120 });
+  s.syncProcesses(procs("alpha"));
+  s.handleInput(String.fromCharCode(13));
+  assert.equal(s.focus.mode, "pty", "precondition: attached on a wide terminal");
+
+  s.noteViewport({ columns: 79 });
+  assert.equal(s.focus.mode, "dashboard", "the keyboard stayed in a pane the compositor is not drawing");
+  assert.equal(s.handleInput("hello").toPty, null);
+});
+
+test("POSITIVE CONTROL: a wide enough terminal still attaches and forwards", () => {
+  // Without this, a guard that refused everything would satisfy both tests above and silently remove
+  // the feature.
+  const s = session([]);
+  s.noteViewport({ columns: 100 });
+  s.syncProcesses(procs("alpha"));
+  assert.equal(s.handleInput(String.fromCharCode(13)).action, "attach");
+  assert.equal(s.focus.mode, "pty");
+  assert.equal(s.handleInput("hello").toPty, "hello");
+});
+
+test("AN UNREPORTED VIEWPORT FAILS CLOSED, because a guard that passes on missing input is decoration", () => {
+  // A caller that never says how wide it is cannot be shown to be drawable, and the failure mode of
+  // guessing wrong is blind typing into a live agent. Refusing loudly is the recoverable direction:
+  // a caller that forgets to report loses attach visibly, rather than gaining invisible input.
+  const s = session([]);
+  s.syncProcesses(procs("alpha"));
+  assert.equal(s.handleInput(String.fromCharCode(13)).action, "attach-refused");
+  assert.equal(s.focus.mode, "dashboard");
 });
 
 test("stop() closes the stream and is safe twice", () => {
