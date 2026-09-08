@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { clip, clipToWidth, pad, width } from "../lib/text-width.mjs";
+import { clip, clipToWidth, pad, width, widthMemoSizeForTests } from "../lib/text-width.mjs";
 
 const ESC = String.fromCharCode(27);
 const dim = (s) => `${ESC}[2m${s}${ESC}[0m`;
@@ -165,4 +165,74 @@ test("CLIPPING SEGMENTS THE SAME BYTES WIDTH MEASURES", () => {
     "the accent was cut off its letter because an escape sat between them");
   assert.equal(width(clipToWidth(styled, 1)), 1, "the styled clip is not one column wide");
   assert.equal(width(clipToWidth("éx", 1)), 1);
+});
+
+test("the ASCII fast path agrees with the general path on every character it claims", () => {
+  // WHY THIS EXISTS. `width` short-circuits a string of printable ASCII to its `.length`, skipping
+  // the SGR strip and the grapheme segmenter. A CPU profile of one 40-process dashboard frame put
+  // 70% of the whole frame inside `width`, and almost every string a row is built from is ASCII.
+  //
+  // A SHORTCUT IS A SECOND IMPLEMENTATION UNLESS SOMETHING COMPARES THEM. This compares them per
+  // character, and without restating the general rule: appending a character that is NOT ASCII
+  // forces the same string down the general path, so subtracting that character's own width leaves
+  // the general path's answer for the ASCII one.
+  const WIDE = "\u7ffb";
+  const wide = width(WIDE);
+  assert.equal(wide, 2, "the character chosen to force the general path is not two columns");
+
+  for (let code = 0x20; code <= 0x7e; code += 1) {
+    const ch = String.fromCharCode(code);
+    const fast = width(ch);                       // takes the shortcut
+    const general = width(ch + WIDE) - wide;      // cannot take it
+    assert.equal(fast, general,
+      `U+${code.toString(16)} measured ${fast} by the fast path and ${general} by the general one`);
+  }
+});
+
+test("the fast path is refused for every string it must not answer for", () => {
+  // NEGATIVE CONTROL for the test above. That test only feeds the shortcut strings it is ALLOWED to
+  // claim, so on its own it would pass for a fast path that claimed everything. Each case here is
+  // a string whose width differs from its length, so a shortcut taken for it reads wrong.
+  const BEL = String.fromCharCode(7);
+  const CASES = [
+    [`${ESC}[31mred${ESC}[0m`, 3, "an SGR sequence costs no columns"],
+    ["\u7ffb\u8a33", 4, "East Asian Wide is two columns each"],
+    ["e\u0301x", 2, "a combining mark is drawn on the character before it"],
+    [`${BEL}beep`, 4, "a control character draws nothing"],
+    ["\ud83d\udc4d", 2, "an astral emoji is one grapheme, two columns"],
+  ];
+  for (const [text, expected, why] of CASES) {
+    assert.equal(width(text), expected, `${why} (length ${text.length})`);
+  }
+});
+
+test("the remembered widths are bounded, and eviction does not corrupt an answer", () => {
+  // THE SAFETY PROPERTY OF THE CACHE, and the only one no correctness test can reach: every answer
+  // stays right whether or not the map is bounded, so an unbounded cache would leak silently. This
+  // path measures arbitrary terminal output, so growth with it is the failure to rule out.
+  const WIDE = "\u7ffb";                       // non-ASCII, so the shortcut is skipped and it caches
+  assert.equal(widthMemoSizeForTests({ reset: true }), 0, "the cache did not reset");
+  assert.equal(width(WIDE), 2);
+
+  const before = widthMemoSizeForTests();
+  assert.ok(before > 0, "nothing was remembered at all; the cache is not being written");
+
+  // Churn well past the bound with strings that are novel and NOT ASCII.
+  for (let i = 0; i < 6000; i += 1) assert.equal(width(`${WIDE}${i}`), 2 + String(i).length);
+  const after = widthMemoSizeForTests();
+  assert.ok(after <= 4096, `the cache grew to ${after} entries with no bound`);
+
+  // AND THE EVICTED ENTRY IS STILL MEASURED CORRECTLY, recomputed rather than lost.
+  assert.equal(width(WIDE), 2, "a width was wrong after its cache entry was evicted");
+  assert.equal(width(`${WIDE}\u8a33`), 4);
+});
+
+test("a string too long to be worth remembering is measured but not cached", () => {
+  // The bound is entries, so one enormous key would still be held for as long as it survived
+  // eviction. Long strings are the ones least likely to be asked for twice.
+  const long = "\u7ffb".repeat(600);           // 600 characters, past the key limit
+  const before = widthMemoSizeForTests({ reset: true });
+  assert.equal(before, 0, "the cache did not reset, so a full one would hide the growth");
+  assert.equal(width(long), 1200, "the long string was measured wrongly");
+  assert.equal(widthMemoSizeForTests(), before, "an over-long string was cached anyway");
 });
