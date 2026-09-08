@@ -67,29 +67,40 @@ function fakeFetch(processCount, nonceFor) {
 }
 
 async function drawOnce(fetchImpl, count) {
-  let bytes = 0;
+  let text = "";
   await startDashboard({
     endpoint: ENDPOINT, registryPath: REGISTRY_PATH,
-    write: (t) => { bytes += t.length; }, clearScreen: false, once: true,
+    write: (t) => { text += t; }, clearScreen: false, once: true,
     columns: 132, rows: 40, fetchImpl,
     // SEALED. `collectSnapshot` reads the host's real credential store by default, so without this
     // the number below is decided partly by whatever this machine happens to hold -- an ambient
     // input, and one an injected fetch does not close. (External review of c74927a.)
     readCredentialStore: () => [],
   });
-  return bytes;
+  // A FRAME IS ONLY A SAMPLE IF IT DREW THE ROSTER. This counted BYTES and nothing else, so a frame
+  // that rendered an error banner, or a header and no rows, would time fast and read as an
+  // improvement. Review found exactly this class twice in this repo's transport probes; applying it
+  // here before it has to be found a third time.
+  const drewRoster = count === 0 || text.includes("agent-0");
+  return { bytes: text.length, drewRoster };
 }
 
 async function timeFrames(processCount, nonceFor) {
   const fetchImpl = fakeFetch(processCount, nonceFor);
   // One warm frame first: the first call pays module init and JIT, which is not what a steady
   // redraw costs.
-  let bytes = await drawOnce(fetchImpl, processCount);
+  let warm = await drawOnce(fetchImpl, processCount);
 
+  let bytes = warm.bytes;
+  let rejected = warm.drewRoster ? 0 : 1;
   const started = process.hrtime.bigint();
-  for (let i = 0; i < FRAMES; i += 1) bytes += await drawOnce(fetchImpl, processCount);
+  for (let i = 0; i < FRAMES; i += 1) {
+    const frame = await drawOnce(fetchImpl, processCount);
+    bytes += frame.bytes;
+    if (!frame.drewRoster) rejected += 1;
+  }
   const ms = Number(process.hrtime.bigint() - started) / 1e6 / FRAMES;
-  return { ms, bytesPerFrame: Math.round(bytes / (FRAMES + 1)) };
+  return { ms, bytesPerFrame: Math.round(bytes / (FRAMES + 1)), rejected };
 }
 
 const ARMS = [
@@ -97,15 +108,25 @@ const ARMS = [
   ["CHANGING (every row novel every frame)", (frame) => ` #${frame}`],
 ];
 
+let failures = 0;
 console.log(`one frame at 132x40, averaged over ${FRAMES} (plus one warm-up, discarded)`);
 for (const [label, nonceFor] of ARMS) {
   console.log(`\n${label}`);
   console.log("  processes    ms/frame    bytes written    frames/s one core could draw");
   for (const count of [10, 20, 40, 80]) {
-    const { ms, bytesPerFrame } = await timeFrames(count, nonceFor);
+    const { ms, bytesPerFrame, rejected } = await timeFrames(count, nonceFor);
     console.log(
       `  ${String(count).padStart(9)}  ${ms.toFixed(2).padStart(9)}  ${String(bytesPerFrame).padStart(15)}`
-      + `  ${Math.round(1000 / ms).toString().padStart(28)}`,
+      + `  ${Math.round(1000 / ms).toString().padStart(28)}`
+      + (rejected ? `   REJECTED ${rejected} frame(s) that drew no roster` : ""),
     );
+    if (rejected) failures += rejected;
   }
 }
+
+console.log(
+  failures === 0
+    ? `\nEvery frame drew the roster it was given, so the figures above are renders.`
+    : `\nNOTHING ABOVE IS PUBLISHED: ${failures} frame(s) timed without drawing the roster, so those`
+      + ` samples measured something other than a render.`,
+);
