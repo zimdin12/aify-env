@@ -29,6 +29,36 @@ const SNAPSHOT = {
 
 const render = (overrides = {}) => renderDashboard({ ...SNAPSHOT, ...overrides }).join("\n");
 
+test("THE ACTIVITY DOT'S COLUMN IS NAMED, so a grey circle is not read as 'offline'", () => {
+  // The operator reported this as a bug: "claude agents status dot is not green even tho they are
+  // online". IT WAS NOT A BUG. Measured 2026-09-08 against the live daemon over 12 samples: every
+  // working row had output 0.0-1.6s old and the one grey row had been silent for 308 seconds, so the
+  // mark was correct and the COLUMN WAS MUTE -- headed by an empty string.
+  //
+  // A column of symbols with no header invites the reader to supply a meaning, and "is it alive" is
+  // the meaning they reach for. This one is about OUTPUT. Naming it costs three characters and is the
+  // whole fix; pinned here because an empty header is invisible in a diff and reads as deliberate.
+  const now = Date.now();
+  // `nowMs` IS PART OF THE SNAPSHOT, not read from the clock inside the renderer -- which is what
+  // keeps this a pure function. Omitting it makes `activityOf` answer `unknown` and the column render
+  // BLANK, which would have made the header assertion below pass against no marks at all.
+  const view = render({
+    nowMs: now,
+    processes: [
+      { id: "busy", pid: 1, service: "s", terminal: true, uptimeMs: 1000, lastOutputAtMs: now },
+      { id: "idle", pid: 2, service: "s", terminal: true, uptimeMs: 1000, lastOutputAtMs: now - 300_000 },
+    ],
+  });
+  assert.match(view, /\bOUT\b/, "the activity column has no header, so its dot means whatever the reader guesses");
+
+  // POSITIVE AND NEGATIVE CONTROL TOGETHER: the header would be worth nothing if both rows carried
+  // the same mark, and the marks would be worth nothing without a header to explain them.
+  const busy = view.split("\n").find((l) => l.includes("busy"));
+  const idle = view.split("\n").find((l) => l.includes("idle"));
+  assert.ok(busy.includes("\u25cf"), `a process that just printed is not marked as producing: ${busy}`);
+  assert.ok(idle.includes("\u25cb"), `a process silent for five minutes is not marked as quiet: ${idle}`);
+});
+
 test("registered services are listed with what they said about themselves", () => {
   const view = render();
   assert.match(view, /aify-comms/);
