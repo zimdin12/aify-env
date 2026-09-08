@@ -150,6 +150,20 @@ async function drawOnce(fetchImpl, count) {
   // reason. Whether the real renderer was invoked is a source-and-execution fact, established by
   // reading this file's imports, not inferred from anything below.
   //
+  // MEASURED, NOT CLAIMED, 2026-09-08. The paragraph above was an argument until the carriers were
+  // put back through it, `startDashboard` replaced by each in turn and restored byte-identical:
+  //
+  //   review's own constant -- the six labels plus the whole declared marker domain    REFUSED
+  //   the same constant wrapped to the viewport, so the width bound cannot catch it    REFUSED
+  //   the same rows with eight blank lines between them, which beat an older filter    REFUSED
+  //   a dynamic non-renderer that READS the input and lays the six rows out itself     PUBLISHED
+  //
+  // The survivor is the one this comment already names, and it is not a hole to be closed by a
+  // longer or more random token: any predicate over the OUTPUT is satisfied by something that
+  // produces the right output. Review's warning was the same -- "a dynamic fake can still append
+  // the current marker without rendering" -- and the answer is that this file imports the real
+  // `startDashboard` and times it, which is a fact about the source rather than about a frame.
+  //
   // The STATIC arm is weaker still: its token is constant for the run by construction, so within
   // it a correct render IS the same text every frame and nothing here separates that from a cache
   // of one. It is unpredictable rather than fixed -- generated per run, so nothing written in
