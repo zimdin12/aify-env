@@ -154,3 +154,116 @@ test("and attaching after that empty search reaches the agent they were on", () 
   assert.equal(s.focus.mode, "pty");
   assert.equal(built.at(-1), "p3", "the keyboard went into the wrong agent");
 });
+
+// ── the fourth wrong-subject defect, and it arrived with the fix for the third ───────────────────
+//
+// Performing `attach` inside the router made the menu's own default work -- it had been inert,
+// because every executor handles `stop` and none of them knows what attaching means. But the router
+// is PURE: it moves the keyboard by mode and cannot resolve an identity, so the subject fell back to
+// the cursor while every other menu action resolves by the id captured when the menu opened.
+//
+// The two agree until the list shifts, which it does every two seconds on a busy host.
+
+test("ATTACHING FROM THE MENU GOES TO THE AGENT THE MENU NAMED, not to the cursor", () => {
+  // MEASURED by review through the real daemon adapter: menu opened on bravo, alpha exits, the
+  // prompt still reads "actions for bravo", and `runner.write` receives charlie's id.
+  const { s } = session(FLEET);
+  s.handleInput(ESC + "[B");                       // cursor to p2
+  s.handleInput("m");                              // menu bound to p2
+  assert.equal(s.actionTargetId, "p2", "positive control: the menu did not bind a subject");
+  s.syncProcesses(FLEET.slice(1));                 // p1 exits; index 1 is now p3
+  const result = s.handleInput(ENTER);             // Enter on `attach`
+  assert.equal(result.action, "attach");
+  assert.equal(s.selected?.id, "p2", "the keyboard went to the row that took the target's place");
+});
+
+test("A TARGET THAT VANISHED REFUSES THE ATTACH, rather than taking whoever replaced it", () => {
+  // Gone means refused, exactly as it does for stop. Attaching to whichever row moved into that
+  // position is the same wrong-subject bug in a harmless-looking costume: the operator types into
+  // somebody else's session believing it is the one they chose.
+  const { s } = session(FLEET);
+  s.handleInput(ESC + "[B");
+  s.handleInput("m");
+  s.syncProcesses([FLEET[0], FLEET[2]]);           // p2 itself is gone
+  const result = s.handleInput(ENTER);
+  assert.equal(result.action, "attach-refused");
+  assert.equal(s.focus.mode, "dashboard");
+});
+
+test("ATTACHING FROM THE DASHBOARD STILL FOLLOWS THE CURSOR", () => {
+  // The two paths resolve differently ON PURPOSE, and this is the control that keeps the fix from
+  // being "attach is broken everywhere". Enter on the dashboard is a choice made at that instant;
+  // Enter in a menu is a choice made when the menu opened.
+  const { s } = session(FLEET);
+  s.handleInput(ESC + "[B");
+  const result = s.handleInput(ENTER);
+  assert.equal(result.action, "attach");
+  assert.equal(s.selected?.id, "p2");
+  assert.equal(s.focus.mode, "pty");
+});
+
+test("THE MENU'S SUBJECT IS RELEASED BY ATTACHING, like every other way out of it", () => {
+  // A subject left bound after the menu closed is one a LATER confirmation could resolve against --
+  // the same stale-target shape from the other end.
+  const { s } = session(FLEET);
+  s.handleInput("m");
+  s.handleInput(ENTER);
+  assert.equal(s.actionTargetId, null, "the menu's target outlived the menu");
+});
+
+// ── readiness was an observation of the past read beside a fact of the present ───────────────────
+//
+// `paneRendered` says a frame reached the screen. It does not say WHICH frame -- and the follower's
+// problem was being read LIVE beside it, so the two described different moments.
+//
+// REVIEW'S REPRO, with a real dashboard, session, follower and parser: display alpha's baseline
+// refusal, hold the health refresh, then deliver RIS and visible text and let it parse. Enter and a
+// keystroke reached alpha while the accepted frame count stayed at 3 and the last thing displayed was
+// still the refusal. The operator is typing at a screen that says they are not seeing the process.
+
+const refusingFollower = (problem) => ({
+  status: "streaming",
+  start() {}, stop() {},
+  lines: () => ["something"],
+  paneProblem: () => problem.value,
+});
+
+test("A RECOVERED STREAM DOES NOT UNLOCK INPUT UNTIL A FRAME SHOWING IT HAS BEEN DRAWN", () => {
+  const problem = { value: "waiting for the first full repaint" };
+  const s = new ConsoleSession({ makeFollower: () => refusingFollower(problem) });
+  s.noteViewport({ columns: 160 });
+  s.syncProcesses([{ id: "p1", label: "alpha" }]);
+  s.handleInput(ENTER);
+  s.notePaneRendered(true);                 // the frame that was drawn was the REFUSAL
+  assert.equal(s.inputIsLive(), false, "input was live while a refusal was on screen");
+
+  problem.value = "";                        // the stream recovered
+  assert.equal(s.inputIsLive(), false,
+    "input went live on a recovery that has not been drawn -- the screen still shows the refusal");
+
+  // POSITIVE CONTROL: drawing a frame that shows the process is what makes it readable. Without
+  // this, a gate that refused for ever would satisfy both assertions above.
+  s.notePaneRendered(true);
+  assert.equal(s.inputIsLive(), true, "a redrawn, recovered pane still refused input");
+});
+
+test("A STREAM THAT BREAKS AFTER A GOOD FRAME STOPS INPUT IMMEDIATELY", () => {
+  // The other direction, and the reason BOTH readings are consulted. Binding readiness only to what
+  // the frame showed would let input keep flowing into a stream that has since failed, because the
+  // last frame drawn was fine.
+  const problem = { value: "" };
+  const s = new ConsoleSession({ makeFollower: () => refusingFollower(problem) });
+  s.noteViewport({ columns: 160 });
+  s.syncProcesses([{ id: "p1", label: "alpha" }]);
+  s.handleInput(ENTER);
+  s.notePaneRendered(true);
+  assert.equal(s.inputIsLive(), true, "positive control: a good frame did not enable input");
+  problem.value = "the daemon stopped answering";
+  assert.equal(s.inputIsLive(), false, "input kept flowing after the stream failed");
+});
+
+// A THIRD TEST WAS WRITTEN HERE AND DELETED, because no mutant could kill it. It asserted that a
+// FAILED draw clears the record of what the last good frame showed -- and `paneRendered` is already
+// false in that state, so `inputIsLive` never reaches the record at all. A mutant that left the
+// stale value behind passed. The clearing stays in the source with its reason written there; a test
+// that cannot fail is worse than none, because it manufactures confidence.
