@@ -51,12 +51,49 @@ const ESC = String.fromCharCode(27);
 // the SAME size the growth ratio still read 2.87x, which can only have come from the write count.
 // Per-write amortisation is not independent of how many writes it is averaged over.
 const WRITES = 60;
+//: WHAT THE COMMITTED CAPTURE DECODES TO. Pinned so a truncated, empty or malformed fixture
+//: cannot be measured as though it were the real frame.
+const CAPTURE_FRAMES = 7;
+const CAPTURE_CHARS = 562;
 const CALLBACK_TIMEOUT_MS = 2000;
 
-/** The real bytes an agent sent, decoded exactly as the pane's own reader decodes them. */
+/**
+ * The real bytes an agent sent, decoded exactly as the pane's own reader decodes them.
+ *
+ * VALIDATED, because the decode was trusted and never checked. An empty file, a malformed one, or a
+ * valid PREFIX leaving unconsumed carry all decode to nothing or to less than the file holds -- and
+ * the probe would then append its own marker and call the result "a real captured frame". A workload
+ * that is only the marker is not a capture.
+ */
 function realFrame() {
-  const { frames } = readFrames("", readFileSync(CAPTURE, "utf8"));
-  return frames.filter((frame) => frame?.type === FRAME_OUTPUT).map((frame) => frame.text).join("");
+  const raw = readFileSync(CAPTURE, "utf8");
+  // `carry`, NOT `rest`. The first version of this guard destructured a field `readFrames` does not
+  // return, so the unconsumed-capture check read `undefined` on every run and could never fire.
+  const { frames, carry } = readFrames("", raw);
+  const output = frames.filter((frame) => frame?.type === FRAME_OUTPUT);
+  const text = output.map((frame) => frame.text).join("");
+  const problems = [];
+  if (!output.length) problems.push("the capture decoded to NO output frames");
+  if (String(carry || "").trim()) {
+    problems.push(`${String(carry).length} characters of the capture were never consumed, so this `
+      + `is a prefix rather than the whole file`);
+  }
+  // THE FIXTURE'S EXACT SHAPE, not a threshold. It is a committed file and does not drift, so an
+  // equality says what a "> 200 characters" test cannot: a HALF of this capture decodes to 263
+  // characters across 3 frames and sailed past that threshold, which is the prefix case review
+  // named. If the fixture is ever legitimately replaced, these two numbers are the edit that says so.
+  if (output.length !== CAPTURE_FRAMES || text.length !== CAPTURE_CHARS) {
+    problems.push(`the capture decoded to ${output.length} frames and ${text.length} characters, `
+      + `not the ${CAPTURE_FRAMES} and ${CAPTURE_CHARS} this fixture holds`);
+  }
+  if (!text.includes(ESC)) problems.push("the decoded capture contains no ESC byte, so it is not a "
+    + "painted stream and the decode did nothing");
+  if (problems.length) {
+    process.stderr.write(`NOTHING IS PUBLISHED: the captured workload is not usable:${LF}`);
+    for (const problem of problems) process.stderr.write(`  - ${problem}${LF}`);
+    process.exit(1);
+  }
+  return text;
 }
 
 /**
@@ -99,6 +136,8 @@ class Arm {
     this.timedOut = 0;
     this.overran = false;
     this.batchWrote = false;
+    this.lateWrites = 0;
+    this.badWrites = 0;
   }
 
   async run(Terminal) {
@@ -124,14 +163,23 @@ class Arm {
       // PARSE COST is the whole batch issued back to back with only the LAST callback awaited. The
       // deferral is then paid a handful of times for the run instead of once per write, so what is
       // left is the work.
+      // THE SAME ADMISSION AS THE BATCH, because guarding one phase and not the other leaves the
+      // published column unguarded. A synchronous callback can finish past this bound and then clear
+      // a timer the blocked loop never ran -- so the AGE decides, not the callback -- and a duration
+      // that is not a positive finite number is not a sample whatever the median does with it.
       for (let i = 0; i < Math.min(this.writes, 20); i += 1) {
         const started = process.hrtime.bigint();
+        const bound = started + BigInt(CALLBACK_TIMEOUT_MS) * 1000000n;
         const settled = await new Promise((resolve) => {
           const timer = setTimeout(() => resolve(false), CALLBACK_TIMEOUT_MS);
           term.write(body, () => { clearTimeout(timer); resolve(true); });
         });
+        const ended = process.hrtime.bigint();
         if (!settled) { this.timedOut += 1; continue; }
-        this.ms.push(Number(process.hrtime.bigint() - started) / 1e6);
+        if (ended > bound) { this.lateWrites += 1; continue; }
+        const elapsed = Number(ended - started) / 1e6;
+        if (!Number.isFinite(elapsed) || elapsed <= 0) { this.badWrites += 1; continue; }
+        this.ms.push(elapsed);
       }
 
       // CHECKED WHEN THIS PHASE ENDS, not at the end of everything. The painted arms repaint all
@@ -228,6 +276,15 @@ for (const arm of ARMS) {
       + `${CALLBACK_TIMEOUT_MS}ms, so those writes cannot be timed`);
   }
   if (!arm.ms.length) refusals.push(`${arm.label}: no write was timed at all`);
+  if (arm.lateWrites) {
+    refusals.push(`${arm.label}: ${arm.lateWrites} single write(s) finished after their own `
+      + `deadline and cleared a timer the blocked loop never ran -- a callback decided they were in `
+      + `time, not the clock`);
+  }
+  if (arm.badWrites) {
+    refusals.push(`${arm.label}: ${arm.badWrites} single write(s) measured zero or a negative `
+      + `duration; a median hides one bad sample but it does not make one a sample`);
+  }
   if (!arm.wroteSomething) {
     refusals.push(`${arm.label}: the latency phase's marker is not in the buffer afterwards, so `
       + `whatever was timed did not reach the screen`);

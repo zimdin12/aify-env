@@ -78,11 +78,35 @@ class ReceivingService {
     return new Promise((resolve) => this.server.close(resolve));
   }
 
-  /** Arrivals whose DECODED output carries this marker, for the terminal it was posted to. */
-  carrying(marker) {
+  /**
+   * How many times this exact CHUNK appears across everything the service received, for the
+   * terminal it was posted to.
+   *
+   * THE WHOLE CHUNK, NOT THE MARKER. Asking whether the output CONTAINED the marker accepted a
+   * valid envelope carrying only the marker and nothing else -- the bytes the producer wrote were
+   * never checked. And counting matching REQUESTS rather than OCCURRENCES read a whole output
+   * duplicated INSIDE one request as duplicated=0.
+   */
+  occurrencesOf(chunk) {
+    let seen = 0;
+    for (const arrival of this.arrivals) {
+      if (arrival.output === null || arrival.terminalId !== TERMINAL) continue;
+      let from = 0;
+      for (;;) {
+        const at = arrival.output.indexOf(chunk, from);
+        if (at < 0) break;
+        seen += 1;
+        from = at + chunk.length;
+      }
+    }
+    return seen;
+  }
+
+  /** Arrivals whose DECODED output carries this exact chunk, for the terminal it was posted to. */
+  carrying(chunk) {
     return this.arrivals.filter((arrival) => arrival.output !== null
       && arrival.terminalId === TERMINAL
-      && arrival.output.includes(marker));
+      && arrival.output.includes(chunk));
   }
 
   /** The first such arrival, or null. Content and address, never order or time. */
@@ -110,6 +134,7 @@ class Arm {
     this.requests = 0;
     this.postMs = [];
     this.answerMs = [];
+    this.issuedPosts = 0;
     this.completedPosts = 0;
     this.failedPosts = 0;
   }
@@ -128,32 +153,43 @@ class Arm {
         // demonstrated it by moving only the hold to after the response: the 50ms arm went from
         // 101.8ms age against a 51.0ms column to 51.8ms against 51.0ms, and the same sentence still
         // read "about twice" beside 1.02x.
+        // THE WHOLE AWAITED POST IS GUARDED, because the sender catches whatever escapes it and
+        // carries on -- that is the behaviour keeping a console alive through a service blip, and it
+        // means a failure this probe does not count is a failure nobody ever sees. Counting only a
+        // non-OK STATUS missed both of the other shapes: a `fetch` rejection, and a `text()`
+        // rejection after the request had already arrived. Review failed one quiet post that way and
+        // got 40 arrived chunks, 39 completed posts, zero recorded failures, exit 0.
         const callStarted = process.hrtime.bigint();
-        if (this.postDelayMs) await delay(this.postDelayMs);
-        const issuedAt = process.hrtime.bigint();
-        this.requests += 1;
-        const response = await fetch(`http://127.0.0.1:${ownPort}/terminals/${terminalId}/output`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (!response.ok) {
+        this.issuedPosts += 1;
+        try {
+          if (this.postDelayMs) await delay(this.postDelayMs);
+          const issuedAt = process.hrtime.bigint();
+          this.requests += 1;
+          const response = await fetch(`http://127.0.0.1:${ownPort}/terminals/${terminalId}/output`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (!response.ok) throw new Error(`service answered ${response.status}`);
+          await response.text();
+          const now = process.hrtime.bigint();
+          this.postMs.push(Number(now - callStarted) / 1e6);      // the caller's whole post
+          this.answerMs.push(Number(now - issuedAt) / 1e6);       // request issued -> response read
+          this.completedPosts += 1;
+        } catch (error) {
           this.failedPosts += 1;
-          throw new Error(`service answered ${response.status}`);
+          throw error;                                            // the sender's own path, unchanged
         }
-        await response.text();
-        const now = process.hrtime.bigint();
-        this.postMs.push(Number(now - callStarted) / 1e6);      // the caller's whole post
-        this.answerMs.push(Number(now - issuedAt) / 1e6);       // request issued -> response read
-        this.completedPosts += 1;
       },
       status: "attached",
     });
 
     for (let i = 0; i < this.chunks; i += 1) {
-      const marker = `<${this.label}-${i}>`;
-      this.sentAt.set(marker, process.hrtime.bigint());
-      sender.send(TERMINAL, `${marker} a line of output from an agent${LF}`);
+      // KEYED ON THE WHOLE CHUNK, not on the marker inside it. The bytes the producer wrote are
+      // what has to arrive; a marker is only how one chunk is told from another.
+      const chunk = `<${this.label}-${i}> a line of output from an agent${LF}`;
+      this.sentAt.set(chunk, process.hrtime.bigint());
+      sender.send(TERMINAL, chunk);
       if (this.gapMs > 0) await delay(this.gapMs);
       else await new Promise((resolve) => setImmediate(resolve));
     }
@@ -167,19 +203,19 @@ class Arm {
     this.service = service;
     this.ages = [];
     this.missing = [];
-    for (const [marker, sentAt] of this.sentAt) {
-      const arrival = service.firstCarrying(marker);
-      if (!arrival) { this.missing.push(marker); continue; }
+    for (const [chunk, sentAt] of this.sentAt) {
+      const arrival = service.firstCarrying(chunk);
+      if (!arrival) { this.missing.push(chunk); continue; }
       this.ages.push(Number(arrival.at - sentAt) / 1e6);
     }
     this.ages.sort((a, b) => a - b);
     // ONCE, NOT AT LEAST ONCE. A chunk that appears in two arrivals was delivered twice, which is a
     // different world from the one being measured, and taking `[0]` and moving on would hide it.
-    this.duplicated = [...this.sentAt.keys()].filter((m) => service.carrying(m).length > 1).length;
+    this.duplicated = [...this.sentAt.keys()].filter((c) => service.occurrencesOf(c) > 1).length;
     this.undecodable = service.undecodable;
     // THE NEGATIVE CONTROL, in this arm and against this arm's own server: a marker shaped exactly
     // like the others but never handed to the sender must not be found.
-    this.foreignFound = service.carries(`<${this.label}-never-sent>`);
+    this.foreignFound = service.carries(`<${this.label}-never-sent> a line of output from an agent${LF}`);
     await service.close();
   }
 }
@@ -263,8 +299,9 @@ for (const arm of [...ARMS, ...DELAY_SWEEP]) {
       + `received, so this collector cannot tell present from absent`);
   }
   if (arm.duplicated) {
-    refusals.push(`${arm.label}: ${arm.duplicated} chunk(s) arrived in more than one request, so `
-      + `"the request that carried it" is not a single thing and these ages are not attributable`);
+    refusals.push(`${arm.label}: ${arm.duplicated} chunk(s) arrived MORE THAN ONCE -- across `
+      + `requests or twice within one -- so "the request that carried it" is not a single thing `
+      + `and these ages are not attributable`);
   }
   if (arm.undecodable) {
     refusals.push(`${arm.label}: ${arm.undecodable} request body(ies) could not be decoded as the `
@@ -280,6 +317,13 @@ for (const arm of [...ARMS, ...DELAY_SWEEP]) {
   }
   if (!arm.completedPosts) {
     refusals.push(`${arm.label}: no post completed at all`);
+  }
+  // ISSUED = COMPLETED + FAILED, or a post ended in a way this ledger does not know about, and the
+  // figures describe whichever subset happened to be countable.
+  if (arm.issuedPosts !== arm.completedPosts + arm.failedPosts) {
+    refusals.push(`${arm.label}: ${arm.issuedPosts} post(s) were issued but `
+      + `${arm.completedPosts} completed and ${arm.failedPosts} failed -- the rest ended in a way `
+      + `nothing here counted`);
   }
   if (!arm.ages.length) refusals.push(`${arm.label}: no chunk was aged at all`);
   if (arm.ages.some((ms) => !Number.isFinite(ms))) {
