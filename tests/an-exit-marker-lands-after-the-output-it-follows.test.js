@@ -172,6 +172,52 @@ test("AND THE SENDER RELEASES THE DEAD TERMINAL", async () => {
     "the sender is still tracking a terminal whose process has exited");
 });
 
+test("A LOGGER THAT THROWS CANNOT SUPPRESS THE MARKER OR THE RELEASE", async () => {
+  // FOUND BY REVIEW, and it is the same defect `output-sender.mjs` already carries a fix for --
+  // written into a different file a few hours later, by me.
+  //
+  // The timeout warning sat BEFORE the release and the marker POST, so a caller's logger that
+  // throws aborted both: no release, no exit marker. The `.catch` then called the SAME logger and
+  // turned it into an unhandled rejection in the daemon. Review's trace after releasing the first
+  // POST: FIRST, FINAL-TAIL, and nothing else, with the sender still tracked at the deadline.
+  //
+  // THE LOGGER FAILS ONLY AFTER THE LISTENER IS ATTACHED, because a logger that throws from the
+  // start takes the control down before this path is ever reached -- which is a different test.
+  const api = recordingApi({ holdMs: 6000 });
+  let failing = false;
+  const throwing = () => { if (failing) throw new Error("a caller's logger blew up"); };
+  const sender = createOutputSender({
+    post: (id, body) => api.terminalOutput(id, body), log: throwing, status: "attached",
+  });
+  const processes = fakeProcesses();
+  const book = new Map([[PREVIOUS, HANDLE]]);
+  const handles = {
+    handleFor: (id) => book.get(id) || "",
+    forget: (id) => book.delete(id),
+    remember: (id, value) => book.set(id, value),
+    otherTerminalsFor: () => [PREVIOUS],
+    carriedBy: () => "",
+    noteOutput: () => {},
+  };
+  await runOneControl({
+    control: { id: "ctl-1", terminalId: TERMINAL, action: "start" },
+    api, processes, handles, sender, log: throwing, withinRoots: () => true,
+    resolveCandidates: () => [process.execPath],
+    buildSpec: () => ({ service: "aify-comms", fileText: "", command: process.execPath, args: ["-e", "0"] }),
+  });
+  failing = true;
+
+  processes.seen.onChunk("STUCK");
+  processes.seen.onExit(0, null);
+
+  // Past the 2s drain bound, which is where the warning -- and the throw -- happen.
+  await new Promise((resolve) => setTimeout(resolve, 2600));
+  assert.ok(api.posts.some((post) => post.output.includes("[terminal exited]")),
+    `a throwing logger suppressed the exit marker entirely: ${JSON.stringify(api.posts.map((p) => p.output))}`);
+  assert.equal(sender.pendingFor(TERMINAL), null,
+    "a throwing logger suppressed the release, so the sender still tracks a dead terminal");
+});
+
 test("A SERVICE THAT STOPS ANSWERING DOES NOT HOLD THE MARKER FOR EVER", async () => {
   // NEGATIVE CONTROL for the wait. A bound that never expires is a console that never says the
   // worker died, which is worse than saying it in the wrong order.
