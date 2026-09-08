@@ -203,6 +203,61 @@ test("attaching opens the pane even when it was hidden", () => {
   assert.equal(pane.attached, true);
 });
 
+test("ATTACHMENT FOLLOWS THE PROCESS WHEN A ROW ABOVE IT DISAPPEARS", () => {
+  // P1, found by comms-senior-dev 2026-09-08. The existing guard only fires when the WATCHED process
+  // is gone. Remove a DIFFERENT one and the watched process still exists, so `pty` mode stays on --
+  // while `selected` is an INDEX, and every row below the removal has just shifted up by one.
+  //
+  // Attach to bravo in [alpha, bravo, charlie], remove alpha, and index 1 now means charlie. The
+  // operator is looking at a pane they opened on bravo and typing into charlie's live PTY. Nothing on
+  // screen announces it. Testing only the removal of the ATTACHED process misses this whole class.
+  const log = [];
+  const s = session(log);
+  s.syncProcesses(procs("alpha", "bravo", "charlie"));
+  s.handleInput(String.fromCharCode(27) + "[B");   // down to bravo
+  s.handleInput(String.fromCharCode(13));           // attach
+  assert.equal(s.selected.id, "bravo", "precondition: attached to bravo");
+  assert.equal(s.focus.mode, "pty");
+
+  s.syncProcesses(procs("bravo", "charlie"));
+
+  assert.equal(s.focus.mode, "pty", "the attachment was dropped even though bravo is still running");
+  assert.equal(s.selected.id, "bravo",
+    `typing would go to ${s.selected?.id} -- the keyboard followed the ROW, not the process`);
+  const { toPty } = s.handleInput("hello");
+  assert.equal(toPty, "hello");
+  assert.equal(s.watchedId, "bravo", "the follower moved to a process the operator did not choose");
+});
+
+test("attachment survives a REORDER, not just a removal", () => {
+  // Same defect, no removal at all: the daemon lists processes in whatever order it holds them, and
+  // an index means a different process the moment two swap.
+  const s = session([]);
+  s.syncProcesses(procs("alpha", "bravo", "charlie"));
+  s.handleInput(String.fromCharCode(27) + "[B");
+  s.handleInput(String.fromCharCode(13));
+  assert.equal(s.selected.id, "bravo");
+
+  // bravo MUST change index, or this test passes on a broken implementation. It did: my first
+  // permutation left bravo at index 1 and proved nothing.
+  s.syncProcesses(procs("bravo", "charlie", "alpha"));
+  assert.equal(s.selected.id, "bravo", "the selection followed position through a reorder");
+});
+
+test("but when the ATTACHED process itself goes, the keyboard fails CLOSED", () => {
+  // The control for the two above: re-pointing by identity is impossible when the identity is gone,
+  // so the keyboard goes back to the dashboard where a keystroke moves a cursor instead of reaching
+  // a process. A fix for the shift case that kept pty mode alive here would be worse than the bug.
+  const s = session([]);
+  s.syncProcesses(procs("alpha", "bravo"));
+  s.handleInput(String.fromCharCode(13));
+  assert.equal(s.focus.mode, "pty");
+  assert.equal(s.selected.id, "alpha");
+
+  s.syncProcesses(procs("bravo"));
+  assert.equal(s.focus.mode, "dashboard", "the keyboard stayed inside a pane whose process is gone");
+});
+
 test("stop() closes the stream and is safe twice", () => {
   const log = [];
   const s = session(log);
