@@ -326,3 +326,65 @@ test("NEGATIVE CONTROL: an ordinary line is untouched by the cap", () => {
 });
 
 console.log("pane-buffer.test.js: all assertions passed");
+
+// ── the cap counted the wrong units ──────────────────────────────────────────────────────────────
+//
+// MEASURED at `maxLines: 1`: 100,000 ASCII characters retained 4,096 UTF-16 units, and 20,000 emoji
+// retained 20,001 -- five times the cap, from a stream a fifth the size. A bound that holds only for
+// Latin text is not a bound; it is a bound with a locale attached.
+//
+// THE MECHANISM: `for...of` walks CODE POINTS, `String.length` and `slice` count UTF-16 UNITS. With
+// an emoji at every column `col` was N while `current.length` was 2N, so the OVERWRITE branch --
+// which is not the one the cap guards -- ran for ever, and each write replaced one unit with a
+// two-unit character. The line grew by one unit per character and never reached the append-only cap.
+
+test("THE LINE CAP HOLDS FOR EVERY SCRIPT, not just for Latin text", () => {
+  const retained = (text) => {
+    const buffer = new PaneBuffer({ maxLines: 1 });
+    buffer.append(text);
+    return [...buffer.carry.text].length;
+  };
+  // POSITIVE CONTROL: the case that always worked still works, so a cap that stopped applying at all
+  // could not satisfy this block.
+  assert.equal(retained("x".repeat(100_000)), MAX_LINE_COLUMNS);
+  for (const [name, ch] of [["emoji", "\u{1F600}"], ["CJK", "漢"], ["accented", "é"], ["combining", "é"]]) {
+    const held = retained(ch.repeat(20_000));
+    assert.ok(held <= MAX_LINE_COLUMNS, `${name}: retained ${held} cells against a cap of ${MAX_LINE_COLUMNS}`);
+  }
+});
+
+test("AND THE MEMORY IT COSTS IS BOUNDED TOO, which is what the cap is for", () => {
+  // Code points are the unit of the model; UTF-16 units are the unit of the memory. One code point
+  // is at most two units, so the cap in cells implies a cap in units -- and that implication is the
+  // only reason a cell cap is a memory bound at all.
+  const buffer = new PaneBuffer({ maxLines: 1 });
+  buffer.append("\u{1F600}".repeat(20_000));
+  assert.ok(buffer.carry.text.length <= MAX_LINE_COLUMNS * 2,
+    `retained ${buffer.carry.text.length} UTF-16 units`);
+});
+
+test("A CARRIAGE RETURN OVERWRITES WIDE CHARACTERS BY CELL, not by unit", () => {
+  // The same defect from the visible end. Overwriting one UTF-16 unit of a surrogate pair leaves the
+  // other half behind, which is a lone surrogate on the operator's screen -- and the column count
+  // drifts from what they can see with every character after it.
+  const buffer = new PaneBuffer({ maxLines: 5 });
+  buffer.append(`\u{1F600}\u{1F600}\u{1F600}${CR}AB${LF}`);
+  assert.deepEqual(buffer.view({ height: 3, width: 40, screen: { problem: "" } }), ["AB\u{1F600}"]);
+});
+
+test("A COLUMN IS A CODE POINT WHEN THE CARRY ARRIVES AS A BARE STRING", () => {
+  // `splitChunk` accepts a string carry and derives the column from it. Derived from `.length`, the
+  // cursor starts at TWICE the real column on a line of emoji -- and once that doubled number passes
+  // the cap, every further character is silently discarded while the line is still half empty. The
+  // tail of the line simply vanishes.
+  //
+  // A CARRIAGE RETURN HIDES THIS, which is why the first version of this test proved nothing: CR
+  // sets the column to 0 whatever it was, so the wrong derivation never gets to matter. A mutant
+  // restoring `.length` survived it.
+  const wide = "\u{1F600}".repeat(3000);
+  const { carry } = splitChunk(wide, "TAIL");
+  assert.equal([...carry.text].length, 3004, "characters were dropped while the line was under the cap");
+  assert.ok(carry.text.endsWith("TAIL"));
+  // POSITIVE CONTROL: the same call with ASCII, where both derivations agree, still appends.
+  assert.ok(splitChunk("x".repeat(3000), "TAIL").carry.text.endsWith("TAIL"));
+});
