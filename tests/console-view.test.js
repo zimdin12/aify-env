@@ -230,4 +230,18 @@ test("THE HEADER COST IS ONE NUMBER, not two literals that can drift", () => {
   assert.ok(composed.join("\n").includes("b"), "the composer drew no body where the predicate says it would");
 });
 
+
+test("A PARTIAL INSTALL IS SAID, because it measures columns differently", () => {
+  // `@xterm/addon-unicode11` is optional SEPARATELY from the emulator, so headless-present /
+  // addon-absent is a real state and the easiest of the three to end up in -- with no error to
+  // notice. Measured on the real packages: at five columns `123<emoji>X` wraps X to row 2 at version
+  // 11 and leaves it on row 1 at version 6, where a narrow pane crops it away. A different screen,
+  // not a cosmetic difference.
+  const at = (v) => paneTitle({ id: "p1", label: "alpha", screenUnicode: v }, 80);
+  assert.match(at("6"), /unicode 6, columns may differ/);
+  assert.ok(!at("11").includes("unicode"), "the matching case gained furniture");
+  assert.ok(!at("").includes("unicode"), "a pane with no emulator claimed a unicode version");
+  assert.ok(!paneTitle({ id: "p1", label: "alpha" }, 80).includes("unicode"));
+});
+
 console.log("console-view.test.js: all assertions passed");

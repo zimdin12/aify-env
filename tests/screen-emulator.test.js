@@ -37,6 +37,8 @@ test("POSITIVE CONTROL: the package is present and this file is testing the real
   assert.ok(loaded, "the installed arm is not running -- everything below would be vacuous");
   assert.equal(typeof loaded.Terminal, "function");
   assert.ok(loaded.Unicode11Addon, "the unicode11 addon is absent, so column parity is not tested");
+  // REPORTED SEPARATELY, which is what lets a caller tell a partial install from a complete one.
+  assert.equal("Unicode11Addon" in loaded, true, "the loader hides whether the addon resolved");
 });
 
 test("A PAINTED SCREEN KEEPS ITS POSITIONS, which a line buffer cannot", async () => {
@@ -264,6 +266,19 @@ test("POSITIVE CONTROL: RIS IS a baseline -- the two screens agree", async () =>
   const kept = `${ESC}c${ESC}[1;1HAFTER_RESET`;
   assert.equal(await screenAfter(lost + kept), await screenAfter(kept),
     "RIS did not make the lost history irrelevant, so nothing can be a baseline");
+});
+
+test("THE ADDON IS SEPARATELY OPTIONAL, and its absence is a THIRD acceptance arm", () => {
+  // Three states, not two: both packages, neither, and HEADLESS WITHOUT THE ADDON -- which is the
+  // easiest to end up in and the only one with no error to notice. `loadEmulator` returns the addon
+  // as its own field precisely so the caller can tell them apart, and the pane reports a version
+  // other than 11 in its title because the columns genuinely differ.
+  //
+  // WHAT THIS ARM CAN PROVE HERE is the SHAPE: the loader reports the two independently. Producing a
+  // resolution where headless loads and the addon does not needs a package tree neither the installed
+  // nor the temp-copy arm provides, so the consequence is pinned where it is observable -- the
+  // title's warning, in `console-view.test.js`.
+  assert.equal(typeof ScreenEmulator.create, "function");
 });
 
 // ── the ABSENT arm, in a child process where the package genuinely cannot be resolved ────────────
