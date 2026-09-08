@@ -42,6 +42,10 @@ const ROWS = 40;
 // split into the lines the renderer laid out -- a line is the unit a row is bound to below.
 const ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]/g;
 const NEWLINE = /\r?\n/;
+//: THE SHAPE `freshToken` MINTS, so a marker can be recognised without knowing which one it is.
+//: That is what makes "no marker but this frame's" checkable at all: a scan that only knew the
+//: tokens this run ISSUED could never see one it did not.
+const MARKER = /~[0-9a-f]{10}~/g;
 
 /** A token no hard-coded carrier can hold, because it does not exist until this process runs. */
 function freshToken() {
@@ -158,6 +162,21 @@ async function drawOnce(fetchImpl, count) {
   //   the same rows with eight blank lines between them, which beat an older filter    REFUSED
   //   a dynamic non-renderer that READS the input and lays the six rows out itself     PUBLISHED
   //
+  // AND FOUR MORE, 2026-09-09, because the round above was too kind to this check. Review answered
+  // it by publishing eight rows twice through VISIBLY WRONG output, which the impossibility argument
+  // above does not cover at all -- it is about output that is INDISTINGUISHABLE, not output that is
+  // simply different:
+  //
+  //   ONE line carrying all six labels and the current token       REFUSED, shares a line
+  //   six rows labelled agent-000, agent-100 ... with the token    REFUSED, agent-0 not found
+  //   correct rows plus a RETIRED token split by an escape         REFUSED, foreign marker
+  //   correct rows plus an EXTRA token this run never issued       REFUSED, foreign marker
+  //   a correctly laid-out dynamic renderer                        PUBLISHED, as it must be
+  //
+  // The last is the control against over-tightening: a check that had stopped admitting CORRECT
+  // output would be a worse defect than the one being fixed, and invisible from a run that only
+  // tries carriers.
+  //
   // The survivor is the one this comment already names, and it is not a hole to be closed by a
   // longer or more random token: any predicate over the OUTPUT is satisfied by something that
   // produces the right output. Review's warning was the same -- "a dynamic fake can still append
@@ -168,7 +187,12 @@ async function drawOnce(fetchImpl, count) {
   // it a correct render IS the same text every frame and nothing here separates that from a cache
   // of one. It is unpredictable rather than fixed -- generated per run, so nothing written in
   // advance can contain it.
-  const lines = text.replace(ANSI, "").split(NEWLINE);
+  // NORMALIZED ONCE, AND EVERYTHING BELOW READS THE NORMALIZED FORM. The row checks stripped ANSI
+  // and the marker check searched the RAW text, which is a hole review walked through: a retired
+  // token split internally by `ESC[31m` is absent from the raw bytes and plainly VISIBLE once the
+  // escapes are removed. 164 frames carried one that way and published.
+  const normalized = text.replace(ANSI, "");
+  const lines = normalized.split(NEWLINE);
   const missing = [];
   // PHYSICAL LINES, not painted ones. Filtering the blanks out first was a hole review walked
   // straight through: forty empty lines inserted between the rows changed no label and no token,
@@ -185,14 +209,42 @@ async function drawOnce(fetchImpl, count) {
   // BOUNDED BY THE VIEWPORT, not by the roster size: 40 rows cannot show 80 agents, so requiring
   // every label would fail for a reason that is not a defect. The first few are always on screen.
   const visible = Math.min(count, 6);
+  // EXACT IDENTITIES ON DISTINCT LINES, and `includes` was neither. Review published eight rows
+  // twice through this check: once with ONE line carrying all six labels and the current token, and
+  // once with six rows labelled `agent-000`, `agent-100` ... which every `includes("agent-0")`
+  // accepts. A substring match is not an identity, and six identities found on one line are not six
+  // rows -- a laid-out frame puts each on its own.
+  const claimedBy = new Map();
   for (let i = 0; i < visible; i += 1) {
     const label = `agent-${i}`;
-    const row = lines.find((line) => line.includes(label));
-    if (row === undefined) { missing.push(label); continue; }
-    if (nonce && !row.includes(nonce)) missing.push(`${label} is on a line that does not carry ${nonce}`);
+    // DELIMITED: not preceded by a word character or a dash, and not followed by another digit.
+    // `agent-0` must not match inside `agent-000`.
+    const identity = new RegExp(`(?<![A-Za-z0-9-])${label}(?![0-9])`);
+    const at = lines.reduce((found, line, index) => (identity.test(line) ? [...found, index] : found), []);
+    if (!at.length) { missing.push(label); continue; }
+    if (at.length > 1) { missing.push(`${label} is on ${at.length} lines, so the frame is not a roster`); continue; }
+    if (claimedBy.has(at[0])) {
+      missing.push(`${label} shares line ${at[0]} with ${claimedBy.get(at[0])}, so they are not rows`);
+      continue;
+    }
+    claimedBy.set(at[0], label);
+    if (nonce && !lines[at[0]].includes(nonce)) {
+      missing.push(`${label} is on a line that does not carry ${nonce}`);
+    }
   }
-  for (const retired of (fetchImpl.retiredNonces ? fetchImpl.retiredNonces() : [])) {
-    if (text.includes(retired)) { missing.push(`a retired token ${retired} is still on screen`); break; }
+  // NO MARKER BUT THIS FRAME'S, which is what line 225 has always claimed and what the retired-only
+  // scan did not check. Review published with an EXTRA `~fffffffffe~` that this run never issued, so
+  // it was in no retired set and nothing looked for it. Every marker-shaped run in the normalized
+  // frame must be the current token; a retired one is named as retired because that is the more
+  // useful message, but an unissued one is refused just the same.
+  if (nonce) {
+    const retired = new Set(fetchImpl.retiredNonces ? fetchImpl.retiredNonces() : []);
+    const foreign = [...new Set((normalized.match(MARKER) || []).filter((mark) => mark !== nonce))];
+    if (foreign.length) {
+      const named = foreign.slice(0, 3)
+        .map((mark) => (retired.has(mark) ? `${mark} (retired)` : `${mark} (never issued)`));
+      missing.push(`${foreign.length} marker(s) on screen that are not this frame's: ${named.join(", ")}`);
+    }
   }
   const drewRoster = count === 0 || missing.length === 0;
   return { bytes: text.length, drewRoster, missing, renderNs };
@@ -206,6 +258,12 @@ async function timeFrames(processCount, nonceFor) {
 
   let bytes = warm.bytes;
   let rejected = warm.drewRoster ? 0 : 1;
+  // WHICH CLAUSE FIRED, not just how many frames failed. "REJECTED 41 frame(s) that drew no roster"
+  // is the same sentence whether the width bound caught it, an identity was missing or a foreign
+  // marker was on screen -- so a mutation that was killed could not be told from one killed for a
+  // reason nobody intended, which is a mistake this project has made and written down. Distinct
+  // reasons only: forty-one frames failing the same way is one fact.
+  const reasons = new Set(warm.drewRoster ? [] : warm.missing);
   // THE SUM OF THE RENDERS, not the wall time of the loop. The loop also mints tokens and parses
   // frames, and neither is a cost the console pays.
   let renderNs = 0;
@@ -213,10 +271,13 @@ async function timeFrames(processCount, nonceFor) {
     const frame = await drawOnce(fetchImpl, processCount);
     bytes += frame.bytes;
     renderNs += frame.renderNs;
-    if (!frame.drewRoster) rejected += 1;
+    if (!frame.drewRoster) {
+      rejected += 1;
+      for (const reason of frame.missing) reasons.add(reason);
+    }
   }
   const ms = renderNs / 1e6 / FRAMES;
-  return { ms, bytesPerFrame: Math.round(bytes / (FRAMES + 1)), rejected };
+  return { ms, bytesPerFrame: Math.round(bytes / (FRAMES + 1)), rejected, reasons: [...reasons] };
 }
 
 // THE TOKENS ARE GENERATED, NOT ENUMERATED, and that is the difference between the two arms.
@@ -237,7 +298,7 @@ for (const [label, nonceFor] of ARMS) {
   rows.push(`${LF}${label}`);
   rows.push("  processes    ms/frame    bytes written    frames/s one core could draw");
   for (const count of [10, 20, 40, 80]) {
-    const { ms, bytesPerFrame, rejected } = await timeFrames(count, nonceFor);
+    const { ms, bytesPerFrame, rejected, reasons } = await timeFrames(count, nonceFor);
     // HELD, NOT PRINTED. A refusal after the rows cannot retract them, and review demonstrated
     // exactly that: 328 empty calls, eight numeric rows on stdout, "nothing is published", exit 0.
     rows.push(`  ${String(count).padStart(9)}  ${ms.toFixed(2).padStart(9)}  `
@@ -246,6 +307,7 @@ for (const [label, nonceFor] of ARMS) {
       failures += rejected;
       process.stderr.write(`  ${label} / ${count} processes: REJECTED ${rejected} frame(s) that `
         + `drew no roster${LF}`);
+      for (const reason of reasons) process.stderr.write(`      because: ${reason}${LF}`);
     }
   }
 }
