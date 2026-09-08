@@ -20,12 +20,21 @@
 // view sets it true and diffs against the previous frame, which writes fewer bytes and adds the
 // differ's own cost. So these numbers are compose-and-render, not the steady-state redraw.
 //
+// TWO SEPARATE QUESTIONS, AND THE SECOND ONE IS NEW. The frame check below answers "is this frame
+// this frame". `execution-receipt.mjs` answers "is this function that function" -- it hashes the
+// module's bytes AND the imported object's own source and requires the second to appear verbatim in
+// the first. Review's standing objection was that an import line is one link; this is the rest of
+// the chain, and the run refuses rather than publishing if it does not close. It still does NOT
+// prove the function was called: nothing in-process can, and the report says so.
+//
 // Run: node scripts/measure-draw-cost.mjs
 
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { startDashboard } from "../lib/dashboard.mjs";
+
+import { receiptFor, receiptLines } from "./execution-receipt.mjs";
 
 // `fileURLToPath`, not `.pathname`: on Windows the latter yields a leading-slash "/C:/..."
 // that `readFile` cannot open, and the registry read fails into an empty service list --
@@ -325,6 +334,16 @@ const ARMS = [
   ["CHANGING (every row novel every frame)", () => freshToken()],
 ];
 
+// WHAT WAS ACTUALLY INVOKED, bound to the source it claims to come from. Review's standing
+// objection to these figures is that an import line is one link: it says where the NAME came
+// from and nothing about the OBJECT that ran. The receipt hashes the module's bytes AND the
+// function object's own source, and checks that the second appears verbatim inside the first.
+//
+// A SEPARATE BLOCK FROM THE FRAME CHECK, deliberately. That one answers "is this frame this
+// frame"; this one answers "is this function that function". Neither substitutes for the other,
+// and folding them together is what let the first stand in for provenance it cannot establish.
+const RECEIPT = await receiptFor(startDashboard, new URL("../lib/dashboard.mjs", import.meta.url).href);
+
 let failures = 0;
 const LF = String.fromCharCode(10);
 const rows = [];
@@ -351,13 +370,28 @@ for (const [label, nonceFor] of ARMS) {
 // cannot retract them: review ran the exact body with 328 empty calls and got eight numeric rows,
 // "nothing is published", and exit 0 -- so an automated caller saw a successful run with figures in
 // it. That was this script carrying over its sibling's DISCLAIMER instead of its GATING.
-if (failures === 0) {
+if (failures === 0 && RECEIPT.declaredHere) {
   console.log(header);
   for (const row of rows) console.log(row);
   console.log(`${LF}Every frame carried this frame's identity and content inside its viewport, and`
     + ` the figures are the bracketed cost of startDashboard alone -- token generation and frame`
     + ` checking are outside the clock.`);
+  console.log("");
+  for (const line of receiptLines(RECEIPT)) console.log(line);
+  console.log("  observed    a published frame carries THIS frame's token on every visible row, and");
+  console.log("              the only source of that token is the injected fetch -- so publication");
+  console.log("              already implies the collaborators were called inside the bracket. A separate");
+  console.log("              counter for that was removed: it guarded a condition the frame check admits");
+  console.log("              nothing through, and it put an increment inside the clock.");
+  console.log("  NOT PROVEN  that this function was the one called. Nothing in-process can say so:");
+  console.log("              a caller could hold this receipt and invoke something else. What is");
+  console.log("              established is that the imported object IS the module's own body.");
 } else {
+  if (!RECEIPT.declaredHere) {
+    process.stderr.write(`${LF}NOTHING IS PUBLISHED: the function this file imported as `
+      + `${RECEIPT.name} does not appear in ${RECEIPT.module}, so the figures would describe `
+      + `something other than that module's renderer${LF}`);
+  }
   process.stderr.write(
     `${LF}NOTHING IS PUBLISHED: ${failures} frame(s) timed without drawing the roster, so those`
     + ` samples measured something other than a render. Per-arm rejections are above.${LF}`,
