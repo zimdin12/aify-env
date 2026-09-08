@@ -22,10 +22,15 @@ cd aify-env
 npm install
 ```
 
-`node-pty` is the only dependency that matters, and it is the one that can fail: it is a native module,
+`node-pty` is the dependency that matters most, and it is the one that can fail: it is a native module,
 so a host without build tools gets a working install with NO TERMINALS. That is not a broken state and
 aify-env does not pretend otherwise — processes run with piped stdio, a console cannot render a TUI for
 them, and `aify-env doctor` says so in as many words. Check before you trust it:
+
+**Two more optional dependencies arrived in v0.6.3**, and they degrade the same way rather than
+failing: `@xterm/headless` and `@xterm/addon-unicode11` are what let the right-hand pane draw a
+coding agent's SCREEN instead of a notice. Absent, the pane says it cannot draw one and names
+`aify-env attach`, which is exactly what it said before they existed. Nothing else changes.
 
 ```bash
 aify-env doctor
@@ -137,6 +142,35 @@ straight to its service and this environment never sees it. The rule is not resi
 
 Colour and width are decided by the caller, so a pipe gets neither and `NO_COLOR` is honoured. Every
 state is a word as well as a colour -- a glyph alone fails for a piped view or a colour-blind reader.
+
+### The keyboard, where there is one
+
+The view says what it accepts on screen, and this section exists for the two answers that are
+decisions rather than bindings.
+
+| key | does |
+|---|---|
+| `up`/`down`, `j`/`k`, `1`-`9` | move the selection |
+| `g` | find, filtering the list as you type |
+| `p` | show or hide the console pane |
+| `enter` | attach -- every keystroke then goes into that agent's terminal |
+| `m` | actions for the selected agent |
+| `ctrl+]` | back, from anywhere |
+| `q` | leave, where leaving is offered |
+
+**THE CONSOLE STARTS HIDDEN, and that is deliberate.** It costs half the width to show one process,
+against a list of every agent on the host -- and the operator's stated priority for this view is
+seeing which agents are working. `p` brings it back. While it is hidden nothing is streamed at all:
+no connection, no buffer, no emulator.
+
+**A DESTRUCTIVE ACTION IS A QUESTION, not a keystroke.** `stop` kills a live worker mid-turn and
+`restart` discards its context, so neither is reachable without opening the menu, choosing it, and
+answering `y`. Anything that is not `y` cancels.
+
+**What the pane can draw depends on what it is given.** A coding agent paints with cursor moves, so
+with the emulator installed the pane runs one at the PRODUCER's geometry and shows the real screen --
+cropped to the pane's width, which the title says when it happens. Without the emulator, or before a
+trustworthy baseline exists, it says so rather than showing a reconstruction that may be wrong.
 
 ## Why it exists
 
