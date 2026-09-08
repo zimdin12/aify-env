@@ -828,6 +828,9 @@ async function postAdvertisement(url, body, apiKey = "") {
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    // The key must never follow a redirect: a 3xx from the endpoint would carry X-API-Key to
+    // wherever it pointed. The bridge applies the same policy at every one of its fetch sites.
+    redirect: "manual",
     signal: AbortSignal.timeout(5000),
   });
 }
@@ -970,8 +973,12 @@ if (ADVERTISE) {
   // NOT FROM A VIEW. See `viewOnly`: a process that refused a takeover runs nothing, so describing
   // this host from it hands the service capabilities nobody will deliver.
   if (!viewOnly) {
-    void advertiseOnce();
-    const advertiseTimer = setInterval(() => { void advertiseOnce(); }, ADVERTISE_MS);
+    // NEVER UNHANDLED. This daemon registers no unhandledRejection handler, so a throw anywhere in
+    // an advertisement pass -- reading the registry, detecting runtimes, describing the host -- was
+    // the end of the process, and with it every worker it owned. A failed advertisement is a log line.
+    const advertiseSafely = () => advertiseOnce().catch((error) => logLine(`advertise failed: ${error?.message || error}`));
+    advertiseSafely();
+    const advertiseTimer = setInterval(advertiseSafely, ADVERTISE_MS);
     advertiseTimer.unref();
     stopAdvertising = () => clearInterval(advertiseTimer);
   }
