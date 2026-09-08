@@ -42,6 +42,8 @@ import { dirname, join } from "node:path";
 
 import { FRAME_OUTPUT, readFrames } from "../lib/sse-frames.mjs";
 import { applyFrame } from "../lib/output-follower.mjs";
+import { ScreenEmulator } from "../lib/screen-emulator.mjs";
+import { PaneBuffer } from "../lib/pane-buffer.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CAPTURE = join(HERE, "fixtures", "claude-console-sse.raw.txt");
@@ -126,4 +128,82 @@ test("a frame split across reads is not lost", () => {
   const split = [...first.frames, ...second.frames]
     .filter((f) => f?.type === FRAME_OUTPUT).map((f) => f.text).join("");
   assert.equal(split, decodedText(), "splitting the stream changed what reached the pane");
+});
+
+// -- the emulator, driven by the same real bytes -------------------------------------------------
+
+/** The screen a terminal would show for this text, or null when the emulator is not installed. */
+async function renderedRows(text, { cols = 80, rows = 24 } = {}) {
+  const screen = await ScreenEmulator.create({ cols, rows });
+  if (!screen) return null;                       // the package is optional; absence is not failure
+  await screen.write(text);
+  const out = screen.rows();
+  screen.dispose();
+  return out;
+}
+
+/** What the LINE BUFFER shows for the same text -- the path a non-painting process takes. */
+function bufferedRows(text, { width = 80, height = 24 } = {}) {
+  const buffer = new PaneBuffer();
+  buffer.append(text);
+  return buffer.view({ height, width });
+}
+
+test("A REAL PAINTED CAPTURE RENDERS THROUGH THE EMULATOR", async () => {
+  // NOTHING HAS EVER DONE THIS. Every other emulator test in this suite writes escape sequences by
+  // hand; this fixture is what a working agent actually sent, and until now it stopped at the line
+  // buffer. A renderer proven only against sequences someone wrote to exercise it is proven against
+  // its author's expectations.
+  const rendered = await renderedRows(decodedText());
+  if (rendered === null) return;                  // @xterm/headless is optional and may be absent
+
+  assert.ok(rendered.length > 0, "the emulator produced no rows from a real capture");
+  const screen = rendered.join(String.fromCharCode(10));
+  assert.ok(!screen.includes(ESC),
+    "an ESC byte survived into the RENDERED screen; the emulator printed a control sequence "
+    + "instead of obeying it");
+  assert.ok(!screen.includes("\\u001b"),
+    "the literal six characters reached the rendered screen, which is a missing JSON.parse");
+});
+
+test("THE EMULATOR AND THE LINE BUFFER DISAGREE ON A PAINTED STREAM", async () => {
+  // THE WHOLE POINT OF THE BLOCK, stated as something that can fail. If a real painted capture
+  // rendered identically through both paths, the emulator would be doing nothing and B1-B5 would be
+  // decoration. `ESC[1C` alone guarantees a difference: the line buffer keeps the sequence, a
+  // terminal moves the cursor and shows a gap.
+  const text = decodedText();
+  const rendered = await renderedRows(text);
+  if (rendered === null) return;
+
+  const buffered = bufferedRows(text);
+  assert.notDeepEqual(rendered, buffered,
+    "a real painted capture renders identically through the emulator and the raw line buffer, so "
+    + "the emulator is not interpreting anything");
+});
+
+test("AND THEY AGREE ON A STREAM THAT DOES NOT PAINT", async () => {
+  // B3'S STATED CONTRACT, and the positive control for the test above: without it, a "renderer"
+  // that mangled everything would satisfy the disagreement. A process that only prints lines must
+  // look the same either way -- that is what "the line-buffer path stays byte-identical for
+  // non-painting processes" promised.
+  //
+  // CR LF, BECAUSE THAT IS WHAT THE EMULATOR EVER SEES. The first version of this used a bare line
+  // feed and the emulator rendered a staircase -- "alpha", five spaces then "beta", nine then
+  // "gamma" -- which is CORRECT: a bare LF moves down without returning to column zero, and only the
+  // line buffer treats it as a line break.
+  //
+  // The combination cannot occur in production, which is why that was a fixture bug rather than a
+  // finding. `#openScreen` builds a screen only when the producer reports non-zero geometry, and a
+  // PIPED process reports 0x0 and never gets one -- so the emulator only ever receives PTY output,
+  // and a PTY's ONLCR delivers CR LF. Worth stating here, because the next person to write a
+  // non-painting fixture will reach for a bare newline exactly as I did.
+  const CRLF = String.fromCharCode(13) + String.fromCharCode(10);
+  const plain = ["alpha", "beta", "gamma"].join(CRLF) + CRLF;
+  const rendered = await renderedRows(plain);
+  if (rendered === null) return;
+
+  const trim = (list) => list.map((row) => row.replace(/\s+$/, "")).filter((row) => row !== "");
+  assert.deepEqual(trim(rendered), trim(bufferedRows(plain)),
+    "a stream that paints nothing renders differently through the emulator than through the line "
+    + "buffer, so the non-painting path is not the one B3 promised to leave alone");
 });
