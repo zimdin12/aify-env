@@ -340,7 +340,7 @@ for (const arm of ARMS) {
   }
 }
 
-// THE COST HAS TO GROW WITH THE WORK, or the arms are not measuring the parse at all. Sixty-four
+// THE COST HAS TO DIFFER BETWEEN THE ARMS, or they are not distinguishable at all. Sixty-four
 // times the bytes taking the same time would mean the timer is reading something else.
 // A MEANINGFUL FACTOR, NOT MERELY `>`, AND SET FROM TWO MEASUREMENTS RATHER THAN FROM TASTE. The
 // first version required only that 64KB cost MORE than 1KB and PASSED on a ratio of 1.0x, because
@@ -366,7 +366,7 @@ if (![small, large].every((ms) => Number.isFinite(ms) && ms > 0)) {
 } else if (!(large >= small * MIN_GROWTH)) {
   refusals.push(`64 KB completes in ${large.toFixed(4)}ms and 1 KB in ${small.toFixed(4)}ms -- `
     + `${(large / small).toFixed(2)}x for 64x the bytes, under the ${MIN_GROWTH}x floor. These `
-    + `timings are not tracking the work.`);
+    + `completion times do not differ between the arms.`);
 }
 
 if (refusals.length) {
@@ -390,11 +390,14 @@ if (refusals.length) {
     // granularity whenever the spread was small -- and review's zero-delay control published
     // 0.1/0.1/0.2/0.4ms under a sentence calling 0.1ms that granularity. Agreement between the arms
     // says the reading does not depend on payload size; it does not say what the reading IS.
-    console.log(`THE LATENCY COLUMN DOES NOT VARY WITH PAYLOAD SIZE HERE: every arm reads about `
-      + `${latencies[0].toFixed(1)}ms (spread ${spread.toFixed(2)}ms) across a 100x range of bytes, `
-      + `so whatever it is measuring is not the payload. What it IS is not established by this `
-      + `probe; on this host a reading near 15.6ms would be consistent with the timer granularity `
-      + `xterm's deferred callback runs on, and a reading far from it would not.`);
+    // LEVELS AND SPREAD, AND NOTHING INFERRED FROM THEM. The previous sentence said the column
+    // "does not vary with payload size" -- which is still an inference, and a wrong one: review's
+    // control charged costs that DO depend on size and printed 0.1/0.1/0.2/0.4ms, a fourfold change
+    // inside a small absolute spread. A small spread is a small spread.
+    console.log(`LATENCY LEVELS: ${latencies.map((ms) => ms.toFixed(3)).join(", ")}ms `
+      + `(spread ${spread.toFixed(3)}ms) across payloads of `
+      + `${ARMS.map((arm) => arm.bytes).join(", ")} bytes. What this column measures is not `
+      + `established by this probe.`);
   } else {
     console.log(`THE LATENCY COLUMN VARIES ACROSS THE ARMS HERE (${latencies.map((ms) => ms.toFixed(1)).join(", ")}ms, `
       + `spread ${spread.toFixed(2)}ms), so it is NOT simply this host's timer floor and no single `

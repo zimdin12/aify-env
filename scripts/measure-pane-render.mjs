@@ -1,18 +1,23 @@
-// What one pane redraw costs, against the budget the pane actually redraws on.
+// What a pane's emulate-and-extract costs, operation by operation.
 //
 // THE RENDERER HALF OF THE OPERATOR'S GOAL. The frame probe measures the whole dashboard frame; this
 // measures the pane inside it -- feeding an agent's bytes into the emulator and pulling the rows back
 // out -- which is the work the console pane does and nothing had a number for.
 //
-// THE BUDGET IS REAL, NOT INVENTED. `paneRepaintMs` is 80: arriving output coalesces into at most one
-// repaint every 80ms. So the question this answers is whether a repaint fits in the window that
-// schedules it, with room for everything else the frame draws.
+// `paneRepaintMs` IS A CADENCE, NOT A BUDGET, and these figures are not compared against it. It is
+// 80ms: arriving output coalesces into at most one repaint every 80ms. That is how often a repaint is
+// SCHEDULED, which is not an observed end-to-end completion time, and an earlier version of this file
+// divided a three-phase sum by it and called the result a fraction of a budget.
 //
-// THREE THINGS ARE TIMED SEPARATELY, because they are different work and only one of them scales
-// with what the agent printed:
-//   WRITE     feeding the chunk into the emulator, which is xterm's parse
-//   ROWS      pulling the screen back out, once per repaint regardless of how much arrived
+// THREE OPERATIONS, TIMED SEPARATELY, and they are NOT three stages of one repaint:
+//   WRITE     feeding the chunk into the emulator, awaited
+//   ROWS      pulling the screen back out
 //   COLOUR    the same extraction with SGR read from each cell, which is B5's path
+//
+// `output-follower.mjs` finishes the parse, THEN notifies progress, and `dashboard.mjs` schedules
+// the repaint after -- different lifecycle phases -- and the follower selects ONE `rows({ color })`
+// call, so ROWS and COLOUR are ALTERNATIVES rather than stages. Any combined figure below is the
+// median of PAIRED per-iteration sums for one of those two paths, never a sum of medians.
 //
 // THE WORKLOAD IS THE COMMITTED CAPTURE, validated before use: 7 output frames and 562 characters,
 // decoded through the pane's own reader. An empty, malformed or truncated fixture would otherwise be
@@ -37,6 +42,8 @@ import { loadEmulator, ScreenEmulator } from "../lib/screen-emulator.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CAPTURE = join(HERE, "..", "tests", "fixtures", "claude-console-sse.raw.txt");
 const LF = String.fromCharCode(10);
+//: Colour codes, so the two extraction paths can be compared on the TEXT they carry.
+const SGR = /\u001b\[[0-9;]*m/g;
 const ESC = String.fromCharCode(27);
 
 //: WHAT THE COMMITTED CAPTURE DECODES TO, and what it draws. The row and the text come from the
@@ -49,8 +56,9 @@ const CAPTURE_CHARS = 562;
 const CAPTURE_ROW = 25;
 const CAPTURE_TEXT = "thinking with high effort";
 
-//: The pane redraw budget, from `paneRepaintMs` in `lib/dashboard.mjs`.
-const BUDGET_MS = 80;
+//: The CADENCE a pane repaint is scheduled on, from `paneRepaintMs` in `lib/dashboard.mjs`. It is
+//: reported for context and nothing below is divided by it.
+const CADENCE_MS = 80;
 const REPAINTS = 200;
 
 /** The bytes an agent sent, decoded through the pane's own reader and checked against the fixture. */
@@ -94,7 +102,7 @@ function capturedFrame() {
   return text;
 }
 
-/** One pane geometry, timed through the three phases a repaint actually performs. */
+/** One pane geometry, with each operation timed separately -- they are not one repaint. */
 class Pane {
   constructor({ cols, rows }) {
     this.cols = cols;
@@ -108,6 +116,8 @@ class Pane {
     this.plainPathMs = [];
     this.colourPathMs = [];
     this.notApplied = 0;
+    this.contentlessExtractions = 0;
+    this.pathsDisagreed = 0;
     this.emptyExtractions = 0;
     this.foreignInTimed = 0;
     this.drewCapture = false;
@@ -149,8 +159,33 @@ class Pane {
         for (const extraction of [plain, colour]) {
           if (!Array.isArray(extraction.value) || extraction.value.length !== this.rows) {
             this.emptyExtractions += 1;
-          } else if (extraction.value.join(LF).includes("<never-written-by-any-pane>")) {
+            continue;
+          }
+          const joined = extraction.value.join(LF);
+          if (joined.includes("<never-written-by-any-pane>")) {
             this.foreignInTimed += 1;
+            continue;
+          }
+          // SHAPE IS NOT A SCREEN ORACLE. A full-height array of blanks, or of unrelated text, has
+          // the right length and says nothing -- review published all four geometries with every
+          // timed extraction returning `Array(height).fill('')`. What the capture actually paints is
+          // known, so it is asked for: the marker text, on the row its cursor addressing puts it on.
+          //
+          // ONLY WHERE THE PANE CAN SHOW IT, and only against the CONTENT rather than by redrawing
+          // the first screen 200 times -- this capture is not idempotent, so re-establishing the
+          // first state per iteration would measure a different thing.
+          if (this.rows > CAPTURE_ROW
+              && !String(extraction.value[CAPTURE_ROW] || "").includes(CAPTURE_TEXT)) {
+            this.contentlessExtractions += 1;
+            continue;
+          }
+          // AND THE TWO PATHS MUST AGREE ON WHAT IS ON THE SCREEN. They are alternatives over one
+          // buffer, so a coloured extraction whose text differs from the plain one is not the same
+          // screen with SGR added -- it is a different answer.
+          if (extraction === colour) {
+            const strippedColour = joined.replace(SGR, "");
+            const strippedPlain = plain.value.join(LF).replace(SGR, "");
+            if (strippedColour !== strippedPlain) this.pathsDisagreed += 1;
           }
         }
 
@@ -210,7 +245,7 @@ const CHUNK = capturedFrame();
 const PANES = [new Pane({ cols: 80, rows: 24 }), new Pane({ cols: 132, rows: 26 }),
                new Pane({ cols: 132, rows: 40 }), new Pane({ cols: 200, rows: 50 })];
 
-const rows = [`WHAT A PANE'S EMULATE-AND-EXTRACT COSTS. \`paneRepaintMs\` is ${BUDGET_MS}ms, which is`,
+const rows = [`WHAT A PANE'S EMULATE-AND-EXTRACT COSTS. \`paneRepaintMs\` is ${CADENCE_MS}ms, which is`,
   "the CADENCE a repaint is scheduled on -- not an observed end-to-end completion budget, and these",
   "are not compared against it.",
   "",
@@ -259,6 +294,15 @@ for (const pane of PANES) {
     refusals.push(`${pane.cols}x${pane.rows}: ${pane.emptyExtractions} timed extraction(s) did not `
       + `return a full ${pane.rows}-row screen, so those samples timed something that produced `
       + `nothing`);
+  }
+  if (pane.contentlessExtractions) {
+    refusals.push(`${pane.cols}x${pane.rows}: ${pane.contentlessExtractions} timed extraction(s) `
+      + `returned a full screen that does NOT carry the capture's own text at row ${CAPTURE_ROW}, `
+      + `so the right SHAPE was timed and the wrong CONTENT`);
+  }
+  if (pane.pathsDisagreed) {
+    refusals.push(`${pane.cols}x${pane.rows}: ${pane.pathsDisagreed} coloured extraction(s) carried `
+      + `different text from the plain one over the same buffer, so they are not one screen`);
   }
   if (pane.foreignInTimed) {
     refusals.push(`${pane.cols}x${pane.rows}: a string no pane wrote appeared in `
