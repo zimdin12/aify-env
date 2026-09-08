@@ -6,7 +6,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DETACH, MENU_ACTIONS, MODES, initialFocus, needsConfirming, reconcileFocus, routeKey } from "../lib/keys.mjs";
+import {
+  DETACH, MENU_ACTIONS, MODES, initialFocus, menuActionsIn, needsConfirming, reconcileFocus, routeKey,
+} from "../lib/keys.mjs";
 
 const ESC = String.fromCharCode(27);
 const UP = `${ESC}[A`;
@@ -23,6 +25,25 @@ test("an empty host selects nothing rather than index 0", () => {
   assert.equal(initialFocus(3).selected, 0);
 });
 
+test("BOTH RECONCILE PATHS RETURN THE SAME SHAPE, which three fields have now been dropped from", () => {
+  // `reconcileFocus` rebuilds the focus as a LITERAL on two paths -- the empty list and everything
+  // else -- and a field added to one and forgotten in the other is reset without a symptom until
+  // something reads it. It has happened THREE TIMES: `paneHidden`, then `confirming`, then the menu's
+  // offer list, which a session loses on its very first sync because a session starts at count 0.
+  //
+  // COMPARING KEY SETS rather than naming them: a test that listed the fields would be a fourth copy
+  // of the thing that keeps going stale, and it would need editing every time one is added -- which
+  // is exactly the edit that gets forgotten.
+  const rich = {
+    mode: "menu", selected: 1, count: 3, query: "q", paneHidden: false,
+    menuAt: 2, confirming: "stop", menuActions: ["attach", "stop"],
+  };
+  const populated = Object.keys(reconcileFocus(rich, 3)).sort();
+  const empty = Object.keys(reconcileFocus(rich, 0)).sort();
+  assert.deepEqual(empty, populated,
+    "the two reconcile paths return different fields, so one of them silently resets what it omits");
+});
+
 test("the selection is CLAMPED when the process list shrinks, not reset", () => {
   // Processes come and go while the pane is open -- that is the normal case, since watching work start
   // and finish is the point of the view. Jumping back to the top on every spawn would make it unusable
@@ -35,7 +56,7 @@ test("when the last process goes, the pane closes rather than pointing at nothin
   // `paneHidden` goes back to the default here because there is nothing left to show in a pane.
   assert.deepEqual(reconcileFocus(pty(2, 3), 0),
     { mode: "dashboard", selected: -1, count: 0, query: "", paneHidden: true,
-      menuAt: 0, confirming: null });
+      menuAt: 0, confirming: null, menuActions: null });
 });
 
 test("reconciling keeps pty mode while there is still something to show", () => {
@@ -50,7 +71,13 @@ test("reconciling keeps pty mode while there is still something to show", () => 
 // to reach a destructive action, and a third to confirm it.
 
 const ENTER = String.fromCharCode(13);
-const menu = (selected = 1, count = 3) => ({ mode: "dashboard", selected, count, query: "", paneHidden: true });
+//: A focus whose CALLER can perform everything. The offer is per-caller now -- `aify-env` can stop
+//: a process it owns but cannot restart a managed agent -- so a router test has to say what it is
+//: routing for, or it would be testing the attach-only default.
+const ALL_ACTIONS = ["attach", "restart", "stop"];
+const menu = (selected = 1, count = 3) => ({
+  mode: "dashboard", selected, count, query: "", paneHidden: true, menuActions: ALL_ACTIONS,
+});
 
 test("EVERY MODE SURVIVES A REDRAW -- the list of survivors was typed by hand and lost two", () => {
   // FOUND BY REVIEW WITHIN AN HOUR OF SHIPPING B6. `reconcileFocus` preserved `pty` and `picker` and
@@ -85,6 +112,30 @@ test("AN EMPTY LIST CLOSES THE MENU, because its actions all name a process", ()
   assert.equal(reconcileFocus({ mode: "picker", selected: 0, count: 1, query: "x" }, 0).mode, "picker");
 });
 
+test("A MENU OFFERS WHAT ITS CALLER CAN PERFORM, and attach alone by default", () => {
+  // `aify-env` can stop a process it owns and cannot RESTART a managed agent -- respawning is the
+  // service's business. A menu listing an action nobody wired would be a control that does nothing
+  // when chosen, which is the same defect as a field with no reader, seen from the other side.
+  assert.deepEqual(menuActionsIn({}), ["attach"], "the default offer is not the safe one");
+  assert.deepEqual(menuActionsIn({ menuActions: ["attach", "stop"] }), ["attach", "stop"]);
+
+  // AN UNKNOWN NAME IS DROPPED rather than offered: a caller that misspells one gets fewer choices,
+  // not a row whose Enter resolves to nothing.
+  assert.deepEqual(menuActionsIn({ menuActions: ["attach", "detonate"] }), ["attach"]);
+  assert.deepEqual(menuActionsIn({ menuActions: [] }), ["attach"], "an empty offer falls back");
+  assert.deepEqual(menuActionsIn({ menuActions: "stop" }), ["attach"], "a non-array offer falls back");
+});
+
+test("THE MENU CURSOR WRAPS ON THE OFFER, not on the vocabulary", () => {
+  // With two actions offered, moving up from the top must land on index 1 -- not on 2, which would
+  // point past the end of what this caller can do and resolve to nothing.
+  const two = { mode: "dashboard", selected: 0, count: 2, query: "", menuActions: ["attach", "stop"] };
+  const opened = routeKey("m", two).state;
+  assert.equal(routeKey(UP, opened).state.menuAt, 1);
+  assert.equal(routeKey(DOWN, opened).state.menuAt, 1);
+  assert.equal(routeKey(DOWN, routeKey(DOWN, opened).state).state.menuAt, 0, "it did not wrap at 2");
+});
+
 test("POSITIVE CONTROL: `m` opens the menu on a real selection", () => {
   const opened = routeKey("m", menu());
   assert.equal(opened.state.mode, "menu");
@@ -102,7 +153,7 @@ test("STOP IS NEVER REPORTED FROM ONE KEYSTROKE -- it becomes a QUESTION", () =>
   // The whole point. The caller cannot see `stop` until a `y` has been pressed, so there is no path
   // where a menu keystroke alone ends somebody's work.
   let state = routeKey("m", menu()).state;
-  while (MENU_ACTIONS[state.menuAt] !== "stop") state = routeKey(DOWN, state).state;
+  while (ALL_ACTIONS[state.menuAt] !== "stop") state = routeKey(DOWN, state).state;
   const chosen = routeKey(ENTER, state);
   assert.equal(chosen.action, "confirm:stop", "choosing stop reported it as done");
   assert.equal(chosen.state.mode, "confirm");
@@ -140,7 +191,7 @@ test("ATTACH NEEDS NO CONFIRMATION, so the guard is not just refusing everything
   assert.equal(needsConfirming("restart"), true);
 
   const opened = routeKey("m", menu()).state;
-  assert.equal(MENU_ACTIONS[opened.menuAt], "attach", "attach is no longer the resting choice");
+  assert.equal(ALL_ACTIONS[opened.menuAt], "attach", "attach is no longer the resting choice");
   const chosen = routeKey(ENTER, opened);
   assert.equal(chosen.action, "chose:attach");
   assert.equal(chosen.state.mode, "dashboard");
@@ -159,7 +210,7 @@ test("the menu wraps, like every other list on this screen", () => {
   let state = routeKey("m", menu()).state;
   assert.equal(state.menuAt, 0);
   state = routeKey(UP, state).state;
-  assert.equal(state.menuAt, MENU_ACTIONS.length - 1, "moving up from the top did not wrap");
+  assert.equal(state.menuAt, ALL_ACTIONS.length - 1, "moving up from the top did not wrap");
 });
 
 test("EVERY OTHER KEY IS SWALLOWED, so the list behind the menu cannot be acted on", () => {

@@ -68,7 +68,10 @@ const FLEET = [
 ];
 const withKeys = (view) => renderDashboard(
   { ...SNAPSHOT, processes: FLEET, nowMs: Date.now() },
-  { keys: { enabled: true, canQuit: true }, view: { rows: FLEET, query: "", ...view } },
+  // THE VIEW IS TOLD WHAT ITS CALLER OFFERS. The menu draws that, not the vocabulary, so a render
+  // test showing `stop` has to declare a caller that can perform one.
+  { keys: { enabled: true, canQuit: true },
+    view: { rows: FLEET, query: "", menuActions: ["attach", "restart", "stop"], ...view } },
 ).join("\n");
 
 test("THE MENU NAMES THE AGENT IT WILL ACT ON", () => {

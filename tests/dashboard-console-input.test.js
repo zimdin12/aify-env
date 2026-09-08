@@ -238,6 +238,9 @@ test("A CONFIRMED ACTION REACHES onAction, through the real key path", async () 
     clearScreen: false,
     intervalMs: 60_000,
     input,
+    // THE CALLER DECLARES WHAT IT CAN DO. The menu offers attach alone by default, so a test that
+    // exercises `stop` has to say its caller can perform one -- exactly as `daemon-view.mjs` does.
+    actions: ["attach", "restart", "stop"],
     onAction: (p) => performed.push(p),
     fetchImpl: async () => ({
       ok: true, status: 200, body: null,

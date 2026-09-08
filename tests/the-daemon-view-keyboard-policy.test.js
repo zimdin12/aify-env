@@ -60,6 +60,68 @@ test("Ctrl+C runs the DAEMON'S shutdown, not a view's exit", async () => {
   assert.deepEqual(stopped, ["keyboard"], "Ctrl+C did not stop the environment");
 });
 
+test("THE MENU OFFERS ONLY WHAT THIS TIER CAN DO -- stop, never restart", async () => {
+  // aify-env owns the processes, so it can stop one. It cannot RESTART a managed agent: respawning
+  // is the service's business and this tier has no primitive for it. Offering `restart` would put a
+  // row in the menu that does nothing when chosen, which is the same defect as a field with no
+  // reader, seen from the other side.
+  const s = spy();
+  await startDaemonView({
+    endpoint: "e", registryPath: "r", stdout: tty(), stdin: tty(), start: s.start,
+  });
+  assert.deepEqual(s.calls[0].actions, ["attach", "stop"]);
+});
+
+test("A CONFIRMED STOP REACHES THE RUNNER, which is the executor that was missing", async () => {
+  // Review's finding: the menu shipped with no handler in either entrypoint, so choosing `stop` and
+  // answering `y` performed nothing. This is the daemon half of the wiring -- the tui client cannot
+  // call a runner, it has to ask over HTTP, and that is its own path.
+  //
+  // WHAT REACHES HERE IS ALREADY CONFIRMED. `keys.mjs` turns a destructive choice into a question and
+  // reports nothing until `y`; the session resolves the target by IDENTITY against the current list.
+  // So this handler is handed a process the operator chose and that still exists, or is not called.
+  const s = spy();
+  const stopped = [];
+  await startDaemonView({
+    endpoint: "e", registryPath: "r", stdout: tty(), stdin: tty(), start: s.start,
+    runner: { stop: async (id) => { stopped.push(id); } },
+  });
+  assert.equal(typeof s.calls[0].onAction, "function", "the menu reaches no executor at all");
+
+  s.calls[0].onAction({ action: "stop", process: { id: "p2" } });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(stopped, ["p2"], "a confirmed stop did not reach the runner");
+});
+
+test("AN ACTION THIS TIER CANNOT PERFORM DOES NOTHING, rather than stopping something", async () => {
+  // The control for the handler above. A dispatcher that ran its one branch for every action would
+  // turn `restart` -- or anything a future caller adds -- into a stop, which is the worst possible
+  // way to be wrong about a verb.
+  const s = spy();
+  const stopped = [];
+  await startDaemonView({
+    endpoint: "e", registryPath: "r", stdout: tty(), stdin: tty(), start: s.start,
+    runner: { stop: async (id) => { stopped.push(id); } },
+  });
+  for (const action of ["restart", "attach", "detonate"]) {
+    s.calls[0].onAction({ action, process: { id: "p2" } });
+  }
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(stopped, [], "an action other than stop reached the runner's stop");
+});
+
+test("A RUNNER THAT REJECTS DOES NOT BECOME AN UNHANDLED REJECTION", async () => {
+  // This runs inside a `data` listener. A rejected stop must not take the view down on a keypress,
+  // and must not be swallowed into an unhandled rejection either.
+  const s = spy();
+  await startDaemonView({
+    endpoint: "e", registryPath: "r", stdout: tty(), stdin: tty(), start: s.start,
+    runner: { stop: async () => { throw new Error("already gone"); } },
+  });
+  assert.doesNotThrow(() => s.calls[0].onAction({ action: "stop", process: { id: "p2" } }));
+  await new Promise((r) => setImmediate(r));
+});
+
 test("`q` IS NOT WIRED, and that is what stops a stray keystroke reaping the fleet", async () => {
   // There is no view to leave here: this screen belongs to the running daemon, so "quit" could only
   // mean stopping it -- and that is Ctrl+C's job, held to one key nobody presses by accident.

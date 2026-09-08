@@ -32,7 +32,13 @@ function recordingFollower(log) {
 
 const procs = (...ids) => ids.map((id) => ({ id, label: `label-${id}` }));
 
-const session = (log) => new ConsoleSession({ endpoint: "http://x", makeFollower: recordingFollower(log) });
+//: Every action, because these tests exercise the whole menu. A real caller declares only what it
+//: can perform -- `aify-env` cannot restart a managed agent -- and the default is attach alone.
+const session = (log) => new ConsoleSession({
+  endpoint: "http://x",
+  makeFollower: recordingFollower(log),
+  actions: ["attach", "restart", "stop"],
+});
 
 //: A session whose console is OPEN, on a terminal wide enough to draw it. The pane defaults to
 //: HIDDEN and a hidden pane opens no follower, so every test about stream lifecycle needs one that
@@ -436,6 +442,23 @@ test("AN UNREPORTED VIEWPORT FAILS CLOSED, because a guard that passes on missin
 // -- the actions menu hands work OUT ---------------------------------------------------------------
 
 const ENTER = String.fromCharCode(13);
+
+/**
+ * Move the open menu onto `name` and choose it, or fail saying it was not on offer.
+ *
+ * BOUNDED, AND THAT IS THE POINT. These tests used `while (s.focus.menuAt !== 2)` loops, which HANG
+ * rather than fail when the action is not reachable -- and the moment the menu's offer became
+ * per-caller, they hung the whole suite instead of reporting anything. A test that cannot fail is
+ * bad; one that hangs is worse, because it takes every other test with it.
+ */
+const chooseAction = (s, name, offered = ["attach", "restart", "stop"]) => {
+  const want = offered.indexOf(name);
+  assert.notEqual(want, -1, `${name} is not in the offer this test declared`);
+  for (let step = 0; step < offered.length && s.focus.menuAt !== want; step += 1) s.handleInput(DOWN_);
+  assert.equal(s.focus.menuAt, want, `could not reach ${name} in the menu`);
+  return s.handleInput(ENTER);
+};
+
 const DOWN_ = String.fromCharCode(27) + "[B";
 
 test("A DESTRUCTIVE ACTION REACHES THE CALLER ONLY AFTER A YES", () => {
@@ -445,9 +468,8 @@ test("A DESTRUCTIVE ACTION REACHES THE CALLER ONLY AFTER A YES", () => {
   s.syncProcesses(procs("alpha", "bravo"));
   s.handleInput(DOWN_);
   s.handleInput("m");
-  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);   // to `stop`
 
-  const asked = s.handleInput(ENTER);
+  const asked = chooseAction(s, "stop");
   assert.equal(asked.perform, null, "the caller was handed a stop before it was confirmed");
   assert.equal(asked.action, "confirm:stop");
 
@@ -470,8 +492,7 @@ test("A CONFIRMED STOP FOLLOWS THE AGENT IT WAS OPENED ON, not the cursor", () =
     s.syncProcesses(rows);
     s.handleInput(DOWN_);                                  // bravo
     s.handleInput("m");
-    while (s.focus.menuAt !== 2) s.handleInput(DOWN_);      // stop
-    s.handleInput(ENTER);
+    chooseAction(s, "stop");
     return s;
   };
   const three = () => procs("alpha", "bravo", "charlie");
@@ -502,8 +523,7 @@ test("IF THE TARGET ITSELF IS GONE, THE ACTION IS REFUSED rather than redirected
   s.syncProcesses(procs("alpha", "bravo", "charlie"));
   s.handleInput(DOWN_);
   s.handleInput("m");
-  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);
-  s.handleInput(ENTER);
+  chooseAction(s, "stop");
 
   s.syncProcesses(procs("alpha", "charlie"));
   assert.equal(s.handleInput("y").perform, null, "the stop was redirected to a surviving agent");
@@ -517,8 +537,7 @@ test("NEGATIVE CONTROL: an unchanged list still stops the agent it named", () =>
   s.syncProcesses(procs("alpha", "bravo"));
   s.handleInput(DOWN_);
   s.handleInput("m");
-  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);
-  s.handleInput(ENTER);
+  chooseAction(s, "stop");
   s.syncProcesses(procs("alpha", "bravo"));
   assert.equal(s.handleInput("y").perform.process.id, "bravo");
 });
@@ -527,8 +546,7 @@ test("CANCELLING HANDS OUT NOTHING", () => {
   const s = shownSession([]);
   s.syncProcesses(procs("alpha", "bravo"));
   s.handleInput("m");
-  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);
-  s.handleInput(ENTER);
+  chooseAction(s, "stop");
   const cancelled = s.handleInput("n");
   assert.equal(cancelled.perform, null);
   assert.equal(cancelled.action, "confirm-cancel");
@@ -551,8 +569,7 @@ test("THE PROCESS IS RESOLVED WHEN THE ACTION IS, not looked up later", () => {
   s.syncProcesses(procs("alpha", "bravo", "charlie"));
   s.handleInput(DOWN_);
   s.handleInput("m");
-  while (s.focus.menuAt !== 2) s.handleInput(DOWN_);
-  s.handleInput(ENTER);
+  chooseAction(s, "stop");
   const done = s.handleInput("y");
   assert.equal(done.perform.process.id, "bravo");
   assert.equal(done.perform.process.label, "label-bravo", "an id was handed over without its row");
