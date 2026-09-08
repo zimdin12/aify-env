@@ -131,3 +131,55 @@ test("a forgotten terminal stops holding memory", async () => {
   sender.forget("t1");
   assert.equal(sender.pendingFor("t1"), null, "a dead terminal is still tracked");
 });
+
+test("A BURST OF CHUNKS BECOMES TWO POSTS, however big the burst is", async () => {
+  // THE RATIO IS THE POINT, and this file tested every other property of the sender without it.
+  // "One in flight per terminal, the rest coalesced" bounds aify-env's traffic against a service
+  // that is SINGLE-WORKER BY DESIGN: the post count follows how fast the service answers, not how
+  // fast the agent talks. A sender that queued one job per chunk would pass every other test here.
+  const { post, calls, gates } = controllablePost();
+  const sender = createOutputSender({ post, status: "attached" });
+
+  const BURST = 500;
+  sender.send("t1", "first");
+  await settle();
+  assert.equal(calls.length, 1, "the first chunk did not go out on its own");
+
+  for (let i = 0; i < BURST; i += 1) sender.send("t1", `c${i} `);
+  await settle();
+  assert.equal(calls.length, 1,
+    `${BURST} chunks arriving during one in-flight POST produced ${calls.length} POSTs; two in `
+    + "flight is enough to scramble the console, because the service assigns seq on ARRIVAL");
+
+  gates[0].resolve({});
+  await settle();
+  await settle();
+
+  // ONE more POST, carrying the whole burst. Not 500, and not one per chunk.
+  assert.equal(calls.length, 2,
+    `${BURST} coalesced chunks became ${calls.length - 1} POST(s) instead of exactly one`);
+  const carried = calls[1].body.output;
+  assert.ok(carried.startsWith("c0 "), "the burst did not start where it was produced");
+  assert.ok(carried.endsWith(`c${BURST - 1} `), "the burst lost its tail");
+  assert.equal(carried.length, [...Array(BURST).keys()].reduce((n, i) => n + `c${i} `.length, 0),
+    "the coalesced body is not the concatenation of every chunk in the burst");
+});
+
+test("AND A SERVICE THAT ANSWERS INSTANTLY DOES NOT COALESCE", async () => {
+  // NEGATIVE CONTROL for the ratio. A sender that ALWAYS batched would satisfy the test above while
+  // adding latency to every chunk on an idle console. The count has to follow the service's speed.
+  const calls = [];
+  const sender = createOutputSender({
+    post: (terminalId, body) => { calls.push(body.output); return Promise.resolve({}); },
+    status: "attached",
+  });
+
+  for (let i = 0; i < 5; i += 1) {
+    sender.send("t1", `c${i}`);
+    await settle();
+    await settle();
+  }
+  assert.equal(calls.length, 5,
+    `five chunks against an instant service became ${calls.length} POST(s); coalescing is supposed `
+    + "to be what a SLOW service costs, not a delay every console pays");
+});
