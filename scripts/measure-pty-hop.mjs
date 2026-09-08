@@ -63,6 +63,25 @@ const EXIT_TIMEOUT_MS = 5000;
 //: The sizes `pty-hop-child.mjs` pre-builds. Written in both places would be two sources for one
 //: fact, so a mismatch is REPORTED by the child rather than answered with the nearest payload.
 const PAINT_SIZES = [1024, 16 * 1024, 64 * 1024];
+//: The shape `freshToken` mints, so a reply can be recognised without knowing which one it is --
+//: which is what makes an UNREQUESTED one visible at all.
+const MARKER = /~[0-9a-f]{10}~/g;
+const MARKER_CHARS = 12;
+//: WHAT A PAINTED ROW LOOKS LIKE COMING BACK. The drain is measured in ROWS, not bytes, and that is
+//: forced by the transport rather than chosen: a ConPTY is a terminal, not a pipe. It renders the
+//: child's writes onto a 132x40 screen and emits its own updates, so a 64 KB paint comes back as at
+//: most a screenful -- a byte floor refused every real PTY run on the first attempt, which is the
+//: measurement telling me the semantics were wrong. Rows survive the rendering; bytes do not.
+const PAINTED_ROW = /row \d+ of a full-screen redraw/g;
+//: HOW MANY DISTINCT PAINTED ROWS MUST ARRIVE before a paint's timing is a sample. MEASURED, and
+//: the report prints the numbers it is set against: the fewest any iteration delivered is 14 / 39 /
+//: 39 through the PTY and 14 / 200 / 200 through the pipe, at 1 / 16 / 64 KB. Five is well clear of
+//: the smallest and far above the ZERO a terminator-only reply or a substituted payload produces.
+//:
+//: THE 39-VERSUS-200 IS THE TRANSFORMATION ITSELF, visible in the output. The pipe carries every row
+//: the child wrote; the ConPTY renders them onto a 40-row screen and emits that. Same child, same
+//: bytes offered, different observable -- which is why the drain is counted in rows and not bytes.
+const MIN_PAINTED_ROWS = 5;
 
 /** A token nothing hard-coded can hold, because it does not exist until this process runs. */
 function freshToken() {
@@ -99,8 +118,29 @@ class Peer {
     this.text = "";
     this.waiter = null;
     this.exited = null;
+    //: WHAT ARRIVED WHILE ONE REQUEST WAS OUTSTANDING. A reply that carries the terminator and none
+    //: of the paint is not a drain of that paint, and final-token membership alone admitted exactly
+    //: that -- review dropped the payload, kept the token, and all eight rows published. It also
+    //: admitted a substituted payload of the same length, which a byte count cannot tell apart and
+    //: the painted rows can.
+    this.window = "";
+    //: EVERY MARKER-SHAPED RUN THAT HAS ARRIVED, in order. One request should produce exactly one,
+    //: and it should be the one that was asked for. Counting them is what refuses a DUPLICATED reply
+    //: and a reply nobody requested, neither of which a per-request membership test can see.
+    this.markers = [];
+    let carry = "";
     subscribe((chunk) => {
-      this.text += String(chunk);
+      const text = String(chunk);
+      if (this.waiter) {
+        this.window += text;
+        if (this.window.length > 1000000) this.window = this.window.slice(-500000);
+      }
+      // OVERLAPPED, because a marker can straddle a chunk boundary and a scan of each chunk alone
+      // would miss it -- which would turn this ledger into a source of false refusals.
+      const scanned = carry + text;
+      for (const found of scanned.match(MARKER) || []) this.markers.push(found);
+      carry = scanned.slice(-(MARKER_CHARS - 1));
+      this.text += text;
       if (this.text.length > 1000000) this.text = this.text.slice(-500000);
       if (this.waiter && this.text.includes(this.waiter.needle)) {
         const settle = this.waiter;
@@ -111,9 +151,14 @@ class Peer {
     onExit((status) => { this.exited = status; });
   }
 
-  /** Write one request and wait for its wrapped token. Resolves NaN on the bound. */
+  /**
+   * Write one request and wait for its wrapped token.
+   *
+   * Answers `{ms, rows}`, or NaN milliseconds when nothing usable arrived in time.
+   */
   ask(request, token) {
     const needle = `~${token}~`;
+    this.window = "";
     // ARMED BEFORE THE WRITE. A reply to a small request can arrive inside the same tick the write
     // returns on, and a waiter installed afterwards would wait out the full bound for something that
     // had already come.
@@ -125,7 +170,23 @@ class Peer {
     });
     const started = process.hrtime.bigint();
     this._write(request + CR + LF);
-    return settled.then((at) => (typeof at === "bigint" ? Number(at - started) / 1e6 : NaN));
+    return settled.then((at) => {
+      const rows = new Set(this.window.match(PAINTED_ROW) || []).size;
+      if (typeof at !== "bigint") return { ms: NaN, rows };
+      const ms = Number(at - started) / 1e6;
+      // THE AGE DECIDES, NOT WHICH CALLBACK RAN FIRST. A reply delivered after the bound but before
+      // the deferred timer fired was accepted and aged -- review's completion at 6000ms on an
+      // injected clock published as 6000.000ms under a 5000ms deadline. A timer is a hint about
+      // elapsed time; the elapsed time is the fact.
+      //
+      // AND THIS GUARD SURVIVES ITS OWN MUTATION BATTERY, which is worth saying rather than hiding.
+      // Removing it changes nothing here, because on this host no reply is ever late and no timer is
+      // ever starved -- review reached the case with an INJECTED monotonic clock, which this file
+      // does not have. So it is a guard against a condition this file cannot currently produce, kept
+      // because the alternative is publishing a number aged past its own bound.
+      if (!(ms >= 0) || ms > REPLY_TIMEOUT_MS) return { ms: NaN, rows, aged: ms > REPLY_TIMEOUT_MS };
+      return { ms, rows };
+    });
   }
 
   sees(needle) {
@@ -143,27 +204,51 @@ class Peer {
   }
 }
 
-/** One request shape on one transport: its samples and its own rejections. */
+/** One request shape on one transport: its samples, its own rejections, and what it asked for. */
 class Arm {
-  constructor(transport, label, make, iterations) {
+  constructor(transport, label, make, iterations, expectBytes = 0) {
     this.transport = transport;
     this.label = label;
     this.make = make;
     this.iterations = iterations;
+    //: WHETHER THIS ARM ASKS FOR A PAINT AT ALL. The echo arm does not, so it is not held to the row
+    //: floor -- there is nothing for it to drain, and holding it there would refuse a correct run.
+    this.expectBytes = expectBytes;
+    //: THE FEWEST DISTINCT PAINTED ROWS EVERY ITERATION DELIVERED, reported so the floor below can
+    //: be seen to be clear of the real numbers rather than asserted to be.
+    this.minRows = Infinity;
     this.ms = [];
     this.timedOut = 0;
     this.badSpans = 0;
+    this.thinDrains = 0;
+    this.agedOut = 0;
     this.issued = 0;
+    this.tokens = [];
   }
 
   async run(peer) {
     for (let i = 0; i < this.iterations; i += 1) {
       const token = freshToken();
       this.issued += 1;
-      const elapsed = await peer.ask(this.make(token), token);
-      if (!Number.isFinite(elapsed)) { this.timedOut += 1; continue; }
-      if (!(elapsed > 0)) { this.badSpans += 1; continue; }
-      this.ms.push(elapsed);
+      this.tokens.push(`~${token}~`);
+      const { ms, rows, aged } = await peer.ask(this.make(token), token);
+      if (this.expectBytes) this.minRows = Math.min(this.minRows, rows);
+      // AGED AND NEVER-ARRIVED ARE DIFFERENT FACTS and are counted apart. Folded together, a run in
+      // which the deadline guard actually fired would be indistinguishable from one where a reply
+      // was simply lost -- and the guard's whole point is that those are not the same thing.
+      if (aged) { this.agedOut += 1; continue; }
+      if (!Number.isFinite(ms)) { this.timedOut += 1; continue; }
+      if (!(ms > 0)) { this.badSpans += 1; continue; }
+      // A REPLY IS NOT A DRAIN. Review answered a 64 KB paint request with the terminator alone, and
+      // separately with an unrelated payload of the same length, and every row published both times:
+      // the terminator says the child reached the end of its handler, not that the paint crossed the
+      // transport. Distinct PAINTED ROWS is the measure a terminal does not destroy, and it refuses
+      // both -- a substituted payload carries none of them.
+      if (this.expectBytes && rows < MIN_PAINTED_ROWS) {
+        this.thinDrains += 1;
+        continue;
+      }
+      this.ms.push(ms);
     }
   }
 }
@@ -213,6 +298,7 @@ function armsFor(transport) {
       `paint ${size >= 1024 ? `${size / 1024} KB` : `${size} B`}`,
       (token) => `P ${token} ${size}`,
       PAINT_ITERATIONS,
+      size,
     )),
   ];
 }
@@ -235,12 +321,34 @@ for (const [transport, open] of [["pty", openPtyPeer], ["pipe", openPipePeer]]) 
       refusals.push(`${transport} ${arm.label}: ${arm.timedOut} repl(ies) never arrived within `
         + `${REPLY_TIMEOUT_MS}ms and ${arm.badSpans} produced a span that is not positive`);
     }
+    if (arm.agedOut) {
+      refusals.push(`${transport} ${arm.label}: ${arm.agedOut} repl(ies) arrived AFTER the `
+        + `${REPLY_TIMEOUT_MS}ms bound while their timer had not yet run, so a starved loop was `
+        + "about to publish an aged sample as a fresh one");
+    }
+    if (arm.thinDrains) {
+      refusals.push(`${transport} ${arm.label}: ${arm.thinDrains} repl(ies) carried fewer than `
+        + `${MIN_PAINTED_ROWS} distinct painted rows (fewest seen: ${arm.minRows}), so the `
+        + "terminator arrived without the paint it terminates");
+    }
     // THE LEDGER HAS TO BALANCE, or requests are going somewhere this probe does not name.
-    const accounted = arm.ms.length + arm.timedOut + arm.badSpans;
+    const accounted = arm.ms.length + arm.timedOut + arm.badSpans + arm.thinDrains + arm.agedOut;
     if (accounted !== arm.issued) {
       refusals.push(`${transport} ${arm.label}: ${accounted} of ${arm.issued} requests accounted for`);
     }
     if (!arm.ms.length) refusals.push(`${transport} ${arm.label}: produced no usable sample`);
+  }
+  // ONE REPLY PER REQUEST, AND EACH THE ONE THAT WAS ASKED FOR. A per-request membership test cannot
+  // see a DUPLICATED reply or one nobody requested -- review published all eight rows with each --
+  // because both leave the needle it was looking for exactly where it looked. The ledger of every
+  // marker-shaped run that crossed the stream can see both.
+  const wanted = arms.flatMap((arm) => arm.tokens);
+  const got = peer.markers;
+  if (got.length !== wanted.length || got.some((mark, at) => mark !== wanted[at])) {
+    const extra = got.filter((mark) => !wanted.includes(mark));
+    refusals.push(`${transport}: ${got.length} replies crossed the stream for ${wanted.length} `
+      + `requests, ${extra.length} of them for a token never issued -- so a reply was duplicated, `
+      + "reordered, or invented, and no per-request check can see that");
   }
   if (foundAbsent) {
     refusals.push(`${transport}: a wrapped token nobody requested was found in the stream, so its `
@@ -279,6 +387,20 @@ for (const { transport, arms } of results) {
 
 const ptyEcho = median(results[0].arms[0].ms);
 const pipeEcho = median(results[1].arms[0].ms);
+lines.push("");
+lines.push("");
+lines.push("EVERY PAINT ARM DRAINED, and this is the number the floor is set against: the fewest");
+lines.push(`DISTINCT painted rows any single iteration delivered, against a floor of ${MIN_PAINTED_ROWS}.`);
+for (const { transport, arms } of results) {
+  const painted = arms.filter((arm) => arm.expectBytes)
+    .map((arm) => `${arm.label.trim()} ${arm.minRows}`);
+  lines.push(`  ${transport.padEnd(6)} ${painted.join(", ")}`);
+}
+lines.push("A terminator-only reply delivers ZERO, and so does a payload of the same length carrying");
+lines.push("something else -- which a byte count could not tell apart. What is NOT bound is the paint's");
+lines.push("exact bytes: a ConPTY renders onto a 132x40 screen and emits its own updates, so the bytes");
+lines.push("out are not the bytes in, and for a TIMING of a payload of that size the content is not");
+lines.push("what the number depends on.");
 lines.push("");
 lines.push("EVERY SPAN IS ONE PROCESS'S CLOCK AT BOTH ENDS, which is why these are ROUND TRIPS and");
 lines.push("not one-way times. Producer-to-handler is bounded ABOVE by an echo row and is NOT half of");
