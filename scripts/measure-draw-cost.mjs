@@ -72,6 +72,10 @@ async function drawOnce(fetchImpl, count) {
     endpoint: ENDPOINT, registryPath: REGISTRY_PATH,
     write: (t) => { bytes += t.length; }, clearScreen: false, once: true,
     columns: 132, rows: 40, fetchImpl,
+    // SEALED. `collectSnapshot` reads the host's real credential store by default, so without this
+    // the number below is decided partly by whatever this machine happens to hold -- an ambient
+    // input, and one an injected fetch does not close. (External review of c74927a.)
+    readCredentialStore: () => [],
   });
   return bytes;
 }

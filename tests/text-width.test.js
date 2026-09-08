@@ -20,6 +20,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
 import { clip, clipToWidth, pad, width, widthMemoSizeForTests } from "../lib/text-width.mjs";
 
 const ESC = String.fromCharCode(27);
@@ -235,4 +238,41 @@ test("a string too long to be worth remembering is measured but not cached", () 
   assert.equal(before, 0, "the cache did not reset, so a full one would hide the growth");
   assert.equal(width(long), 1200, "the long string was measured wrongly");
   assert.equal(widthMemoSizeForTests(), before, "an over-long string was cached anyway");
+});
+
+test("a cached key does not hold on to the string it was sliced out of", () => {
+  // THE BOUND THAT WAS NOT A BOUND. This cache limits entries and key length, and both limits were
+  // being honoured while 32 entries held 40,634,424 bytes: V8 represents `big.slice(a, b)` as a
+  // SlicedString pointing AT `big`, so caching a 120-unit slice of a one-MiB line kept the MiB.
+  // A pane line is a slice of terminal output and a process title is a slice of a JSON body, so
+  // this is how nearly every key arrives. Found by external review of c74927a.
+  //
+  // A SEPARATE PROCESS, because measuring retention needs `--expose-gc` and the suite must not run
+  // with a global `gc()` available to every other test.
+  //
+  // NO ASSERTION ON MILLISECONDS. This host's own notes record wall-clock A/B as unmeasurable here;
+  // retained bytes after a forced collection are not a timing measurement and do not have that
+  // problem.
+  const probe = new URL("./fixtures/width-memo-retention-probe.mjs", import.meta.url);
+  const done = spawnSync(process.execPath, ["--expose-gc", fileURLToPath(probe)], {
+    encoding: "utf8",
+  });
+  assert.equal(done.status, 0, `the probe did not run: ${done.stderr}`);
+
+  const seen = JSON.parse(done.stdout);
+  assert.equal(seen.entries, 32, "the probe cached a different number of entries than it reports on");
+
+  // POSITIVE CONTROL that the probe allocated what it claims: without this, a probe that built no
+  // parents at all would report a tiny retention and pass for the wrong reason.
+  assert.equal(seen.parentBytes, 32 * 1024 * 1024 * 2, "the probe did not allocate the parents");
+
+  // The owned keys are ~2 bytes a unit plus map overhead. A tenth of one parent is far below the
+  // 40MB the defect held and far above anything the keys themselves need, so this discriminates
+  // without depending on an exact allocator.
+  const ceiling = 1024 * 1024 * 2 / 10;
+  assert.ok(
+    seen.attributableBytes < ceiling,
+    `the cache retained ${seen.attributableBytes} bytes for ${seen.logicalUnits} units of text; `
+    + "it is holding the parents of the strings it was given",
+  );
 });
