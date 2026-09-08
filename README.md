@@ -155,6 +155,7 @@ decisions rather than bindings.
 | `p` | show or hide the console pane |
 | `enter` | attach -- every keystroke then goes into that agent's terminal |
 | `m` | actions for the selected agent |
+| `s` | start an agent this host knows that has no worker |
 | `ctrl+]` | back, from anywhere |
 | `q` | leave, where leaving is offered |
 

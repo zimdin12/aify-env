@@ -50,8 +50,17 @@ test("POSITIVE CONTROL: the process table renders at all", () => {
 });
 
 test("with a keyboard, the view says what to press", () => {
-  const view = render({}, { keys: { enabled: true, canQuit: true } });
-  for (const hint of ["move", "jump", "find", "attach"]) {
+  // RENDERED WIDE, and that is a real change rather than a test bent to fit. There are eight hints
+  // now, and at the default 100 columns they do not all fit -- so the line drops whole items by
+  // priority instead of being cut, and `1-9 jump` is the first to go. This test asks whether the
+  // view NAMES its bindings; the width at which they all fit is what
+  // `the-keys-are-documented.test.js` measures, including which one survives at each size.
+  //
+  // Left at 100 this would have gone red for a reason unrelated to what it is testing, and the
+  // tempting repair -- deleting `jump` from the list -- would have stopped anyone noticing if the
+  // digits were dropped from the view entirely.
+  const view = render({}, { columns: 140, keys: { enabled: true, canQuit: true } });
+  for (const hint of ["move", "jump", "find", "attach", "actions", "start"]) {
     assert.match(view, new RegExp(hint), `the hint line does not mention ${hint}`);
   }
   assert.match(view, /1-9/, "the jump keys are not named");
