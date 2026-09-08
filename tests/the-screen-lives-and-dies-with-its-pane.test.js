@@ -19,7 +19,7 @@ import test from "node:test";
 
 import { OutputFollower } from "../lib/output-follower.mjs";
 import { dataFrame, namedFrame } from "../lib/sse-frames.mjs";
-import { loadEmulator } from "../lib/screen-emulator.mjs";
+import { ScreenEmulator, loadEmulator } from "../lib/screen-emulator.mjs";
 
 const ESC = String.fromCharCode(27);
 
@@ -345,6 +345,42 @@ test("NEGATIVE CONTROL: a meta that repeats the SAME size does not disturb the s
   await settle();
   assert.match(f.screen.rows()[0], /^kept/, "an identical meta disturbed the screen");
   f.stop();
+});
+
+test("A RESIZE CANNOT OVERTAKE OUTPUT ALREADY QUEUED, on either arm", async () => {
+  // REVIEW'S WITNESS, and it is the sharpest kind: an ORACLE rather than an expectation. `write` is
+  // asynchronous and `resize` was not, so a resize issued while a write sat in the parser's queue
+  // applied ahead of it. At 80 columns write `ESC[1;61HOLD`, resize to 40, write again -- a correctly
+  // ordered terminal leaves row 1 blank, and the follower left an `O` at column 40.
+  //
+  // TWO ARMS, because they fail for different reasons: with the emulator already loaded the resize
+  // jumps a queued write; during the import the backlog held only TEXT, so the replay painted old
+  // bytes at the newest width. The second is why the pending queue carries resizes as events.
+  const oracle = await ScreenEmulator.create({ cols: 80, rows: 4 });
+  assert.ok(oracle, "@xterm/headless is absent, so this comparison cannot run");
+  await oracle.write(`${ESC}[1;61HOLD`);
+  oracle.resize({ cols: 40, rows: 4 });
+  await oracle.write(`${ESC}[2;1HNEW`);
+  const want = oracle.rows()[0];
+  oracle.dispose();
+  assert.equal(want.trim(), "", "the oracle is not blank, so this test is measuring the wrong thing");
+
+  for (const [label, build] of [
+    ["import-time backlog", following],
+    ["screen already loaded", followingSlowly],
+  ]) {
+    const f = build(
+      META({ cols: 80, rows: 4 }),
+      dataFrame(`${ESC}[1;61HOLD`),
+      namedFrame("meta", { cols: 40, rows: 4, truncated: false, replayBytes: 65536 }),
+      dataFrame(`${ESC}[2;1HNEW`),
+    );
+    await f.start();
+    await settle();
+    assert.equal(f.screen.rows()[0], want, `${label}: a resize overtook queued output`);
+    assert.match(f.screen.rows()[1], /^NEW/, `${label}: the later write did not land`);
+    f.stop();
+  }
 });
 
 test("STOP DISPOSES THE SCREEN, so it cannot outlive its pane", async () => {
