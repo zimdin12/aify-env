@@ -186,7 +186,7 @@ class Arm {
       // COMPLETION WALL TIME is the whole batch OFFERED back to back with only the LAST callback
       // awaited. It is not a parse cost and this file no longer calls it one. The
       // deferral is then paid a handful of times for the run instead of once per write, so what is
-      // left is the work.
+      // left is completion wall time, which is not the same thing.
       // THE SAME ADMISSION AS THE BATCH, because guarding one phase and not the other leaves the
       // published column unguarded. A synchronous callback can finish past this bound and then clear
       // a timer the blocked loop never ran -- so the AGE decides, not the callback -- and a duration
@@ -358,8 +358,8 @@ const MIN_GROWTH = 2;
 const small = ARMS[1].parseMs;
 const large = ARMS[3].parseMs;
 // FINITE AND POSITIVE FIRST, because an inequality between two invalid numbers is not a comparison:
-// `-5 >= -5 * 2` is true, so two equal NEGATIVE costs satisfied a growth check meant to prove the
-// timings track the work.
+// `-5 >= -5 * 2` is true, so two equal NEGATIVE costs satisfied a growth check meant to show the
+// arms differ.
 if (![small, large].every((ms) => Number.isFinite(ms) && ms > 0)) {
   refusals.push(`the growth check compared ${small} and ${large}, at least one of which is not a `
     + `positive finite number, so the inequality between them means nothing`);
@@ -386,10 +386,15 @@ if (refusals.length) {
   const latencies = ARMS.map((arm) => percentile(arm.ms, 0.5));
   const spread = Math.max(...latencies) - Math.min(...latencies);
   if (spread < 2) {
-    console.log(`THE LATENCY COLUMN IS THE SCHEDULER: every arm reads about the same `
-      + `${latencies[0].toFixed(1)}ms whatever its size (spread ${spread.toFixed(2)}ms), which on `
-      + `this host is the ~15.6ms timer granularity showing through xterm's deferred callback. A `
-      + `browser defers differently, so it does not transfer.`);
+    // OBSERVATIONAL, NOT AN ATTRIBUTION. The earlier version named this host's ~15.6ms timer
+    // granularity whenever the spread was small -- and review's zero-delay control published
+    // 0.1/0.1/0.2/0.4ms under a sentence calling 0.1ms that granularity. Agreement between the arms
+    // says the reading does not depend on payload size; it does not say what the reading IS.
+    console.log(`THE LATENCY COLUMN DOES NOT VARY WITH PAYLOAD SIZE HERE: every arm reads about `
+      + `${latencies[0].toFixed(1)}ms (spread ${spread.toFixed(2)}ms) across a 100x range of bytes, `
+      + `so whatever it is measuring is not the payload. What it IS is not established by this `
+      + `probe; on this host a reading near 15.6ms would be consistent with the timer granularity `
+      + `xterm's deferred callback runs on, and a reading far from it would not.`);
   } else {
     console.log(`THE LATENCY COLUMN VARIES ACROSS THE ARMS HERE (${latencies.map((ms) => ms.toFixed(1)).join(", ")}ms, `
       + `spread ${spread.toFixed(2)}ms), so it is NOT simply this host's timer floor and no single `

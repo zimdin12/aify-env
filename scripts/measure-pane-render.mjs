@@ -102,6 +102,14 @@ class Pane {
     this.writeMs = [];
     this.rowsMs = [];
     this.colourMs = [];
+    // PAIRED PER ITERATION, because adding two independent medians is not the median of the sum --
+    // review's anticorrelated carrier printed 100.1ms from two 50ms medians while every joined
+    // iteration was 50.2ms.
+    this.plainPathMs = [];
+    this.colourPathMs = [];
+    this.notApplied = 0;
+    this.emptyExtractions = 0;
+    this.foreignInTimed = 0;
     this.drewCapture = false;
     this.foreignFound = false;
     this.stillPainting = false;
@@ -130,9 +138,29 @@ class Pane {
       this.foreignFound = first.join(LF).includes("<never-written-by-any-pane>");
 
       for (let i = 0; i < REPAINTS; i += 1) {
-        this.writeMs.push(await this.#timeAsync(() => screen.write(chunk)));
-        this.rowsMs.push(this.#time(() => screen.rows()));
-        this.colourMs.push(this.#time(() => screen.rows({ color: true })));
+        // EVERY RETURN VALUE IS CHECKED, outside the bracket that timed it. `write` answers whether
+        // it APPLIED, and the extractions answer with the screen -- all three were discarded, so
+        // 200 writes returning false, or 200 extractions returning [], published four geometries.
+        const write = await this.#timeAsync(() => screen.write(chunk));
+        if (!write.value) this.notApplied += 1;
+
+        const plain = this.#time(() => screen.rows());
+        const colour = this.#time(() => screen.rows({ color: true }));
+        for (const extraction of [plain, colour]) {
+          if (!Array.isArray(extraction.value) || extraction.value.length !== this.rows) {
+            this.emptyExtractions += 1;
+          } else if (extraction.value.join(LF).includes("<never-written-by-any-pane>")) {
+            this.foreignInTimed += 1;
+          }
+        }
+
+        this.writeMs.push(write.ms);
+        this.rowsMs.push(plain.ms);
+        this.colourMs.push(colour.ms);
+        // THE TWO PATHS, EACH PAIRED WITH ITS OWN WRITE. The follower selects ONE `rows({ color })`
+        // call -- they are alternatives, not stages -- so a path is a write plus one extraction.
+        this.plainPathMs.push(write.ms + plain.ms);
+        this.colourPathMs.push(write.ms + colour.ms);
       }
       // AND THE EXTRACTION STILL PRODUCES A SCREEN AT THE END, so the timed loop did not leave the
       // emulator in a state where `rows()` returns nothing.
@@ -142,23 +170,25 @@ class Pane {
     } finally {
       screen.dispose();
     }
-    for (const list of [this.writeMs, this.rowsMs, this.colourMs]) {
+    for (const list of [this.writeMs, this.rowsMs, this.colourMs,
+                        this.plainPathMs, this.colourPathMs]) {
       this.bad += list.filter((ms) => !Number.isFinite(ms) || ms <= 0).length;
       list.sort((a, b) => a - b);
     }
   }
 
+  /** Time the work AND hand back what it returned, so the caller can judge it outside the bracket. */
   #time(work) {
     const started = process.hrtime.bigint();
-    work();
-    return Number(process.hrtime.bigint() - started) / 1e6;
+    const value = work();
+    return { ms: Number(process.hrtime.bigint() - started) / 1e6, value };
   }
 
   /** The WAIT, not the parse: what a repaint spends before the screen is readable. */
   async #timeAsync(work) {
     const started = process.hrtime.bigint();
-    await work();
-    return Number(process.hrtime.bigint() - started) / 1e6;
+    const value = await work();
+    return { ms: Number(process.hrtime.bigint() - started) / 1e6, value };
   }
 }
 
@@ -180,10 +210,13 @@ const CHUNK = capturedFrame();
 const PANES = [new Pane({ cols: 80, rows: 24 }), new Pane({ cols: 132, rows: 26 }),
                new Pane({ cols: 132, rows: 40 }), new Pane({ cols: 200, rows: 50 })];
 
-const rows = [`ONE PANE REPAINT, against the ${BUDGET_MS}ms budget \`paneRepaintMs\` schedules it on`,
-  "  pane        write p50   rows p50   colour p50   all three   % of budget",
-  "              (AWAITED,   (extract)  (extract +                            ",
-  "               floored)               SGR)                                 "];
+const rows = [`WHAT A PANE'S EMULATE-AND-EXTRACT COSTS. \`paneRepaintMs\` is ${BUDGET_MS}ms, which is`,
+  "the CADENCE a repaint is scheduled on -- not an observed end-to-end completion budget, and these",
+  "are not compared against it.",
+  "",
+  "  pane        write p50    plain p50   colour p50   write+plain   write+colour",
+  "              (awaited)    (extract)   (extract     (PAIRED per   (PAIRED per",
+  "                                        + SGR)       iteration)    iteration)"];
 const refusals = [];
 
 for (const pane of PANES) {
@@ -191,10 +224,14 @@ for (const pane of PANES) {
   const write = percentile(pane.writeMs, 0.5);
   const plain = percentile(pane.rowsMs, 0.5);
   const colour = percentile(pane.colourMs, 0.5);
-  const total = write + plain + colour;
+  // THE COMBINED FIGURES ARE MEDIANS OF PAIRED SUMS, not sums of medians. Adding two independent
+  // p50s is not the p50 of the sum: review's anticorrelated carrier printed 100.1ms from two 50ms
+  // medians while every joined iteration was 50.2ms.
+  const plainPath = percentile(pane.plainPathMs, 0.5);
+  const colourPath = percentile(pane.colourPathMs, 0.5);
   rows.push(`  ${`${pane.cols}x${pane.rows}`.padEnd(10)}  ${write.toFixed(4).padStart(9)}  `
-    + `${plain.toFixed(4).padStart(9)}  ${colour.toFixed(4).padStart(11)}  `
-    + `${total.toFixed(4).padStart(9)}  ${(100 * total / BUDGET_MS).toFixed(2).padStart(10)}%`);
+    + `${plain.toFixed(4).padStart(11)}  ${colour.toFixed(4).padStart(11)}  `
+    + `${plainPath.toFixed(4).padStart(12)}  ${colourPath.toFixed(4).padStart(13)}`);
   // ONLY WHERE THE CHECK IS AVAILABLE. A 24-row pane cannot show row 25, so demanding it there
   // refuses a pane for being small rather than for being wrong -- and a control that fires on a
   // correct run is one somebody switches off. The panes that CAN be checked are counted below, so
@@ -213,6 +250,19 @@ for (const pane of PANES) {
   if (pane.bad) {
     refusals.push(`${pane.cols}x${pane.rows}: ${pane.bad} timing(s) were zero, negative or not a `
       + `number`);
+  }
+  if (pane.notApplied) {
+    refusals.push(`${pane.cols}x${pane.rows}: ${pane.notApplied} timed write(s) reported that they `
+      + `did NOT apply, so the emulator did not take the bytes those samples timed`);
+  }
+  if (pane.emptyExtractions) {
+    refusals.push(`${pane.cols}x${pane.rows}: ${pane.emptyExtractions} timed extraction(s) did not `
+      + `return a full ${pane.rows}-row screen, so those samples timed something that produced `
+      + `nothing`);
+  }
+  if (pane.foreignInTimed) {
+    refusals.push(`${pane.cols}x${pane.rows}: a string no pane wrote appeared in `
+      + `${pane.foreignInTimed} timed extraction(s)`);
   }
 }
 
@@ -236,6 +286,13 @@ if (refusals.length) {
   console.log(`${checked.length} of ${PANES.length} panes are tall enough to show the capture's own `
     + `row ${CAPTURE_ROW} and all of them carry its text there; `
     + `${tooShort.map((p) => `${p.cols}x${p.rows}`).join(", ")} cannot and is not counted as a check.`);
+  console.log("");
+  console.log("WITHDRAWN: \"one repaint is a fifth of its budget\". That summed the write, the plain "
+    + "extraction and the coloured one, and the real path does none of that: `output-follower.mjs` "
+    + "finishes the parse, THEN notifies progress, and `dashboard.mjs` schedules the repaint after -- "
+    + "different lifecycle phases -- and the follower selects ONE `rows({ color })` call, so plain "
+    + "and coloured are ALTERNATIVES rather than stages. The two paired columns are the two "
+    + "alternatives; neither is compared against the cadence, which is not a completion budget.");
   console.log("WHAT THIS IS NOT: the cost of DRAWING those rows into a terminal, which is the frame "
     + "probe's subject, nor a browser. This is the pane's own emulate-and-extract, which is the work "
     + "that had no number.");
