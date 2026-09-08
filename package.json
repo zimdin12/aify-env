@@ -18,7 +18,9 @@
     "test": "node tests/run-in-a-temp-root.mjs"
   },
   "optionalDependencies": {
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "@xterm/headless": "5.5.0",
+    "@xterm/addon-unicode11": "0.8.0"
   },
   "exports": {
     "./package.json": "./package.json",
