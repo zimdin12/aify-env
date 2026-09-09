@@ -212,13 +212,38 @@ test("A SESSION CONTROL CARRIES NO BRIEF, AND THAT IS THE MOST EXPENSIVE LINE IN
   assert.equal(call.options.method, "POST");
   assert.equal(call.url, "http://127.0.0.1:8800/api/v1/sessions/s1%2F2/control");
   const sent = JSON.parse(call.options.body);
-  assert.deepEqual(Object.keys(sent).sort(), ["action", "from_agent"],
-    `the control carried a field beyond the action and the actor: ${call.options.body}`);
+  // THE WHOLE FIELD SET, listed rather than spot-checked, because what this test exists to stop
+  // is a field ARRIVING -- `body` above all. `only_if_no_live_session` joined it deliberately in
+  // v0.6.3: it carries the caller's precondition to the authority so a start cannot become a stop
+  // of a worker that appeared in between.
+  assert.deepEqual(Object.keys(sent).sort(),
+    ["action", "from_agent", "only_if_no_live_session"],
+    `the control carried a field beyond the action, the actor and the precondition: ${call.options.body}`);
+  assert.equal(sent.only_if_no_live_session, false,
+    "an unconditional control must say so explicitly, not by omission");
   assert.equal(sent.action, "restart");
   // THE ACTOR IS THIS TIER, BY NAME. Never a person, and never read from an environment variable:
   // a control attributed to whichever agent happened to be in `AIFY_AGENT_ID` puts somebody else's
   // name on a restart they did not ask for.
   assert.equal(sent.from_agent, "aify-env");
+});
+
+test("THE PRECONDITION TRAVELS when the caller states one", async () => {
+  // `AgentStarter` picks a session BECAUSE the listing showed no live one, and that reading is a
+  // round trip old by the time this request lands. The flag is how the authority gets to
+  // re-evaluate the belief against the rows it is about to act on; a client-side re-read only
+  // shortens the window. Review traced the race and asked for exactly this shape.
+  const fetchImpl = fakeFetch({ json: { ok: true } });
+  await api(fetchImpl).controlSession("s1", "restart", { onlyIfNoLiveSession: true });
+  assert.equal(JSON.parse(fetchImpl.calls[0].options.body).only_if_no_live_session, true);
+});
+
+test("AND ANYTHING BUT A LITERAL TRUE IS UNCONDITIONAL, because a truthy value is not a claim", async () => {
+  // A guard that passes on a missing input is decoration, and so is one that fires on a stray
+  // string. The route stops a restart; "yes" arriving from a config file must not turn one off.
+  const fetchImpl = fakeFetch({ json: { ok: true } });
+  await api(fetchImpl).controlSession("s1", "restart", { onlyIfNoLiveSession: "yes" });
+  assert.equal(JSON.parse(fetchImpl.calls[0].options.body).only_if_no_live_session, false);
 });
 
 test("the control's action travels, so a future verb cannot silently become a restart", async () => {

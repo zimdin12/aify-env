@@ -39,8 +39,11 @@ function fakeApi({ roster, sessions, control = { ok: true }, throwsOn = "" } = {
       if (throwsOn === "sessionsFor") throw new Error("connection refused");
       return sessions;
     },
-    async controlSession(sessionId, action) {
-      calls.push({ call: "controlSession", sessionId, action });
+    async controlSession(sessionId, action, options = {}) {
+      // THE OPTIONS ARE RECORDED, because the starter's whole reason for choosing this session is
+      // a precondition it must carry to the authority -- and a double that drops the third argument
+      // cannot tell a start that states it from one that does not.
+      calls.push({ call: "controlSession", sessionId, action, options });
       if (throwsOn === "controlSession") throw new Error("connection refused");
       return control;
     },
@@ -56,7 +59,12 @@ test("POSITIVE CONTROL: a startable agent is started, and the control names its 
   const api = fakeApi({ roster: ONE_STARTABLE, sessions: ONE_DEAD_SESSION });
   const result = await new AgentStarter({ api, machineId: HERE }).start("ef-tester");
   assert.deepEqual(result, { started: true, agentId: "ef-tester", sessionId: "s1", problem: "" });
-  assert.deepEqual(api.calls.at(-1), { call: "controlSession", sessionId: "s1", action: "restart" });
+  assert.deepEqual(api.calls.at(-1), {
+    call: "controlSession", sessionId: "s1", action: "restart",
+    // THE RACE REVIEW TRACED: this session was chosen because the listing showed nothing live, and
+    // that reading is a round trip old. The authority re-evaluates the belief before it acts.
+    options: { onlyIfNoLiveSession: true },
+  });
 });
 
 test("THE ROSTER IS READ AGAIN AT THE MOMENT OF ACTING, not taken from the caller's snapshot", async () => {
@@ -102,14 +110,23 @@ test("NO CONTROL IS SENT FOR AN AGENT THIS HOST MAY NOT START", async () => {
 });
 
 test("THE CONTROL CARRIES NO BRIEF, because a brief becomes a message the new worker answers", async () => {
-  // `controlSession` takes a session and an action and nothing else, so a caller CANNOT supply a
-  // body. Testing the signature is testing the guarantee: a third argument that silently became an
-  // `initial_message` is the defect, and it cannot exist if there is nowhere to put one.
+  // THE GUARANTEE IS THAT NO BRIEF CAN TRAVEL, and the mechanism used to be that `controlSession`
+  // had nowhere to put one. v0.6.3 gave it a third argument for the caller's PRECONDITION, so the
+  // guarantee is now stated directly instead of resting on an absent parameter: the options object
+  // carries exactly the precondition, and nothing anywhere in the call names a body.
+  //
+  // The defect this guards has a measurement behind it: 21 self-issued spawn requests on this fleet,
+  // each 45-75s after a restart, because the service turns a non-empty `body` into a real message
+  // and the fresh worker answered it.
   const api = fakeApi({ roster: ONE_STARTABLE, sessions: ONE_DEAD_SESSION });
   await new AgentStarter({ api, machineId: HERE }).start("ef-tester");
   const sent = api.calls.at(-1);
-  assert.deepEqual(Object.keys(sent).sort(), ["action", "call", "sessionId"],
-    `the control carried more than a session and an action: ${JSON.stringify(sent)}`);
+  assert.deepEqual(Object.keys(sent).sort(), ["action", "call", "options", "sessionId"],
+    `the control carried more than a session, an action and a precondition: ${JSON.stringify(sent)}`);
+  assert.deepEqual(Object.keys(sent.options).sort(), ["onlyIfNoLiveSession"],
+    `the options carried more than the precondition: ${JSON.stringify(sent.options)}`);
+  assert.doesNotMatch(JSON.stringify(sent), /body|message|brief/i,
+    `something brief-shaped reached the control: ${JSON.stringify(sent)}`);
 });
 
 test("A REFUSAL ANSWERED WITH 200 IS STILL A REFUSAL", async () => {
