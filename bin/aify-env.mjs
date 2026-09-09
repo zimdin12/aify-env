@@ -297,7 +297,16 @@ function currentAdvertisementBody() {
     exists: existsSync,
     isWsl: hostIsWsl(),
   });
-  return { hostname: hostname(), kind };
+  // The plugin is a second heartbeat writer. Its metadata replaces the stored object,
+  // so omitting this pair erases the full advertiser's currency observation.
+  const codeOnDisk = PACKAGE_BUILD.onDisk();
+  return {
+    hostname: hostname(), kind,
+    metadata: {
+      instance: BUILD,
+      ...(codeOnDisk === null ? {} : { codeOnDisk }),
+    },
+  };
 }
 
 /** The key for the service a plugin serves, resolved PER CALL through the same store-aware path the
