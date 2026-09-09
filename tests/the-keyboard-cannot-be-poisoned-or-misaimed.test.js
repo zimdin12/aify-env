@@ -177,6 +177,42 @@ test("ATTACHING FROM THE MENU GOES TO THE AGENT THE MENU NAMED, not to the curso
   assert.equal(s.selected?.id, "p2", "the keyboard went to the row that took the target's place");
 });
 
+test("AND ON A PANE THAT IS ALREADY FOLLOWING SOMETHING, which is where the reconcile undid it", () => {
+  // THE SAME CHOICE, WITH THE PANE REVEALED, and it went to a different agent. The test above
+  // passes on a HIDDEN pane -- nothing is being followed, so nothing reconciles -- and review
+  // found the case it cannot reach: reveal the pane, let the list shift so the pane is following
+  // p3, and the menu's identity choice is overwritten on the way out.
+  //
+  // `attach` is in RESELECTING_ACTIONS, so `syncProcesses` runs straight after the menu block,
+  // and its rule for a pty-mode pane is to keep the keyboard on the process it is ALREADY bound
+  // to when rows shift. That rule protects an existing binding; an explicit Attach is a NEW one.
+  const { s } = session(FLEET);
+  s.handleInput(ENTER);                            // attach to p1, revealing the pane
+  s.handleInput(String.fromCharCode(29));     // back to the dashboard
+  s.handleInput(ESC + "[B");                       // cursor to p2
+  s.handleInput("m");                              // menu bound to p2
+  assert.equal(s.actionTargetId, "p2", "positive control: the menu did not bind a subject");
+  s.syncProcesses(FLEET.slice(1));                 // p1 exits; the pane follows p3 now
+  assert.equal(s.watchedId, "p3", "positive control: the pane really did shift under the cursor");
+  const result = s.handleInput(ENTER);             // Enter on `attach`
+  assert.equal(result.action, "attach");
+  assert.equal(s.selected?.id, "p2", "the keyboard went to the agent the MENU named");
+  assert.equal(s.watchedId, "p2", "and the pane follows that agent, not the one it was on");
+});
+
+test("A REVEALED PANE ATTACHING TO WHAT IT IS ALREADY WATCHING KEEPS WATCHING IT", () => {
+  // The control for the fix above: closing the old binding on every menu attach would also close
+  // one the operator did not change, so this asks for the no-op case and expects continuity.
+  const { s } = session(FLEET);
+  s.handleInput(ENTER);
+  s.handleInput(String.fromCharCode(29));
+  s.handleInput("m");                              // menu bound to p1, which is what we watch
+  const result = s.handleInput(ENTER);
+  assert.equal(result.action, "attach");
+  assert.equal(s.selected?.id, "p1");
+  assert.equal(s.watchedId, "p1", "the pane still follows the agent it was already on");
+});
+
 test("A TARGET THAT VANISHED REFUSES THE ATTACH, rather than taking whoever replaced it", () => {
   // Gone means refused, exactly as it does for stop. Attaching to whichever row moved into that
   // position is the same wrong-subject bug in a harmless-looking costume: the operator types into
