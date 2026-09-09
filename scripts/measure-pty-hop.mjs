@@ -257,7 +257,13 @@ class Arm {
     const { ms } = await peer.ask(`I ${token} ${this.expectBytes}`, token);
     if (!Number.isFinite(ms)) return false;
     const said = peer.window.match(/maxrow=(\d+)/);
-    this.maxRow = said ? Number(said[1]) : 0;
+    // A BOUND MUST BE A REAL ROW NUMBER, not merely a positive one. `Number()` of a 400-digit run
+    // is `Infinity`, which passed `> 0` and then admitted EVERY row-shaped string as in range --
+    // review substituted rows 900 to 904 behind that bound and all eight numeric figures published.
+    // `Number.isSafeInteger` is the honest test: the answer has to be a row this screen could have,
+    // and anything else STOPS the run rather than becoming a bound that binds nothing.
+    const answer = said ? Number(said[1]) : 0;
+    this.maxRow = Number.isSafeInteger(answer) && answer > 0 ? answer : 0;
     return this.maxRow > 0;
   }
 

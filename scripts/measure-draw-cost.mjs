@@ -62,7 +62,14 @@ const ROWS = 40;
 //: A FRAME THIS RENDERER DOES NOT DRAW IS REFUSED AND NAMED, rather than interpreted. If it
 //: ever starts emitting one of these, the run says which -- and that is the failure anybody
 //: would want from a probe whose figures are attributed to it.
-const FORBIDDEN_CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f]/g;
+//:
+//: AND C1 IS A CONTROL RANGE TOO, which this missed. Review appended U+009B -- CSI, the single
+//: character an 8-bit terminal reads as ESC-bracket -- followed by 2J, then U+009B and H, to a
+//: roster of content-valid rows: eight numeric rows published, while the real headless parser
+//: at 132x40 interprets those exact admitted bytes as an entirely blank viewport. That is the
+//: ESC-erase hole again, arriving through the other encoding of the same sequence. The refusal
+//: runs to U+009F, so it covers the whole block rather than the one code point demonstrated.
+const FORBIDDEN_CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/g;
 //: LF ALONE, because CR is refused above -- an `\r?` here would be unreachable and would read as though
 //: a CRLF frame were expected.
 const NEWLINE = /\n/;

@@ -44,7 +44,23 @@ export async function receiptFor(fn, moduleUrl) {
   const path = fileURLToPath(moduleUrl);
   const bytes = await readFile(path);
   const text = bytes.toString("utf8");
-  const body = String(fn);
+  // THE INTRINSIC, NOT WHATEVER THE OBJECT SAYS ABOUT ITSELF. `String(fn)` consults the object:
+  // an own `toString`, or a `Symbol.toPrimitive`, decides the text that gets hashed and looked for
+  // below -- so a substitute that never calls the real function can hand back the real function's
+  // source and publish. Review drove exactly that through both probes: forged `toString` and forged
+  // `Symbol.toPrimitive`, module and body digests equal to the real control's, `declaredHere` true.
+  // `Function.prototype.toString.call` reads the function's own source text and cannot be answered
+  // by the object under test.
+  //
+  // THIS FIXES THE SPOOF, NOT PROVENANCE IN GENERAL. Intrinsic source membership is still narrower
+  // than resolved-export identity, than the identity of the object actually invoked, and than the
+  // provenance of what that object depends on. The receipt claims the first only.
+  //
+  // AND IT FAILS CLOSED ON A NON-FUNCTION. `Function.prototype.toString` throws on one, and an
+  // empty body would otherwise be found in every module -- `includes("")` is true -- so a callable
+  // object that is not a function would have published with the strongest possible receipt.
+  const isFunction = typeof fn === "function";
+  const body = isFunction ? Function.prototype.toString.call(fn) : "";
   return {
     name: typeof fn?.name === "string" ? fn.name : "",
     module: path,
@@ -53,7 +69,7 @@ export async function receiptFor(fn, moduleUrl) {
     bodyChars: body.length,
     // THE LINK THAT MATTERS. A function handed in from somewhere else hashes differently above and
     // is not found here, whatever name it answers to.
-    declaredHere: text.includes(body),
+    declaredHere: isFunction && body.length > 0 && text.includes(body),
   };
 }
 
