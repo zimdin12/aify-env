@@ -261,6 +261,63 @@ test("input, resize and stop reach the host and are reported", async () => {
   assert.equal(stop.api.reports[0].terminalStatus, "stopped");
 });
 
+test("A REFUSED WRITE IS REPORTED AS FAILED, not as delivered", async () => {
+  // FOUND BY REVIEW 2026-09-09 and NOT a regression -- it reproduces at the env base too.
+  // `Runner.write` answers `{ok:false, error}` for an unknown handle and for a process with no
+  // input channel, and this handler discarded that and reported `completed` / `attached`. A
+  // keystroke the runner rejected was reported to the service as delivered.
+  const book = createHandleBook();
+  await run({ handles: book });
+  const refusing = fakeProcesses();
+  refusing.write = (id, data) => {
+    refusing.calls.writes.push({ id, data });
+    return { ok: false, error: `process ${id} has no input channel` };
+  };
+  const write = await run({
+    handles: book, processes: refusing,
+    control: control({ action: "input", body: "hello" }),
+  });
+  assert.equal(write.result.outcome, "refused");
+  assert.match(write.result.detail, /no input channel/);
+  assert.equal(write.api.reports[0].status, "failed");
+});
+
+test("A REFUSED RESIZE IS REPORTED AS FAILED, so no geometry is stored that nothing accepted", async () => {
+  // The service records the REQUESTED geometry on a completed resize, so a `completed` here
+  // stores a width the pty rejected -- and `Runner.resize`'s own comment says the console then
+  // reflows a screen the process is still painting at the old size.
+  const book = createHandleBook();
+  await run({ handles: book });
+  const refusing = fakeProcesses();
+  refusing.resize = (id, cols, rows) => {
+    refusing.calls.resizes.push({ id, cols, rows });
+    return { ok: false, error: `process ${id} has no terminal to resize` };
+  };
+  const resize = await run({
+    handles: book, processes: refusing,
+    control: control({ action: "resize", cols: 120, rows: 40 }),
+  });
+  assert.equal(resize.result.outcome, "refused");
+  assert.match(resize.result.detail, /no terminal to resize/);
+  assert.equal(resize.api.reports[0].status, "failed");
+});
+
+test("A RUNNER THAT ANSWERS NOTHING IS STILL A SUCCESS, so the guard fires on a CLAIM", async () => {
+  // The control. `refusalFrom` refuses only an explicit `{ok:false}`: a collaborator that returns
+  // undefined has made no claim about the write, and treating silence as failure would refuse
+  // every substitute that does not answer -- including this file's own default double.
+  const book = createHandleBook();
+  await run({ handles: book });
+  const quiet = fakeProcesses();
+  quiet.write = (id, data) => { quiet.calls.writes.push({ id, data }); };
+  const write = await run({
+    handles: book, processes: quiet,
+    control: control({ action: "input", body: "hello" }),
+  });
+  assert.equal(write.result.outcome, "completed");
+  assert.equal(write.api.reports[0].terminalStatus, "attached");
+});
+
 test("an action this host does not implement is NAMED, not dropped", async () => {
   // A control the service is waiting on and never hears about is indistinguishable from a slow host.
   const { result, api } = await run({ control: control({ action: "teleport" }) });
