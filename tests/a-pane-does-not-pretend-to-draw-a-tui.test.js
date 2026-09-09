@@ -186,3 +186,49 @@ test("R8: THE NOTICE NAMES THE COMMAND THAT WORKS, and promises nothing Enter do
   const anonymous = b.view({ height: 4, width: 60 }).join(" ");
   assert.match(anonymous, /aify-env attach <agent>/);
 });
+
+// ── the refusal the INPUT GATE reads ────────────────────────────────────────────────────────────
+
+// EVERY BRANCH THAT SHOWS A NOTICE MUST ALSO SAY SO, because `output-follower.mjs`'s
+// `paneProblem()` is what `console-session.mjs`'s `inputIsLive()` gates keystrokes on. Review
+// measured the hole on 2026-09-09: clean metadata, no emulator, the pane rendering "live TUI --
+// this pane cannot draw it", `paneProblem()` returning "", and `x` forwarded to a live worker.
+// The gate knew ONE of the three reasons this pane refuses.
+
+test("A PAINTING PROCESS WITH NO EMULATOR REFUSES INPUT, not just the picture", () => {
+  const buffer = new PaneBuffer();
+  buffer.append(`${ESC}[2;5Hframe`);
+  assert.equal(buffer.isPainting(), true);
+  assert.match(seen(buffer), /cannot draw it/, "the pane shows the notice");
+  assert.notEqual(buffer.refusalReason(null), "", "and the gate is told the pane is refusing");
+});
+
+test("AND WITH AN EMULATOR IT DOES NOT REFUSE, so the gate is not simply always closed", () => {
+  // The control this pair needs: a refusal that fires for everything would close input for ever
+  // and satisfy the assertion above.
+  const buffer = new PaneBuffer();
+  buffer.append(`${ESC}[2;5Hframe`);
+  assert.equal(buffer.refusalReason({ rows: ["frame"], problem: "" }), "");
+});
+
+test("A CONCEALING LOG REFUSES INPUT TOO, and that branch was silent as well", () => {
+  const buffer = new PaneBuffer();
+  buffer.append(`${ESC}[8mSYNTHETIC_HIDDEN\n`);
+  assert.match(seen(buffer), /cannot draw it/, "the pane refuses to print concealed bytes");
+  assert.notEqual(buffer.refusalReason(null), "", "and the gate hears about it");
+});
+
+test("AN UNTRUSTWORTHY SCREEN STILL REFUSES, which is the branch the gate already knew", () => {
+  const buffer = new PaneBuffer();
+  buffer.append(`${ESC}[2;5Hframe`);
+  assert.equal(buffer.refusalReason({ rows: [], problem: "waiting for a full repaint" }),
+               "waiting for a full repaint");
+});
+
+test("POSITIVE CONTROL: an ordinary log refuses nothing", () => {
+  // Without this, a `refusalReason` that returned a reason for every buffer would pass all four.
+  const buffer = new PaneBuffer();
+  buffer.append("building...\nok\n");
+  assert.equal(buffer.refusalReason(null), "");
+  assert.match(seen(buffer), /building/, "and the pane shows the log");
+});
