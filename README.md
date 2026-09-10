@@ -88,7 +88,9 @@ other.
 A running daemon keeps the code it loaded at boot, so an update reaches it only when it restarts.
 Stopping it takes its processes with it, and the next instance reaps anything a hard kill left behind.
 
-### Optional Herdr terminals
+### Optional Herdr attachment, not integrated mode
+
+The full env-first workspace, native available-agent list, automatic workspace lifecycle and aify-aware cold restore are **not implemented**. Implementation is on hold while plugin-style and other extension options are evaluated. See [the integration boundary](docs/HERDR.md#full-integration-remains-blocked) before choosing this optional adapter.
 
 `aify-env herdr <process-id-or-label>` opens an existing worker in a new Herdr workspace. With no argument it offers a numbered picker. This is a Windows PowerShell adapter for Herdr 0.9.0. Both servers must already be running, and `AIFY_ENV_ENDPOINT` and `HERDR_SOCKET_PATH` must explicitly name them. Neither server is started or stopped by this command.
 

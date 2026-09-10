@@ -2,6 +2,12 @@
 
 This optional command opens an existing aify-env terminal-backed worker in a new Herdr workspace. It does not start workers, install software, start either server, stop the daemon, or own the fleet.
 
+## Full integration remains blocked
+
+The requested integrated mode would launch Herdr with the actual env daemon in the first workspace, list available agents before they have terminals, start them through the service, synchronize worker workspaces on spawn and kill, and preserve aify identity and native context on cold restore. The command below does not implement that mode.
+
+Stock Herdr 0.9.0 builds its native agent list from existing terminal panes. Its native restore constructs agent CLI commands rather than restoring aify-owned launches. Full integration is on hold while extension options are evaluated, including an external controller and upstream extension points. The manual adapter is not its replacement or completion; retaining stock Herdr does not establish that a permanent fork is the only alternative.
+
 ## Requirements and usage
 
 The supported configuration is Windows, Herdr 0.9.0 protocol 22, and PowerShell as Herdr's pane shell. Configure this in Herdr's own configuration before starting Herdr:

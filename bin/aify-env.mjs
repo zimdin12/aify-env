@@ -712,9 +712,8 @@ server.listen(port, HOST, async () => {
   // leftover reap could be killed by it moments later. After LISTENING, because a plugin that claims
   // a spawn needs this host able to run it.
   //
-  // THE CALL LIVES IN `lib/plugin-bootstrap.mjs` so it can be tested. This file cannot be imported
-  // without starting the environment, so anything that can fail in here is only ever proven by
-  // running the daemon -- which nobody does in a test.
+  // The bootstrap test evaluates these statements without importing the daemon or binding a port.
+  // Keep host identity in this payload so every plugin receives the canonical machine id.
   try {
     const host = new PluginHost({
       processes: new PluginProcesses(runner),
@@ -731,6 +730,10 @@ server.listen(port, HOST, async () => {
       build: pluginsForServices,
       shared: {
         version: VERSION,
+        machineId: hostIdentityFacts({
+          platform: process.platform, hostname: hostname(), env: process.env,
+          exists: existsSync, isWsl: hostIsWsl(),
+        }).machineId,
         // Resolved when asked rather than captured: a registry edit or a rotated key must reach a
         // running plugin without a restart.
         advertisement: async () => currentAdvertisementBody(),
