@@ -151,6 +151,7 @@ const SUBCOMMANDS = {
   // that started it. `claude-aify --shared` is one line calling this.
   run: "./aify-env-run.mjs",
   credential: "./aify-env-credential.mjs",
+  herdr: "./aify-env-herdr.mjs",
 };
 const firstArg = args[0];
 if (firstArg && !firstArg.startsWith("-")) {

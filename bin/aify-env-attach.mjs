@@ -51,7 +51,13 @@ async function post(path, body) {
   } catch { /* the stream is the instrument that reports a dead connection */ }
 }
 
-const wanted = process.argv.slice(2).find((arg) => !arg.startsWith("-")) ?? "";
+const args = process.argv.slice(2);
+const exactId = args[0] === '--id';
+if (exactId && (args.length !== 2 || !args[1])) {
+  say('Usage: aify-env attach --id <process-id>');
+  process.exit(64);
+}
+const wanted = exactId ? args[1] : args.find((arg) => !arg.startsWith("-")) ?? "";
 
 let processes;
 try {
@@ -62,7 +68,7 @@ try {
   process.exit(69);
 }
 
-const target = resolveAttachTarget(processes, wanted);
+const target = resolveAttachTarget(processes, wanted, { exactId });
 if (target.error) {
   say(`aify-env attach: ${target.error}`);
   if (target.fix) say(`  ${target.fix}`);
