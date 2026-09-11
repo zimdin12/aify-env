@@ -35,9 +35,11 @@ test("the plugin's request carries the key and refuses to follow a redirect", as
 });
 
 test("the daemon's advertisement fetch refuses to follow a redirect", () => {
-  const site = DAEMON.indexOf('headers["X-API-Key"] = String(apiKey);');
+  const transport = fs.readFileSync(path.join(ROOT, "lib", "post-advertisement.mjs"), "utf8");
+  assert.match(DAEMON, /post: postAdvertisement/);
+  const site = transport.indexOf('headers["X-API-Key"] = String(apiKey);');
   assert.ok(site > 0, "the advertisement's key header is where this test expects it");
-  const fetchCall = DAEMON.slice(site, site + 500);
+  const fetchCall = transport.slice(site, site + 500);
   assert.match(fetchCall, /redirect: "manual"/, "the fetch right after it sets redirect: manual");
 });
 

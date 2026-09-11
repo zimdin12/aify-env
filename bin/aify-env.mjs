@@ -37,7 +37,10 @@
 // `AIFY_NO_DASHBOARD=1` opts out. What the view shows about AGENTS is relayed from each service and
 // attributed to it -- this environment knows which processes it started, and alive is not working.
 
+import { postAdvertisement } from "../lib/post-advertisement.mjs";
 import { DEFAULT_PORT, portFromArgs } from "../lib/port-argument.mjs";
+import { instanceContextArgument } from "../lib/instance-context.mjs";
+import { prepareInstance, publishInstanceReady } from "../lib/instance-bootstrap.mjs";
 import { USAGE, asksForHelp, asksForVersion, refuseUnknownFlag } from "../lib/usage.mjs";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -120,6 +123,9 @@ const BUILD = PACKAGE_BUILD.boot;
 const HOST = "127.0.0.1";
 
 const args = process.argv.slice(2);
+let contextPath = null;
+try { contextPath = instanceContextArgument(args); }
+catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }
 // ASKING FOR HELP MUST NEVER BE A SIDE EFFECT, and here it started a daemon. See `lib/usage.mjs`.
 if (asksForHelp(args)) {
   process.stdout.write(`${USAGE}
@@ -203,12 +209,15 @@ const force = args.includes("--force");
 // PARSED AND JUDGED IN `lib/port-argument.mjs`, which is where it can be tested: importing this
 // file starts a daemon. `--port` with nothing after it used to reach `listen()` as NaN and die
 // with an uncaught ERR_SOCKET_BAD_PORT -- a stack trace for a typo (external review, Round 8).
-const parsedPort = portFromArgs(args, DEFAULT_PORT);
+const parsedPort = portFromArgs(args, contextPath ? 0 : DEFAULT_PORT);
 if (parsedPort.error) {
   process.stderr.write(`aify-env: ${parsedPort.error}` + String.fromCharCode(10));
   process.exit(2);
 }
 const port = parsedPort.port;
+let instanceContext = null;
+try { if (contextPath) instanceContext = await prepareInstance(contextPath, process.env); }
+catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }
 
 const chr10 = String.fromCharCode(10);
 /** SSE frames end with a BLANK line: two newlines. Named so nothing has to escape them. */
@@ -218,7 +227,7 @@ const chr10 = String.fromCharCode(10);
 // The in-memory registry cannot answer for an instance that has already died, and every agent such an
 // instance started is still running with nothing able to name them. The record is the authority, and
 // the next instance cleans up from it.
-const OWNED_FILE = process.env.AIFY_ENV_PROCESS_RECORD || join(homedir(), ".aify", "env-processes.json");
+const OWNED_FILE = instanceContext?.processRecord ?? (process.env.AIFY_ENV_PROCESS_RECORD || join(homedir(), ".aify", "env-processes.json"));
 
 // REAP ONLY ONCE THE PORT IS OURS. Everything in the record belongs to whichever instance wrote it,
 // and it is an ORPHAN only if nobody is still serving. Holding the port is what proves that.
@@ -590,6 +599,10 @@ let viewOnly = false;
 let stopAdvertising = null;
 server.on("error", async (failure) => {
   if (failure?.code === "EADDRINUSE") {
+    if (instanceContext) {
+      process.stderr.write(`dedicated_port_in_use: ${HOST}:${port}; incumbent left untouched\n`);
+      process.exit(69);
+    }
     // TAKE OVER, rather than refuse. Operator ruling: starting the environment means this one serves.
     // The predecessor's processes are not abandoned -- they are in the record, and this instance reaps
     // from it after the port is ours, which is precisely why the reap moved.
@@ -706,7 +719,10 @@ server.listen(port, HOST, async () => {
   const support = terminalSupport();
   // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
   // reapLeftovers.
-  await reapLeftovers();
+  if (instanceContext) {
+    try { publishInstanceReady(instanceContext, { pid: process.pid, envInstance: runner.instance(), port: bound.port, build: BUILD }); }
+    catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }
+  } else await reapLeftovers();
 
   // START THE SERVICE PLUGINS, and only now: a plugin claims work, and work claimed before the
   // leftover reap could be killed by it moments later. After LISTENING, because a plugin that claims
@@ -714,7 +730,7 @@ server.listen(port, HOST, async () => {
   //
   // The bootstrap test evaluates these statements without importing the daemon or binding a port.
   // Keep host identity in this payload so every plugin receives the canonical machine id.
-  try {
+  if (!instanceContext) try {
     const host = new PluginHost({
       processes: new PluginProcesses(runner),
       // NOT the environment id: its shape is a service's convention, and the plugin derives it from
@@ -816,37 +832,12 @@ sweepTimer.unref();
 // The timer is `unref`'d exactly like the sweep above: a daemon whose last outstanding work is a
 // heartbeat should still be able to exit.
 
-const ADVERTISE = advertisingEnabled(process.env.AIFY_ADVERTISE);
+const ADVERTISE = !instanceContext && advertisingEnabled(process.env.AIFY_ADVERTISE);
 const ADVERTISE_MS = Number(process.env.AIFY_ADVERTISE_MS || 30_000);
 const REDETECT_MS = Number(process.env.AIFY_ADVERTISE_REDETECT_MS || 300_000);
-const REGISTRY_FILE = process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json");
+const REGISTRY_FILE = instanceContext?.serviceRegistry ?? (process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json"));
 
-/**
- * POST one advertisement. Injected into `advertiseTo`, which is otherwise pure.
- *
- * The key is an ARGUMENT, resolved by `credentialFor` from the names the registry declares. It sent
- * none at all until 2026-08-30, so turning `API_KEY` on 401'd every advertisement -- and the daemon
- * reported `advertising: true` through all of it while the bridge stood down. `X-API-Key` is the
- * header the service accepts (`service/main.py`); an empty key sends no header rather than an empty
- * one, because a blank credential is a 401 with a more confusing cause.
- */
-async function postAdvertisement(url, body, apiKey = "") {
-  const headers = { "content-type": "application/json" };
-  // SENT EXACTLY AS RESOLVED. This trimmed, which would put a DIFFERENT key on the wire from the one
-  // the store holds -- and the resulting 401 would have no visible cause on either side. The
-  // resolver validates the bytes and refuses anything with surrounding whitespace, so by the time a
-  // key reaches here there is nothing left to tidy and tidying it can only introduce a mismatch.
-  if (String(apiKey || "") !== "") headers["X-API-Key"] = String(apiKey);
-  return fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    // The key must never follow a redirect: a 3xx from the endpoint would carry X-API-Key to
-    // wherever it pointed. The bridge applies the same policy at every one of its fetch sites.
-    redirect: "manual",
-    signal: AbortSignal.timeout(5000),
-  });
-}
+// Advertisement transport is inert until the dedicated-mode gate permits a beat.
 
 let lastDetectedAt = 0;
 let detectedRuntimes = [];

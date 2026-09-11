@@ -44,7 +44,8 @@ const KNOWN_CROSSINGS = {
     + "is the service's, but the PATH SHAPE is aify-comms' API -- a second aify- service with a "
     + "different shape would not be reachable. The real fix is for the registry to declare each "
     + "service's heartbeat path, which is a cross-repo contract change rather than an edit here.",
-  "bin/aify-env.mjs":
+  // Same pre-existing transport crossing, extracted without changing its protocol.
+  "lib/post-advertisement.mjs":
     "Sends the credential as `X-API-Key`. The registry declares which ENV VARS hold a key "
     + "(`keyEnv`) but not the header it travels in, so this host hardcodes aify-comms' choice and a "
     + "service using `Authorization: Bearer` would not be reachable. FOUND BY THIS GATE on its "
