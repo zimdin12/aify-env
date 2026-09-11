@@ -1,5 +1,6 @@
 // Real daemon tests run only after assignment-before-resume in the audited Windows Job.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
@@ -13,7 +14,12 @@ const repo = path.resolve(import.meta.dirname, '../..');
 const supervisor = path.join(import.meta.dirname, 'herdr-owned-processes.ps1');
 const powershell = path.join(process.env.SYSTEMROOT || 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
 const supervised = process.argv[3] === '--owned-job';
-const root = supervised ? process.argv[5] : path.join(repo, '.local/herdr-dedicated-env', randomUUID());
+// SCRATCH GOES TO TEMP, NOT INTO THE REPO. This defaulted to `<repo>/.local/...` and left one
+// untracked UUID directory per run in the working tree. That is the shape aify-comms' CLAUDE.md
+// records as the `.monitor/` trap: the gates walk the FILESYSTEM, so a directory `git status` habits
+// skip is still counted by every census and line-count walk, and it read four files high once.
+// A fixture's scratch is not evidence and has no business in the tree.
+const root = supervised ? process.argv[5] : path.join(os.tmpdir(), 'aify-herdr-dedicated-env', randomUUID());
 const mode = process.argv[2] || 'daemon';
 assert.equal(process.platform, 'win32', 'Windows owned Job is required; no unsupervised fallback');
 fs.mkdirSync(root, { recursive: true });
