@@ -145,28 +145,34 @@ try {
     const bad = instanceFixture(root); Object.assign(bad.context, patch); bad.save(); await refused(bad);
   }
   await refused(instanceFixture(root), ['--force']);
-  await refused(instanceFixture(root), [], 'instance_context', { AIFY_ADVERTISE: '1' });
+  // A REGISTERED SERVICE IS ADMITTED. This asserted the opposite -- any service refused the whole
+  // instance -- which is what left a dedicated env unable to locate aify-comms and therefore unable
+  // to start anything. An instance context binds a lifetime; it does not make this a lesser
+  // environment. A registry it cannot READ is still refused, one line below.
   const registry = instanceFixture(root);
-  fs.writeFileSync(registry.context.serviceRegistry, '{"version":1,"services":{"bad":{}}}');
-  await refused(registry, [], 'scoped_service_contract_required');
+  fs.writeFileSync(registry.context.serviceRegistry, '{"version":1,"services":{"aify-comms":{"endpoint":"http://127.0.0.1:8800"}}}');
+  await owner(registry); await ready(registry);
+  const unreadable = instanceFixture(root);
+  fs.writeFileSync(unreadable.context.serviceRegistry, '{ not json');
+  await refused(unreadable, [], 'readable service registry required');
   // B1: only registry contents change during authorization; the context stays identical.
   const race = instanceFixture(root);
   const originalContext = fs.readFileSync(race.file, 'utf8');
   let changedDuringAuthorization = false;
   await owner(race, true, () => {
     assert.deepEqual(JSON.parse(fs.readFileSync(race.context.serviceRegistry)).services, {});
-    fs.writeFileSync(race.context.serviceRegistry, '{"version":1,"services":{"forbidden":{}}}');
+    fs.writeFileSync(race.context.serviceRegistry, '{ mangled during authorization');
     changedDuringAuthorization = true;
   });
   const raced = daemon(['--instance-context', race.file]);
   await until(() => raced.child.exitCode !== null || fs.existsSync(race.context.readinessEndpoint), 'B1 admission outcome');
   assert.equal(changedDuringAuthorization, true);
   assert.equal(fs.readFileSync(race.file, 'utf8'), originalContext);
-  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(race.context.serviceRegistry)).services), ['forbidden']);
+  assert.equal(fs.readFileSync(race.context.serviceRegistry, 'utf8'), '{ mangled during authorization');
   events.push({ registryChangedDuringAuthorization: true, exitCode: raced.child.exitCode, output: raced.output,
     readyPublished: fs.existsSync(race.context.readinessEndpoint) });
-  assert.equal(raced.child.exitCode, 2, 'B1: registry made nonempty during authorization must refuse, not publish readiness');
-  assert.match(raced.output, /scoped_service_contract_required/);
+  assert.equal(raced.child.exitCode, 2, 'B1: a registry damaged during authorization must refuse, not publish readiness');
+  assert.match(raced.output, /readable service registry required/);
   assert.deepEqual(fs.readdirSync(race.context.root).sort(), ['instance.json', 'services.json']);
   const unknown = instanceFixture(root); await refused(unknown, [], 'instance_context');
   const stranger = instanceFixture(root); await owner(stranger, false); await refused(stranger);

@@ -730,7 +730,9 @@ server.listen(port, HOST, async () => {
   //
   // The bootstrap test evaluates these statements without importing the daemon or binding a port.
   // Keep host identity in this payload so every plugin receives the canonical machine id.
-  if (!instanceContext) try {
+  // A DEDICATED INSTANCE STARTS THEM TOO. Was `if (!instanceContext)`, which left it with no `agents`
+  // capability, so the picker answered 503 beside a service that was registered and healthy.
+  try {
     const host = new PluginHost({
       processes: new PluginProcesses(runner),
       // NOT the environment id: its shape is a service's convention, and the plugin derives it from
@@ -832,7 +834,9 @@ sweepTimer.unref();
 // The timer is `unref`'d exactly like the sweep above: a daemon whose last outstanding work is a
 // heartbeat should still be able to exit.
 
-const ADVERTISE = !instanceContext && advertisingEnabled(process.env.AIFY_ADVERTISE);
+// AN INSTANCE DESCRIBES THE HOST LIKE ANY OTHER: an instance context binds a LIFETIME to a Herdr, it
+// does not make this a lesser environment. Was `!instanceContext && ...`; see the dedicated tests.
+const ADVERTISE = advertisingEnabled(process.env.AIFY_ADVERTISE);
 const ADVERTISE_MS = Number(process.env.AIFY_ADVERTISE_MS || 30_000);
 const REDETECT_MS = Number(process.env.AIFY_ADVERTISE_REDETECT_MS || 300_000);
 const REGISTRY_FILE = instanceContext?.serviceRegistry ?? (process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json"));
