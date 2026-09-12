@@ -16,6 +16,7 @@ import test from "node:test";
 
 import {
   LIVE_SESSION_STATUSES,
+  notOffered,
   NOT_STARTABLE_STATUSES,
   STARTABLE_STATUSES,
   restartTargetFor,
@@ -201,3 +202,60 @@ test("A LISTING THAT IS NOT A LIST REFUSES, and says the service did not answer 
 });
 
 console.log("startable-agents.test.js: all assertions passed");
+
+// ── THE RULE HAS TO BE VISIBLE, OR IT IS INDISTINGUISHABLE FROM NO RULE.
+//
+// The operator, 2026-09-12: "in aify-env start function i see residents for some reason. it should
+// offer only managed options. or it should say it is resident and spawning it should make it
+// managed type automatically (you choose which is better solution)."
+//
+// Residents were ALREADY refused -- measured against their live roster the same day: 38 agents, 18
+// offered and every one `sessionMode: managed`, 12 residents refused. So the answer to the choice is
+// the first option, and it needed no code. What was missing is any way to SEE it: the list draws
+// what it kept and never what it refused, so a correct rule and an absent one look the same.
+//
+// AUTO-CONVERTING WAS THE WRONG HALF OF THE CHOICE, and this project has the incident for it. Two of
+// the residents on that host were ONLINE; starting one as managed forks a twin holding the same
+// session handle, which on 2026-08-31 left messages refused and relayed for hours with every status
+// badge green. The service also already owns resident->managed flips, so a second flip here would be
+// two implementations of one decision.
+
+test("RESIDENTS ARE REFUSED, and the refusal is counted where a view can draw it", () => {
+  const roster = {
+    agents: {
+      "sc-manager": { sessionMode: "resident", status: "online", machineId: "win32:host" },
+      "llama-manager": { sessionMode: "resident", status: "offline", machineId: "win32:host" },
+      "sc-tester": { sessionMode: "managed", status: "offline", machineId: "win32:host" },
+      "ef-senior-dev": { sessionMode: "managed", status: "working", machineId: "win32:host" },
+      // ANOTHER MACHINE'S AGENT IS NOT "NOT OFFERED", it is not this host's business. Counting it
+      // would make every machine look like it was hiding the fleet.
+      "elsewhere": { sessionMode: "resident", status: "offline", machineId: "linux:other" },
+    },
+  };
+  const host = { machineId: "win32:host" };
+
+  assert.deepEqual(startableAgents(roster, host).map((r) => r.id), ["sc-tester"]);
+
+  const skipped = notOffered(roster, host);
+  assert.deepEqual(skipped, [
+    { count: 2, why: "resident sessions are the operator's to launch" },
+    { count: 1, why: "a live worker is mid-turn" },
+  ], "the refusals are not counted, or another host's agent was counted as missing");
+});
+
+test("the summary's words are the REFUSAL's own, so the two cannot drift apart", () => {
+  // A second vocabulary beside the one that decides would drift invisibly -- the counts would still
+  // add up. Driven by asking the deciding function directly for the same agent.
+  const agent = { sessionMode: "resident", status: "offline", machineId: "m" };
+  const [group] = notOffered({ agents: { a: agent } }, { machineId: "m" });
+  assert.equal(group.why, startabilityOf(agent, { machineId: "m" }).reason);
+});
+
+test("NOTHING TO SUMMARISE IS AN EMPTY LIST, never a row saying zero", () => {
+  assert.deepEqual(notOffered({ agents: { a: { sessionMode: "managed", status: "offline", machineId: "m" } } }, { machineId: "m" }), []);
+  // AND AN UNKNOWN HOST IDENTITY SUMMARISES NOTHING, matching the offer's own guard: an empty
+  // machine id must not make every agent on the fleet read as refused here.
+  assert.deepEqual(notOffered({ agents: { a: { sessionMode: "resident", machineId: "m" } } }, { machineId: "" }), []);
+  assert.deepEqual(notOffered(null, { machineId: "m" }), []);
+  assert.deepEqual(notOffered({ agents: "nope" }, { machineId: "m" }), []);
+});

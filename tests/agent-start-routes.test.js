@@ -167,3 +167,23 @@ test("THE ROUTE PASSES THE CAPABILITY'S OWN NAME THROUGH, and invents none", asy
   const none = await handleRequest({ method: "GET", path: "/agents/startable" }, deps({ agents: null }));
   assert.equal(typeof none.body.service, "string", "the 503 body changed shape, so a view has two to render");
 });
+
+test("THE REFUSAL SUMMARY SURVIVES THE WIRE, in both shapes", async () => {
+  // WHY THE WHOLE HOP IS TESTED rather than the capability alone. The daemon's own view calls the
+  // capability directly; a `tui` client reaches it over HTTP. A field dropped anywhere along that
+  // second path gives one question two answers depending on who asked -- and the operator asking
+  // "why do I not see my residents" is exactly the one on the HTTP side.
+  const skipped = [{ count: 12, why: "resident sessions are the operator's to launch" }];
+  const agents = fakeAgents({ list: { agents: [], skipped, problem: "" } });
+  const answer = await handleRequest({ method: "GET", path: "/agents/startable" }, deps({ agents }));
+  assert.deepEqual(answer.body.skipped, skipped, "the route dropped what the host refused");
+
+  // SAME SHAPE ON THE 503, like `agents` and `problem` beside it: a view must not meet a missing
+  // field only on the failing path.
+  const none = await handleRequest({ method: "GET", path: "/agents/startable" }, deps({ agents: null }));
+  assert.deepEqual(none.body.skipped, [], "the body shape changed with the status");
+
+  // AND A CAPABILITY TOO OLD TO SEND IT IS AN EMPTY SUMMARY, never `undefined` on the wire.
+  const old = await handleRequest({ method: "GET", path: "/agents/startable" }, deps({ agents: fakeAgents({ list: { agents: [], problem: "" } }) }));
+  assert.deepEqual(old.body.skipped, []);
+});

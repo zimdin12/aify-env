@@ -252,3 +252,45 @@ test("NOTHING IS DRAWN IN ANY OTHER MODE, so the list cannot leak onto the dashb
 });
 
 console.log("start-list.test.js: all assertions passed");
+
+// ── WHAT THE LIST IS NOT SHOWING, AND WHY ────────────────────────────────────────────────────────
+//
+// The operator, 2026-09-12: "in aify-env start function i see residents for some reason. it should
+// offer only managed options." They already are -- `startable-agents.mjs` has refused a non-managed
+// session since its first commit, measured 18 offered and 12 residents refused on that host's live
+// roster the same day. The defect is that a list drawing only what it KEPT looks identical to a list
+// with no rule at all, so there was nothing on screen to check the claim against.
+
+test("THE REFUSALS ARE DRAWN UNDER THE OFFERS, so the rule is visible rather than asserted", () => {
+  const text = drawn({
+    agents: [{ id: "sc-tester", name: "sc-tester", status: "offline", runtime: "claude-code" }],
+    at: 0, problem: "", asked: true,
+    skipped: [{ count: 12, why: "resident sessions are the operator's to launch" }],
+  });
+  assert.match(text, /sc-tester/);
+  assert.match(text, /12 not offered — resident sessions are the operator's to launch/);
+});
+
+test("AND ON AN EMPTY LIST TOO, which is the state that raises the question hardest", () => {
+  // "nothing to start" beside a dashboard showing forty agents is exactly when an operator asks
+  // where they went. An explanation that appears only when there IS a list is the one they never see.
+  const empty = drawn({ agents: [], at: 0, problem: "", asked: true,
+    skipped: [{ count: 12, why: "resident sessions are the operator's to launch" }] });
+  assert.match(empty, /nothing to start/);
+  assert.match(empty, /12 not offered/);
+
+  // AND WHILE IT IS STILL ASKING, because the counts came with the answer that is being waited for
+  // only in the failing case -- an unanswered list has no skipped rows to draw, and must not invent
+  // any.
+  const asking = drawn({ agents: [], at: 0, problem: "", asked: false, service: "aify-comms" });
+  assert.match(asking, /asking aify-comms/);
+  assert.doesNotMatch(asking, /not offered/, "it drew a refusal summary it had not been given");
+});
+
+test("A ZERO OR A NAMELESS GROUP IS NOT A ROW", () => {
+  // A summary row saying "0 not offered" is worse than none: it reads as a rule that fired and
+  // caught nothing, which is a different claim from "nothing was refused".
+  const text = drawn({ agents: [], at: 0, problem: "", asked: true,
+    skipped: [{ count: 0, why: "resident sessions are the operator's to launch" }, { count: 3, why: "" }] });
+  assert.doesNotMatch(text, /not offered/);
+});

@@ -136,7 +136,7 @@ test("POSITIVE CONTROL: the startable list is read from the daemon", async () =>
   const answer = await listStartableAgents({ endpoint: "http://127.0.0.1:8802/", fetchImpl: f.impl });
   // `service` TRAVELS WITH THE ANSWER so the view can say who it is waiting on without the host
   // knowing any service's name. Empty here because this fake body declared none.
-  assert.deepEqual(answer, { agents: [{ id: "ef-tester", status: "available" }], problem: "", service: "" });
+  assert.deepEqual(answer, { agents: [{ id: "ef-tester", status: "available" }], skipped: [], problem: "", service: "" });
   assert.equal(f.calls[0].url, "http://127.0.0.1:8802/agents/startable");
   assert.equal(f.calls[0].redirect, "manual");
 });
@@ -198,4 +198,20 @@ test("NEITHER CALL THROWS, because both run inside a keyboard handler", async ()
   const thrower = answering({ throws: true }).impl;
   assert.equal((await listStartableAgents({ endpoint: "http://x", fetchImpl: thrower })).agents.length, 0);
   assert.equal((await startKnownAgent("a", { endpoint: "http://x", fetchImpl: thrower })).started, false);
+});
+
+test("WHAT THE HOST REFUSED REACHES A CLIENT TOO", async () => {
+  // The daemon's own view calls the capability directly and a `tui` client comes through here. A
+  // field dropped on this side gives one question two answers depending on who asked -- and it is
+  // the client-side operator who asks "why do I not see my residents".
+  const skipped = [{ count: 12, why: "resident sessions are the operator's to launch" }];
+  const f = answering({ body: { agents: [], skipped, problem: "" } });
+  assert.deepEqual((await listStartableAgents({ endpoint: "http://x", fetchImpl: f.impl })).skipped, skipped);
+
+  // A DAEMON TOO OLD TO SEND IT, and every failure path, answer an empty summary rather than
+  // `undefined` -- the renderer must meet one shape.
+  const old = answering({ body: { agents: [], problem: "" } });
+  assert.deepEqual((await listStartableAgents({ endpoint: "http://x", fetchImpl: old.impl })).skipped, []);
+  const dead = { impl: async () => { throw new Error("no daemon"); } };
+  assert.deepEqual((await listStartableAgents({ endpoint: "http://x", fetchImpl: dead.impl })).skipped, []);
 });
