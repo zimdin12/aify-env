@@ -150,15 +150,34 @@ try {
   // to start anything. An instance context binds a lifetime; it does not make this a lesser
   // environment. A registry it cannot READ is still refused, one line below.
   //
-  // AN ADDRESS THAT ANSWERS NOTHING, never the live service. This pointed at 127.0.0.1:8800 -- the
-  // operator's real aify-comms -- and since a dedicated instance starts its plugins, the daemon it
-  // boots tries to heartbeat and claim there under this HOST's environment id, the same id the
-  // operator's own aify-env beats under. It was refused only because this fixture happens to have no
-  // credential; one leaked key away from superseding the real environment and reaping its workers.
-  // Admission reads the registry and nothing here needs the endpoint to answer. Found by review.
-  const registry = instanceFixture(root);
-  fs.writeFileSync(registry.context.serviceRegistry, '{"version":1,"services":{"aify-comms":{"endpoint":"http://invalid.test"}}}');
-  await owner(registry); await ready(registry);
+  // AN ENDPOINT THIS FIXTURE OWNS, never the live service and never a name presumed not to resolve.
+  // This pointed at 127.0.0.1:8800 -- the operator's real aify-comms -- and since a dedicated
+  // instance starts its plugins, the daemon it boots heartbeats and claims under this HOST's
+  // environment id, the same id the operator's own aify-env beats under. It was refused only because
+  // the fixture held no key. The first repair swapped in `http://invalid.test`, which review rightly
+  // said removes one address and enforces nothing: a `.test` name can be resolved locally.
+  //
+  // So the plugin is given a server started here, and two things are ASSERTED rather than hoped:
+  // that it reached THIS server -- proof the substitution is the destination the daemon actually
+  // used -- and that it presented NO key, which is the property the live address was one leak away
+  // from losing. Not covered: an OS-level egress denial, which a node fixture cannot impose.
+  const seen = [];
+  const commsDouble = http.createServer((req, res) => {
+    seen.push({ method: req.method, url: req.url, key: req.headers['x-api-key'] ?? null });
+    res.writeHead(503, { 'content-type': 'application/json' }); res.end('{"error":"fixture-owned endpoint"}');
+  });
+  await new Promise(resolve => commsDouble.listen(0, '127.0.0.1', resolve));
+  try {
+    const registry = instanceFixture(root);
+    const doubleUrl = `http://127.0.0.1:${commsDouble.address().port}`;
+    fs.writeFileSync(registry.context.serviceRegistry, JSON.stringify({ version: 1, services: { 'aify-comms': { endpoint: doubleUrl } } }));
+    await owner(registry); await ready(registry);
+    await until(() => seen.length > 0, 'the plugin reaches the fixture-owned endpoint it was given');
+    assert.deepEqual(seen.filter(r => r.key !== null), [], 'a fixture daemon presented an API key');
+    events.push({ fixtureOwnedServiceRequests: seen.map(r => `${r.method} ${r.url}`) });
+  } finally {
+    await new Promise(resolve => commsDouble.close(resolve));
+  }
   const unreadable = instanceFixture(root);
   fs.writeFileSync(unreadable.context.serviceRegistry, '{ not json');
   await refused(unreadable, [], 'readable service registry required');
