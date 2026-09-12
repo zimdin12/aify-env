@@ -7,9 +7,15 @@
 // running outside Herdr. The spaces were the operator's entire reason for the mode: "lets that
 // aify-env manage/spawn/kill other spaces".
 //
+// AND THE SECOND HALF, reported once the first worked: "it seems that killing just killed process in
+// that space, but it did not kill the space where agent was running." A space that outlives its
+// worker is an empty window still labelled with an agent's name, so after a few kills the screen
+// describes a fleet that is not running.
+//
 // WHAT IS ASSERTED, and what deliberately is not. That a pane is opened for a terminal-backed worker
-// this daemon started, that it ATTACHES rather than re-running the agent, that a failure to open one
-// never fails the start, and that an ordinary daemon opens nothing. Herdr's own drawing is Herdr's.
+// this daemon started, that it ATTACHES rather than re-running the agent, that the space CLOSES when
+// the worker goes, that neither failure ever fails the start, and that an ordinary daemon opens
+// nothing. Herdr's own drawing is Herdr's.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,7 +37,7 @@ function opener({ env = { HERDR_SOCKET_PATH: "C:/inv/herdr-tui.sock" }, call, lo
     bin: "C:/herdr/herdr.exe",
     call: call || ((_bin, argv) => (argv[0] === "pane" && argv[1] === "process-info"
       ? { result: { process_info: { shell_pid: 4242 } } }
-      : { result: { root_pane: { pane_id: "w2:p1" } } })),
+      : { result: { root_pane: { pane_id: "w2:p1", workspace_id: "w2" }, workspace: { workspace_id: "w2" } } })),
   });
 }
 
@@ -49,7 +55,7 @@ test("THE DEFECT: a started worker gets a space, attached to the worker that is 
     // still reports success. A double that answered immediately would hide that wait.
     return argv[1] === "process-info"
       ? { result: { process_info: { shell_pid: 4242 } } }
-      : { result: { root_pane: { pane_id: "w2:p1" } } };
+      : { result: { root_pane: { pane_id: "w2:p1", workspace_id: "w2" }, workspace: { workspace_id: "w2" } } };
   } });
   assert.ok(openPane, "no opener was built inside a Herdr");
 
@@ -115,6 +121,80 @@ test("THE CALL SITE: PluginProcesses runs the opener after the start, and surviv
   assert.deepEqual(await plain.start({ id: "c" }), { id: "c", terminal: true });
 });
 
+test("THE SECOND DEFECT: the space closes when its worker goes", { skip }, async () => {
+  // TAKEN FROM THE RUNNER, not from the stop call, which is the whole reason this is wired where it
+  // is: a worker killed from outside, or one that simply dies, must take its space with it too.
+  const calls = [];
+  const logs = [];
+  const watched = new Map();
+  const openPane = paneOpenerFor({
+    env: { HERDR_SOCKET_PATH: "C:/inv/herdr-tui.sock" },
+    base: "http://127.0.0.1:65000", node: "C:/node/node.exe", script: "C:/aify-env/bin/aify-env.mjs",
+    cwd: "C:/work", log: m => logs.push(m), bin: "C:/herdr/herdr.exe",
+    watchExit: (id, onExit) => watched.set(id, onExit),
+    call: (_bin, argv) => {
+      calls.push(argv);
+      if (argv[1] === "process-info") return { result: { process_info: { shell_pid: 4242 } } };
+      return { result: { root_pane: { pane_id: "w2:p1", workspace_id: "w2" }, workspace: { workspace_id: "w2" } } };
+    },
+  });
+
+  const opened = await openPane({ id: "proc-1", label: "sc-tester", terminal: true });
+  assert.equal(opened.workspaceId, "w2", "the opener never learned which space it made");
+  assert.deepEqual([...watched.keys()], ["proc-1"], "nothing is watching the worker, so its space outlives it");
+
+  // NOTHING CLOSES UNTIL THE WORKER ACTUALLY EXITS.
+  assert.equal(calls.some(argv => argv[0] === "workspace" && argv[1] === "close"), false, "the space was closed while the worker ran");
+
+  watched.get("proc-1")(0, null);
+  assert.deepEqual(calls.at(-1), ["workspace", "close", "w2"], "the worker exited and its space stayed open");
+  // THE SPACE, NOT THE PANE: `workspace create` made a space holding one pane, and closing the pane
+  // alone leaves exactly the empty window that was reported.
+  assert.ok(logs.some(l => l.includes("closed w2")), "a closed space said nothing");
+});
+
+test("A SPACE THAT WILL NOT CLOSE IS REPORTED, NEVER THROWN", { skip }, async () => {
+  // This runs inside the Runner's exit notification, where a throw reaches a listener loop that has
+  // other workers' business in it.
+  const logs = [];
+  const watched = new Map();
+  let opened = false;
+  const openPane = paneOpenerFor({
+    env: { HERDR_SOCKET_PATH: "C:/inv/herdr-tui.sock" },
+    base: "http://127.0.0.1:65000", node: "C:/node/node.exe", script: "C:/aify-env/bin/aify-env.mjs",
+    cwd: "C:/work", log: m => logs.push(m), bin: "C:/herdr/herdr.exe",
+    watchExit: (id, onExit) => watched.set(id, onExit),
+    call: (_bin, argv) => {
+      if (argv[0] === "workspace" && argv[1] === "close") throw new Error("already gone");
+      if (argv[1] === "process-info") return { result: { process_info: { shell_pid: 7 } } };
+      opened = true;
+      return { result: { root_pane: { pane_id: "w4:p1", workspace_id: "w4" }, workspace: { workspace_id: "w4" } } };
+    },
+  });
+  await openPane({ id: "proc-2", terminal: true });
+  assert.equal(opened, true);
+  watched.get("proc-2")(null, "SIGKILL");
+  assert.ok(logs.some(l => l.includes("w4 outlived proc-2")), "a space that refused to close said nothing");
+});
+
+test("NOTHING IS WATCHED WHEN NO SPACE WAS OPENED", { skip }, async () => {
+  // NEGATIVE CONTROL, driven by removing the thing under test. A watch registered for a worker with
+  // no space would close whatever `workspaceId` happened to hold -- and with no opener at all, the
+  // exit listener would be a leak on every headless worker this host runs.
+  const watched = [];
+  const watchExit = (id) => watched.push(id);
+  const refused = opener({ call: () => { throw new Error("Herdr said no"); } });
+  assert.equal(await refused({ id: "x", terminal: true }), null);
+
+  const headless = paneOpenerFor({
+    env: { HERDR_SOCKET_PATH: "C:/inv/herdr-tui.sock" }, base: "http://127.0.0.1:65000",
+    node: "C:/node/node.exe", script: "C:/aify-env/bin/aify-env.mjs", bin: "C:/herdr/herdr.exe",
+    watchExit, call: () => { throw new Error("never asked"); },
+  });
+  assert.equal(await headless({ id: "no-pty", terminal: false }), null);
+  assert.deepEqual(watched, [], "an exit watch was registered for a worker that got no space");
+});
+
 test("THE DAEMON BUILDS ONE, read rather than run, because importing it STARTS a daemon", async () => {
   // A source assertion, used for the one reason that justifies it: importing `bin/aify-env.mjs` runs
   // the daemon, which supersedes whatever serves this host and reaps its managed workers. The gate
@@ -125,4 +205,8 @@ test("THE DAEMON BUILDS ONE, read rather than run, because importing it STARTS a
   const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs"), "utf8");
   assert.match(source, /paneOpenerFor\(\{/, "the daemon never builds a pane opener");
   assert.match(source, /new PluginProcesses\(runner, \{ onStarted: paneOpener \}\)/, "the opener reaches no start");
+  // AND THE EXIT IT CLOSES ON COMES FROM THE RUNNER. An opener built without `watchExit` opens every
+  // space and closes none, which is the defect this half exists for and is invisible to every test
+  // above -- they inject their own.
+  assert.match(source, /watchExit: \(id, on\) => runner\.subscribe\(id, \(\) => \{\}, on\)/, "the opener learns no exit");
 });

@@ -731,8 +731,8 @@ server.listen(port, HOST, async () => {
   //
   // The bootstrap test evaluates these statements without importing the daemon or binding a port.
   // Keep host identity in this payload so every plugin receives the canonical machine id.
-  const paneOpener = paneOpenerFor({ env: process.env, base: `http://${HOST}:${bound.port}`,
-    node: process.execPath, script: fileURLToPath(import.meta.url), log: logLine });
+  const paneOpener = paneOpenerFor({ env: process.env, base: `http://${HOST}:${bound.port}`, node: process.execPath,
+    script: fileURLToPath(import.meta.url), log: logLine, watchExit: (id, on) => runner.subscribe(id, () => {}, on) });
   // A DEDICATED INSTANCE STARTS THEM TOO. Was `if (!instanceContext)`, which left it with no `agents`
   // capability, so the picker answered 503 beside a service that was registered and healthy.
   try {
