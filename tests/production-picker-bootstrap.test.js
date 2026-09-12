@@ -38,6 +38,9 @@ async function picker(t, facts, identity = hostIdentityFacts) {
     runner, VERSION: "test", REGISTRY_FILE: "memory-only-registry", CWD_ROOTS: [],
     readFileSync: () => JSON.stringify({ version: 1, services: { "aify-comms": { endpoint: "http://example.invalid" } } }),
     readServices, resolvePluginCredential: async () => "test-only", logLine: () => {},
+    // NO HERDR TO OPEN A SPACE IN, which is what an ordinary daemon has. What the opener does when
+    // there IS one is pinned in `a-started-worker-gets-a-herdr-space.test.js`.
+    paneOpener: null,
     currentAdvertisementBody: () => ({ hostname: facts.hostname, kind: "test" }),
     hostIdentityFacts: identity, hostname: () => facts.hostname,
     hostIsWsl: () => facts.isWsl, existsSync: facts.exists,

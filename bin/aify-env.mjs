@@ -71,6 +71,7 @@ import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { readServices } from "../lib/services.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
+import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
 import { bootstrapReport, credentialValue, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
 import {
   advertiseTo,
@@ -730,11 +731,15 @@ server.listen(port, HOST, async () => {
   //
   // The bootstrap test evaluates these statements without importing the daemon or binding a port.
   // Keep host identity in this payload so every plugin receives the canonical machine id.
+  const paneOpener = paneOpenerFor({ env: process.env, base: `http://${HOST}:${bound.port}`,
+    node: process.execPath, script: fileURLToPath(import.meta.url), log: logLine });
   // A DEDICATED INSTANCE STARTS THEM TOO. Was `if (!instanceContext)`, which left it with no `agents`
   // capability, so the picker answered 503 beside a service that was registered and healthy.
   try {
     const host = new PluginHost({
-      processes: new PluginProcesses(runner),
+      // INSIDE A HERDR, A STARTED WORKER GETS A SPACE. Null when this is not a dedicated
+      // instance, which is every ordinary daemon. See lib/herdr-pane-opener.mjs.
+      processes: new PluginProcesses(runner, { onStarted: paneOpener }),
       // NOT the environment id: its shape is a service's convention, and the plugin derives it from
       // what this host advertises.
       environmentId: "",
