@@ -149,8 +149,15 @@ try {
   // instance -- which is what left a dedicated env unable to locate aify-comms and therefore unable
   // to start anything. An instance context binds a lifetime; it does not make this a lesser
   // environment. A registry it cannot READ is still refused, one line below.
+  //
+  // AN ADDRESS THAT ANSWERS NOTHING, never the live service. This pointed at 127.0.0.1:8800 -- the
+  // operator's real aify-comms -- and since a dedicated instance starts its plugins, the daemon it
+  // boots tries to heartbeat and claim there under this HOST's environment id, the same id the
+  // operator's own aify-env beats under. It was refused only because this fixture happens to have no
+  // credential; one leaked key away from superseding the real environment and reaping its workers.
+  // Admission reads the registry and nothing here needs the endpoint to answer. Found by review.
   const registry = instanceFixture(root);
-  fs.writeFileSync(registry.context.serviceRegistry, '{"version":1,"services":{"aify-comms":{"endpoint":"http://127.0.0.1:8800"}}}');
+  fs.writeFileSync(registry.context.serviceRegistry, '{"version":1,"services":{"aify-comms":{"endpoint":"http://invalid.test"}}}');
   await owner(registry); await ready(registry);
   const unreadable = instanceFixture(root);
   fs.writeFileSync(unreadable.context.serviceRegistry, '{ not json');
