@@ -7,3 +7,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# A PowerShell started with LOCALAPPDATA unset writes its module cache relative to the working
+# directory. One was committed on 2026-09-12 by a `git add -A`; it is not source.
+/Microsoft/
