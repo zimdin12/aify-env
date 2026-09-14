@@ -22,7 +22,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 
 import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
 import { workLostToSupersession, showViewInsteadOfRefusing } from "../lib/environment-checks.mjs";
@@ -54,8 +54,21 @@ function longLauncher(dir) {
   return file;
 }
 
-const start = (env, port, extra = []) =>
-  spawn(process.execPath, [ENTRY, "--port", String(port), ...extra], { env, stdio: ["ignore", "pipe", "pipe"] });
+// EVERY DAEMON IS STOPPED AFTER ITS TEST, whatever the test did. Each test's own `finally` starts
+// after `environmentWithWork` returns, so a start that threw inside it -- "nothing was running" --
+// left its daemon alive: four per suite run on Linux, reparented and still listening afterwards, and
+// holding this file open until the 60s timeout cancelled it.
+const started = new Set();
+afterEach(() => {
+  for (const child of started) child.kill();
+  started.clear();
+});
+
+const start = (env, port, extra = []) => {
+  const child = spawn(process.execPath, [ENTRY, "--port", String(port), ...extra], { env, stdio: ["ignore", "pipe", "pipe"] });
+  started.add(child);
+  return child;
+};
 
 function waitFor(child, pattern, ms = 20000) {
   return new Promise((resolve, reject) => {
@@ -218,10 +231,7 @@ test("AIFY_NO_DASHBOARD=1 keeps the old shape even in a terminal", async () => {
   const { daemon, workerPid } = await environmentWithWork(box, PORT);
   let second = null;
   try {
-    second = spawn(process.execPath, [ENTRY, "--port", String(PORT)], {
-      env: { ...box.env, AIFY_NO_DASHBOARD: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    second = start({ ...box.env, AIFY_NO_DASHBOARD: "1" }, PORT);
     const said = await waitFor(second, /Taking over would END/);
     const code = await new Promise((resolve) => second.on("exit", resolve));
     assert.equal(code, 69);
