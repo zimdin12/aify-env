@@ -294,3 +294,27 @@ test("A ZERO OR A NAMELESS GROUP IS NOT A ROW", () => {
     skipped: [{ count: 0, why: "resident sessions are the operator's to launch" }, { count: 3, why: "" }] });
   assert.doesNotMatch(text, /not offered/);
 });
+
+// ── A LIST LONGER THAN THE SCREEN ────────────────────────────────────────────────────────────────
+//
+// The operator, 2026-09-14: "when i press s to start agent, and list is too long, then it goes
+// offscreen and i cannot even see how to close it, it should move the list (scroll)". The list was
+// drawn whole, and the frame was cut at the terminal's height -- taking the hint line with it.
+
+const many = (n) => Array.from({ length: n }, (_, i) => ({ id: `agent-${String(i).padStart(2, "0")}`, name: `agent-${String(i).padStart(2, "0")}` }));
+
+for (const processes of [[], [{ id: "p1", label: "one", terminal: true }, { id: "p2", label: "two", terminal: true }]]) {
+  test(`A LONG START LIST SCROLLS WITH ITS CURSOR and the way back stays on screen (${processes.length} processes)`, () => {
+    for (const at of [0, 17, 39]) {
+      const lines = renderDashboard({ ...SNAPSHOT, processes }, {
+        columns: 100, rows: 24, color: false, keys: { enabled: true, canQuit: true },
+        view: { rows: processes, selected: 0, mode: "start", query: "", start: { agents: many(40), at, problem: "", asked: true } },
+      });
+      const text = lines.join("\n");
+      assert.ok(lines.length <= 24, `${lines.length} lines on a 24-row screen`);
+      assert.match(text, new RegExp(`❯ agent-${String(at).padStart(2, "0")}`), `the cursor at ${at} is off screen`);
+      assert.match(text, /ctrl\+\] back/, "the way out is off screen");
+      assert.match(text, at === 0 ? /\d+ below/ : /\d+ above/, "nothing says the list continues");
+    }
+  });
+}
