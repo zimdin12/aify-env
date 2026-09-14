@@ -3,9 +3,10 @@
 //
 // THE BOUNDARY IS THE POINT OF THIS FILE. aify-env may say what it OBSERVED on a terminal it owns;
 // it may not say what an agent IS DOING. The second one is a service's judgement over a dispatch
-// turn, a worker lease, a heartbeat and a screen model, and it already has an owner. The screen-model
-// half was implemented in this repo once -- at 5am on 2026-09-03, to unblock a fleet -- and the
-// operator ruled it the wrong layer; it lives in aify-comms as `console_prompts.py` now.
+// turn, a worker lease, a heartbeat and a screen model, and it already has an owner. Under the rule as
+// amended on 2026-09-14, the host core stays PTY-only and a service's screen model may live only in
+// that service's plugin directory (`lib/plugins/aify-comms/screen-rules.mjs` for aify-comms). The
+// 2026-09-03 ruling had moved it out of the core into aify-comms' `console_prompts.py`.
 //
 // So there is no `blocked` here, and its absence is tested rather than merely intended.
 
