@@ -22,6 +22,7 @@ import {
   ORPHAN_QUIET_MS,
   TERMINAL_ENDED,
   createHandleBook,
+  launchEnv,
   runOneControl,
   runTerminalControlPass,
 } from "../lib/plugins/aify-comms/terminal-controls.mjs";
@@ -193,6 +194,37 @@ test("THE SERVICE'S ENVIRONMENT WINS OVER AN INHERITED ONE", async () => {
   const env = processes.calls.starts[0].env;
   assert.equal(env.AIFY_AGENT_ROLE, "tester", "an inherited value beat the one the spawn chose");
   assert.equal(env.PATH, "C:/bin", "and the host's own environment must still be there");
+});
+
+test("WHAT THE SERVICE SAYS A WORKER MUST NEVER INHERIT IS REMOVED from this host's environment", async () => {
+  // An overlay can set a name but never unset one. CLAUDE_CODE_CHILD_SESSION turns a claude's
+  // transcript saving OFF by being present, and this host merged its whole environment under the
+  // overlay, so a host started inside a Claude Code session launched every managed claude that way.
+  const inherited = {
+    PATH: "C:/bin",
+    CLAUDE_CODE_CHILD_SESSION: "1",
+    aify_comms_agent_role: "manager",
+    KEEP_ME: "yes",
+  };
+  const unsetEnv = ["CLAUDE_CODE_CHILD_SESSION", "AIFY_COMMS_AGENT_ROLE"];
+  const { processes } = await run({ api: fakeApi({ launch: { ...LAUNCH, unsetEnv } }), baseEnv: inherited });
+  const env = processes.calls.starts[0].env;
+  assert.equal("CLAUDE_CODE_CHILD_SESSION" in env, false, "the child-session marker reached the worker");
+  assert.equal("aify_comms_agent_role" in env, false, "the role alias survived in another case, which Windows reads as the same name");
+  assert.equal(env.KEEP_ME, "yes", "a name the service did not list was removed too");
+  assert.equal(env.AIFY_AGENT_ROLE, "tester", "the overlay must still go on top");
+
+  // CONTROL: the removal comes from the service's list and nothing else -- an older service that
+  // sends none leaves the environment exactly as it was.
+  const before = await run({ baseEnv: inherited });
+  assert.equal(before.processes.calls.starts[0].env.CLAUDE_CODE_CHILD_SESSION, "1");
+});
+
+test("launchEnv ignores an unsetEnv that is not a list of names", () => {
+  const base = { PATH: "p", CLAUDE_CODE_CHILD_SESSION: "1" };
+  for (const unsetEnv of [undefined, null, "CLAUDE_CODE_CHILD_SESSION", [42, null, ""]]) {
+    assert.deepEqual(launchEnv(base, { unsetEnv, env: { A: "1" } }), { ...base, A: "1" }, `unsetEnv ${JSON.stringify(unsetEnv)}`);
+  }
 });
 
 test("the SHIM is refused and the launcher beside it is used", async () => {
