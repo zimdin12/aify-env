@@ -240,6 +240,56 @@ test("A PROCESS THAT GOES QUIET INSIDE AN ESCAPE SEQUENCE STILL ANSWERS: the rep
   await runner.stop(handle.id);
 });
 
+/** Subscribe, and resolve with what the subscriber was handed once it has been answered. */
+async function joinAfter(runner, id, ms = 0) {
+  const { events, handlers } = recorder();
+  runner.subscribeScreen(id, handlers);
+  const deadline = Date.now() + 3000;
+  if (ms) await new Promise((r) => setTimeout(r, ms));
+  while (!events.length && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+  return events;
+}
+
+test("A SCROLL REGION OR A SHIFTED CHARSET IS NOT A CLEAN BOUNDARY: the serializer carries neither", async () => {
+  // Replaying the bytes after a snapshot through a screen with no margins, or no line-drawing set,
+  // draws a different screen than the daemon's. So a snapshot waits for them to be put back.
+  const ESC = String.fromCharCode(27);
+  for (const [label, set, reset] of [
+    ["scroll margins", `${ESC}[2;5r`, `${ESC}[r`],
+    ["line-drawing G0", `${ESC}(0`, `${ESC}(B`],
+    ["shifted to G1", String.fromCharCode(14), String.fromCharCode(15)],
+  ]) {
+    const terminal = fakeTerminal({ cols: 40, rows: 8 });
+    const { runner } = runnerWithCheckpoints(terminal);
+    const handle = await runner.start(SPEC);
+    terminal.emit(`before${set}`);
+    const refused = await joinAfter(runner, handle.id, 1200);
+    assert.equal(refused[0]?.kind, "meta", `${label}: the subscriber was never answered`);
+    assert.equal(refused[0].meta.checkpoint, undefined, `${label}: a checkpoint was taken with it set`);
+    // CONTROL: put back, the same checkpoint answers again -- so the refusal was that mode and nothing else.
+    terminal.emit(`${reset}after`);
+    const accepted = await joinAfter(runner, handle.id);
+    assert.equal(accepted[0].meta.checkpoint, true, `${label}: no checkpoint once it was reset`);
+    await runner.stop(handle.id);
+  }
+});
+
+test("A SCREEN TOO BIG TO HOLD LETS THE CHECKPOINT GO: one resize must not cost the daemon a gigabyte", async () => {
+  const terminal = fakeTerminal({ cols: 40, rows: 8 });
+  const { runner, made } = runnerWithCheckpoints(terminal);
+  const handle = await runner.start(SPEC);
+  terminal.emit("hello");
+  // CONTROL: an ordinary resize keeps it.
+  assert.deepEqual(runner.resize(handle.id, 200, 60), { ok: true });
+  assert.equal((await joinAfter(runner, handle.id))[0].meta.checkpoint, true);
+  assert.deepEqual(runner.resize(handle.id, 10_000, 10_000), { ok: true });
+  assert.equal(made[0].screen.disposed, true, "the checkpoint kept a 10,000 x 10,000 screen");
+  const events = await joinAfter(runner, handle.id);
+  assert.equal(events[0].meta.checkpoint, undefined);
+  assert.equal(events[1].text, "hello");
+  await runner.stop(handle.id);
+});
+
 test("A PROCESS THAT EXITS WHILE A SNAPSHOT IS OUTSTANDING: the subscriber gets the replay and the exit", async () => {
   const terminal = fakeTerminal({ cols: 40, rows: 6 });
   let exit;
@@ -309,7 +359,7 @@ test("PHYSICAL ABSENCE: with any of the three packages missing there is no check
     }
     mkdirSync(path.join(dir, "node_modules", "@xterm"), { recursive: true });
     for (const name of installed) {
-      symlinkSync(path.join(HERE, "..", "node_modules", name), path.join(dir, "node_modules", name), "dir");
+      symlinkSync(path.join(HERE, "..", "node_modules", name), path.join(dir, "node_modules", name), "junction");
     }
     const url = pathToFileURL(path.join(dir, "screen-checkpoint.mjs")).href;
     const script = `import("${url}").then(async (m) => console.log(typeof await m.loadCheckpointFactory()))`
