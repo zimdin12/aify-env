@@ -734,7 +734,7 @@ server.listen(port, HOST, async () => {
     const host = new PluginHost({
       // INSIDE A HERDR, A STARTED WORKER GETS A SPACE. Null when this is not a dedicated
       // instance, which is every ordinary daemon. See lib/herdr-pane-opener.mjs.
-      processes: new PluginProcesses(runner, { onStarted: paneOpener }),
+      processes: new PluginProcesses(runner, { onStarted: paneOpener, prepare: paneOpener?.prepare }),
       // NOT the environment id: its shape is a service's convention, and the plugin derives it from
       // what this host advertises.
       environmentId: "",
