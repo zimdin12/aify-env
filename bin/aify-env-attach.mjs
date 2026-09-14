@@ -25,6 +25,7 @@
 import { OutputFollower } from "../lib/output-follower.mjs";
 import { DETACH } from "../lib/keys.mjs";
 import { resolveAttachTarget } from "../lib/attach-target.mjs";
+import { passthrough } from "../lib/attach-screen.mjs";
 
 const LF = String.fromCharCode(10);
 const ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
@@ -90,11 +91,12 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 // implementation of any of it, and no change to the class the dashboard depends on.
 //
 // It keeps no history on purpose: a terminal already holds its own scrollback, and buffering here
-// would only be a second copy that can disagree with the screen.
+// would only be a second copy that can disagree with the screen. It does clear the visible screen
+// before the first chunk, so the replay is not painted over what this terminal showed before.
 const follower = new OutputFollower({
   endpoint: ENDPOINT,
   id: target.id,
-  buffer: { append: (text) => process.stdout.write(text) },
+  buffer: passthrough((text) => process.stdout.write(text)),
 });
 
 let restored = false;
