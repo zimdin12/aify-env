@@ -52,7 +52,7 @@ import { fileURLToPath } from "node:url";
 import { handleRequest } from "../lib/protocol.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
-import { dataFrame, exitFrame, namedFrame } from "../lib/sse-frames.mjs";
+import { dataFrame, exitFrame, keepStreamAlive, namedFrame } from "../lib/sse-frames.mjs";
 import { startDaemonView } from "../lib/daemon-view.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-processes.mjs";
@@ -499,11 +499,10 @@ const server = createServer(async (request, response) => {
   // A stream, not an answer. Server-sent events because a console only ever reads: no framing to get
   // wrong, no upgrade handshake, and it reconnects by itself when a viewer's tab wakes up.
   if (result.stream) {
-    response.writeHead(200, {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-    });
+    response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+    // A QUIET PROCESS MUST NOT LET A VIEWER'S FETCH TIME OUT: Node aborts a body after 300s with no bytes.
+    // Idle Claude Code panes died exactly that way on 2026-09-14; the heartbeat's reasons live with it.
+    keepStreamAlive(response);
     // BEFORE THE REPLAY, because the replay is bytes and a screen needs two facts it cannot infer
     // from them -- the producer's geometry and whether the history is complete. Both are `streamMeta`'s
     // to answer and it says why; `namedFrame` says why a new fact can join an existing stream safely.
