@@ -102,11 +102,8 @@ test("a second signal does not start a second teardown", async () => {
   assert.equal(events.filter((e) => e === "entered-stop:a").length, 1);
 });
 
-// THERE IS NO TEST FOR "a double-tap before the stops were issued is ignored", because there is no
-// such window. A gate on that was written, and its test failed on the first run: everything from
-// `beforeStop()` to the last `runner.stop()` call runs synchronously in one turn of the loop, so a
-// second signal is never delivered in between. The gate was removed rather than have a condition
-// that is always true.
+// A double-tap BEFORE the stops were issued can only land while `beforeStop` is being awaited, and it
+// ends that wait rather than the daemon -- see `a second signal WHILE WAITING skips the wait` below.
 test("a second signal AFTER the stops were issued exits instead of being swallowed", async () => {
   // WHAT THE OPERATOR ACTUALLY DID, twice: Ctrl+C, nothing, Ctrl+C again, nothing, kill the terminal.
   // Killing the terminal is the worst available outcome -- the managed processes survive AND the
@@ -429,4 +426,63 @@ test("a stop that ignores the phase hook is still reported, as starting", async 
   });
   await shutdown("SIGINT");
   assert.match(written.join(""), /p1 \(in starting\) did not confirm/);
+});
+
+// ── the plugins' stop is AWAITED, under a bound ─────────────────────────────────────────────────
+//
+// `beforeStop()` was called and not awaited, and the daemon's callback is async: the plugins' stop
+// sends an offline heartbeat and waits for exit markers still on their way, and `exit(0)` followed
+// the kills with no turn between -- so neither ever reached the service. After a restart the service
+// was told nothing about the predecessor's terminals and they stayed attached until a reaper.
+
+test("the exit WAITS for what must happen before the stops, when it takes a real round trip", async () => {
+  const events = [];
+  const shutdown = createShutdown({
+    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    beforeStop: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));   // a heartbeat's worth of network
+      events.push("offline-beat-sent");
+    },
+    clearOwned: () => {},
+    exit: (code) => events.push(`exit:${code}`),
+  });
+  await shutdown("SIGTERM");
+  assert.deepEqual(events, ["offline-beat-sent", "stopped:a", "exit:0"]);
+});
+
+test("a beforeStop that NEVER settles costs its budget, then the processes still stop and it exits", async () => {
+  // The service unreachable on the way down must not keep agents running or the daemon alive.
+  const events = [];
+  const shutdown = createShutdown({
+    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    beforeStop: () => new Promise(() => {}),
+    beforeStopBudgetMs: 30,
+    clearOwned: () => events.push("record-cleared"),
+    exit: (code) => events.push(`exit:${code}`),
+  });
+  const started = Date.now();
+  await shutdown("SIGTERM");
+  assert.deepEqual(events, ["stopped:a", "record-cleared", "exit:0"]);
+  assert.ok(Date.now() - started < 2000, "the budget did not bound the wait");
+});
+
+test("a second signal WHILE WAITING skips the wait and still stops the processes", async () => {
+  // The double Ctrl-C reflex must never become "exit leaving every agent running": the wait for the
+  // service is the only thing it may cut short.
+  const events = [];
+  const shutdown = createShutdown({
+    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    beforeStop: () => new Promise(() => {}),
+    beforeStopBudgetMs: 60_000,
+    clearOwned: () => {},
+    exit: (code) => events.push(`exit:${code}`),
+    write: (line) => events.push(`wrote:${line.trim()}`),
+  });
+  const first = shutdown("SIGINT");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await shutdown("SIGINT");
+  await first;
+  assert.ok(events.indexOf("stopped:a") >= 0, "the second signal left the processes running");
+  assert.equal(events.filter((e) => e === "exit:0").length, 1, "the second signal exited before the stops");
+  assert.ok(events.indexOf("stopped:a") < events.indexOf("exit:0"));
 });

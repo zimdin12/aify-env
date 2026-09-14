@@ -383,9 +383,9 @@ const shutdown = createShutdown({
   // Plugins first: one may be mid-claim, and a claim settled after its processes are gone reports a
   // spawn as running against a host that no longer exists.
   // THE VIEW STOPS FIRST, AND SYNCHRONOUSLY, because it owns the operator's TERMINAL and this
-  // callback is not awaited. `lib/daemon-view.mjs` carries the argument and the measurement.
-  // Ordering against the plugins is unchanged: what must precede `runner.stop()` is `stopAll()`,
-  // and `runner.stop()` runs after this whole callback returns.
+  // callback is awaited only up to a budget. `lib/daemon-view.mjs` carries the argument and the
+  // measurement. `stopAll()` -- the offline beat and pending exit markers -- runs before
+  // `runner.stop()` unless that budget, or a second signal, cuts the wait short.
   beforeStop: async () => { stopDashboard(); await servicePlugins.stopAll(); },
   // A FUNCTION, so `server` is looked up when a signal arrives rather than read here, where it is
   // still in its temporal dead zone.
