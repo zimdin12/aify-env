@@ -24,7 +24,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { Runner } from "../lib/runner.mjs";
-import { loadCheckpointFactory } from "../lib/screen-checkpoint.mjs";
+import { loadCheckpointFactory, MAX_CHECKPOINT_CELLS } from "../lib/screen-checkpoint.mjs";
 import { ScreenEmulator } from "../lib/screen-emulator.mjs";
 import { baselineIsSound } from "../lib/screen-baseline.mjs";
 import { namedFrame, readFrames } from "../lib/sse-frames.mjs";
@@ -279,11 +279,14 @@ test("A SCREEN TOO BIG TO HOLD LETS THE CHECKPOINT GO: one resize must not cost 
   const { runner, made } = runnerWithCheckpoints(terminal);
   const handle = await runner.start(SPEC);
   terminal.emit("hello");
-  // CONTROL: an ordinary resize keeps it.
+  // CONTROL: an ordinary resize keeps it, and so does the largest one the cap allows.
   assert.deepEqual(runner.resize(handle.id, 200, 60), { ok: true });
   assert.equal((await joinAfter(runner, handle.id))[0].meta.checkpoint, true);
-  assert.deepEqual(runner.resize(handle.id, 10_000, 10_000), { ok: true });
-  assert.equal(made[0].screen.disposed, true, "the checkpoint kept a 10,000 x 10,000 screen");
+  assert.deepEqual(runner.resize(handle.id, 1000, MAX_CHECKPOINT_CELLS / 1000), { ok: true });
+  assert.equal(made[0].screen.disposed, false, "a screen exactly at the cap was let go");
+  assert.equal((await joinAfter(runner, handle.id))[0].meta.checkpoint, true);
+  assert.deepEqual(runner.resize(handle.id, 1000, MAX_CHECKPOINT_CELLS / 1000 + 1), { ok: true });
+  assert.equal(made[0].screen.disposed, true, "the checkpoint kept a screen past its cap");
   const events = await joinAfter(runner, handle.id);
   assert.equal(events[0].meta.checkpoint, undefined);
   assert.equal(events[1].text, "hello");
