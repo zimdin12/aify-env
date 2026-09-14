@@ -27,10 +27,33 @@ test('selection rejects non-PTY, ambiguous and malformed targets', () => {
 });
 
 test('encoded PowerShell arguments retain metacharacters as single-quoted data', () => {
-  const text = attachCommand({ node: "C:/a'b/$()&/node.exe", script: 'C:/two words/$env:X.mjs', base: 'http://127.0.0.1:12345', id: 'uuid-p1' });
+  const text = attachCommand({ node: "C:/a'b/$()&/node.exe", script: 'C:/two words/$env:X.mjs', base: 'http://127.0.0.1:12345', id: 'uuid-p1', platform: 'win32' });
   const decoded = Buffer.from(text.split(' ').at(-1), 'base64').toString('utf16le');
   assert.equal(decoded, "$env:AIFY_ENV_ENDPOINT='http://127.0.0.1:12345'; & 'C:/a''b/$()&/node.exe' 'C:/two words/$env:X.mjs' attach --id 'uuid-p1'");
   assert.throws(() => attachCommand({ node: 'bad\rpath', script: 'ok', base: 'http://127.0.0.1:12345', id: 'uuid-p1' }));
+});
+
+// THE PANE'S SHELL IS THE HOST'S. On WSL the command was the Windows one, zsh found `powershell.exe`
+// through interop, and Windows PowerShell failed to run a Linux node path in every agent's pane.
+// So the typed line is run through the real shells here rather than compared to a string.
+test('on a POSIX host every shell present runs the attach command with its arguments intact', { skip: process.platform === 'win32' && 'needs POSIX shells' }, t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'herdr-attach-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, "it's two words \\ $(false) `false` !! ~");
+  fs.mkdirSync(dir);
+  const script = path.join(dir, 'probe.cjs');
+  fs.writeFileSync(script, 'console.log(JSON.stringify({ argv: process.argv.slice(2), endpoint: process.env.AIFY_ENV_ENDPOINT }))');
+  const base = 'http://127.0.0.1:12345';
+  const text = attachCommand({ node: process.execPath, script, base, id: 'uuid-p1', platform: 'linux' });
+  let ran = 0;
+  for (const shell of ['sh', 'bash', 'zsh', 'dash', 'fish']) {
+    const result = spawnSync(shell, ['-c', text], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH } });
+    if (result.error?.code === 'ENOENT') { t.diagnostic(`${shell} not installed, not checked`); continue; }
+    assert.equal(result.status, 0, `${shell}: ${result.stderr}`);
+    assert.deepEqual(JSON.parse(result.stdout), { argv: ['attach', '--id', 'uuid-p1'], endpoint: base }, shell);
+    ran++;
+  }
+  assert.ok(ran > 0, 'no shell ran the command');
 });
 
 test('known Windows install detection is passive and needs no PATH entry', t => {

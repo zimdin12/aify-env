@@ -26,8 +26,6 @@ import assert from "node:assert/strict";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
 import { PluginProcesses } from "../lib/service-plugins.mjs";
 
-const WINDOWS = process.platform === "win32";
-const skip = WINDOWS ? false : "attachCommand builds a Windows PowerShell command";
 
 //: A dedicated invocation's root, and the socket its Herdr serves inside it.
 const ROOT = "C:/aify/herdr/invocations/5d8e2a3c-1f4b-4c6d-9e7f-0a1b2c3d4e5f";
@@ -59,8 +57,9 @@ function manualTimers() {
   };
 }
 
-function opener({ env = { HERDR_SOCKET_PATH: SOCKET }, dedicatedRoot = ROOT, herdr = fakeHerdr(), log = () => {}, watchExit = null, timers = manualTimers() } = {}) {
+function opener({ env = { HERDR_SOCKET_PATH: SOCKET }, dedicatedRoot = ROOT, herdr = fakeHerdr(), log = () => {}, watchExit = null, timers = manualTimers(), platform = "win32" } = {}) {
   return paneOpenerFor({
+    platform,
     env,
     dedicatedRoot,
     base: "http://127.0.0.1:65000",
@@ -93,7 +92,7 @@ test("A HERDR THAT IS NOT THIS INVOCATION'S IS NEVER DRIVEN", () => {
   assert.equal(typeof opener(), "function", "the dedicated instance lost its opener");
 });
 
-test("THE DEFECT: a started worker gets a space, attached to the worker that is already running", { skip }, async () => {
+test("THE DEFECT: a started worker gets a space, attached to the worker that is already running", async () => {
   const herdr = fakeHerdr();
   const openPane = opener({ herdr });
   const opened = await openPane({ id: "proc-1", label: "comms-senior-dev", terminal: true });
@@ -110,15 +109,26 @@ test("THE DEFECT: a started worker gets a space, attached to the worker that is 
 
   // THE ATTACH IS THE POINT. The worker keeps its PTY and its dashboard console; a pane that re-ran
   // the agent would take both, and a visible TUI in the web console is a standing requirement.
+  // ONE ARGUMENT, the command text, which is how Herdr documents `pane run`.
   assert.deepEqual(calls[2].argv.slice(0, 3), ["pane", "run", "w2:p1"]);
-  assert.equal(calls[2].argv[3], "powershell.exe");
-  const encoded = calls[2].argv[calls[2].argv.length - 1];
-  const decoded = Buffer.from(encoded, "base64").toString("utf16le");
+  assert.equal(calls[2].argv.length, 4, "the command was not passed as one argument");
+  const [shell, ...rest] = calls[2].argv[3].split(" ");
+  assert.equal(shell, "powershell.exe");
+  const decoded = Buffer.from(rest.at(-1), "base64").toString("utf16le");
   assert.match(decoded, /aify-env\.mjs' attach --id 'proc-1'/, "the pane does not attach to the running worker");
   assert.match(decoded, /AIFY_ENV_ENDPOINT='http:\/\/127\.0\.0\.1:65000'/, "the pane was pointed at no daemon");
 });
 
-test("a worker with no terminal gets no pane, because there is nothing to attach to", { skip }, async () => {
+test("ON A POSIX HOST THE PANE GETS A POSIX COMMAND, not the Windows one it cannot run", async () => {
+  // Reported from WSL: every agent's pane showed Windows PowerShell failing to find a Linux node.
+  const herdr = fakeHerdr();
+  await opener({ herdr, platform: "linux" })({ id: "proc-1", label: "comms-senior-dev", terminal: true });
+  const typed = herdr.calls[2].argv;
+  assert.equal(typed.length, 4, "the command was not passed as one argument");
+  assert.equal(typed[3], "env AIFY_ENV_ENDPOINT='http://127.0.0.1:65000' 'C:/node/node.exe' 'C:/aify-env/bin/aify-env.mjs' attach --id 'proc-1'");
+});
+
+test("a worker with no terminal gets no pane, because there is nothing to attach to", async () => {
   const herdr = fakeHerdr();
   const openPane = opener({ herdr });
   assert.equal(await openPane({ id: "headless", terminal: false }), null);
@@ -127,7 +137,7 @@ test("a worker with no terminal gets no pane, because there is nothing to attach
   assert.deepEqual(herdr.calls, [], "a pane was opened onto a worker with no PTY");
 });
 
-test("A PANE THAT WILL NOT OPEN NEVER FAILS THE START", { skip }, async () => {
+test("A PANE THAT WILL NOT OPEN NEVER FAILS THE START", async () => {
   const logs = [];
   const herdr = fakeHerdr({ onCall: () => { throw new Error("Herdr said no"); } });
   const openPane = opener({ herdr, log: m => logs.push(m) });
@@ -160,7 +170,7 @@ test("THE CALL SITE: PluginProcesses runs the opener after the start, and surviv
   assert.deepEqual(await plain.start({ id: "c" }), { id: "c", terminal: true });
 });
 
-test("THE SECOND DEFECT: the worker's PANE closes when the worker goes, and nothing else does", { skip }, async () => {
+test("THE SECOND DEFECT: the worker's PANE closes when the worker goes, and nothing else does", async () => {
   // TAKEN FROM THE RUNNER, not from the stop call: a worker killed from outside, or one that simply
   // dies, must take its pane with it too.
   //
@@ -188,7 +198,7 @@ test("THE SECOND DEFECT: the worker's PANE closes when the worker goes, and noth
   assert.ok(logs.some(l => l.includes("closed w2:p1")), "a closed pane said nothing");
 });
 
-test("A PANE THAT WILL NOT CLOSE IS TRIED ONCE MORE, then reported -- never thrown", { skip }, async () => {
+test("A PANE THAT WILL NOT CLOSE IS TRIED ONCE MORE, then reported -- never thrown", async () => {
   const logs = [];
   const watched = new Map();
   const timers = manualTimers();
@@ -215,7 +225,7 @@ test("A PANE THAT WILL NOT CLOSE IS TRIED ONCE MORE, then reported -- never thro
   assert.equal(stubborn.closes().length, 2, "a close that never succeeds was retried without end");
 });
 
-test("A PANE THAT IS ALREADY GONE IS NOT A FAILURE", { skip }, async () => {
+test("A PANE THAT IS ALREADY GONE IS NOT A FAILURE", async () => {
   // Herdr answers `pane_not_found` for a pane somebody else closed. That is the outcome the close
   // wanted, so it is neither retried nor reported as a leftover.
   const logs = [];
@@ -232,7 +242,7 @@ test("A PANE THAT IS ALREADY GONE IS NOT A FAILURE", { skip }, async () => {
   assert.equal(logs.some(l => l.includes("outlived")), false, "a pane already gone was reported as left behind");
 });
 
-test("A PANE MADE BEFORE A LATER STEP FAILED IS CLOSED, not left empty", { skip }, async () => {
+test("A PANE MADE BEFORE A LATER STEP FAILED IS CLOSED, not left empty", async () => {
   // Found by review: the space was created, then the shell poll or the typed command failed, and the
   // catch logged it and walked away -- an empty space with the agent's name on it, for ever.
   for (const failing of ["process-info", "run"]) {
@@ -250,7 +260,7 @@ test("A PANE MADE BEFORE A LATER STEP FAILED IS CLOSED, not left empty", { skip 
   assert.deepEqual(never.closes(), [], "a close was sent for a pane that never existed");
 });
 
-test("A WORKER ALREADY RELEASED BY THE TIME IT IS WATCHED STILL LOSES ITS PANE", { skip }, async () => {
+test("A WORKER ALREADY RELEASED BY THE TIME IT IS WATCHED STILL LOSES ITS PANE", async () => {
   // Found by review. The Runner answers null for a stream it has already released, and the opener
   // ignored that answer -- so there was no exit left to hear, and the pane stayed.
   const timers = manualTimers();
@@ -260,7 +270,7 @@ test("A WORKER ALREADY RELEASED BY THE TIME IT IS WATCHED STILL LOSES ITS PANE",
   assert.deepEqual(herdr.closes(), [["pane", "close", "w2:p1"]], "a worker gone before it could be watched kept its pane");
 });
 
-test("NOTHING IS WATCHED WHEN NO SPACE WAS OPENED", { skip }, async () => {
+test("NOTHING IS WATCHED WHEN NO SPACE WAS OPENED", async () => {
   // NEGATIVE CONTROL, driven by removing the thing under test. A watch registered for a worker with
   // no pane would close whatever id happened to be held, and would leak on every headless worker.
   const watched = [];
