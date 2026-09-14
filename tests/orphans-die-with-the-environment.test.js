@@ -9,7 +9,7 @@
 // nothing about the case the handler cannot reach.
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -22,12 +22,23 @@ import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
 const DAEMON = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs");
 const LF = String.fromCharCode(10);
 
+// EVERY DAEMON IS STOPPED AFTER ITS TEST, whatever the test did. The `finally` blocks below start
+// after the first assertions, so a test that failed before reaching one left its daemon alive:
+// three per suite run on Linux, still listening afterwards, and holding this file open until the 60s
+// timeout cancelled it.
+const started = new Set();
+afterEach(() => {
+  for (const child of started) child.kill();
+  started.clear();
+});
+
 function startDaemon(record) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
       stdio: ["ignore", "pipe", "pipe"],
       env: sealedDaemonEnv({ AIFY_ENV_PROCESS_RECORD: record }),
     });
+    started.add(child);
     let out = "";
     const timer = setTimeout(() => reject(new Error(`daemon did not start: ${out}`)), 20_000);
     child.stdout.on("data", (c) => {
