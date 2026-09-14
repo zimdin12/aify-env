@@ -33,6 +33,16 @@ test('encoded PowerShell arguments retain metacharacters as single-quoted data',
   assert.throws(() => attachCommand({ node: 'bad\rpath', script: 'ok', base: 'http://127.0.0.1:12345', id: 'uuid-p1' }));
 });
 
+// A NODE PATH HOLDING `=` IS REFUSED on POSIX. GNU env 8.32, measured: `env A=x '/tmp/odd=dir/node'
+// '/tmp/script.sh' attach` set `/tmp/odd` as a variable and ran script.sh as the program. Windows has no
+// `env` in its line, and the script path sits after the program, where `=` is only an argument.
+test('a POSIX attach refuses a node path env would read as an assignment', () => {
+  const base = 'http://127.0.0.1:12345';
+  assert.throws(() => attachCommand({ node: '/opt/a=b/node', script: '/s.mjs', base, id: 'uuid-p1', platform: 'linux' }), /containing =/);
+  assert.doesNotThrow(() => attachCommand({ node: '/opt/ab/node', script: '/x=y/s.mjs', base, id: 'uuid-p1', platform: 'linux' }));
+  assert.doesNotThrow(() => attachCommand({ node: 'C:/a=b/node.exe', script: 'C:/s.mjs', base, id: 'uuid-p1', platform: 'win32' }));
+});
+
 // THE PANE'S SHELL IS THE HOST'S. On WSL the command was the Windows one, zsh found `powershell.exe`
 // through interop, and Windows PowerShell failed to run a Linux node path in every agent's pane.
 // So the typed line is run through the real shells here rather than compared to a string.
