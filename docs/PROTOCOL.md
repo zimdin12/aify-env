@@ -117,6 +117,21 @@ The replay is **bounded** (64 KB by default, most-recent-first). A process that 
 not be holding a week of scrollback in the environment's memory, and truncating from the other end
 would give a console the start of a session and none of what is happening now.
 
+**Before any of it, one `meta` event** says what the bytes are: `cols` and `rows`, `truncated` (the
+replay lost its head), `resized` (the PTY changed size inside the retained replay) and `replayBytes`.
+A later `meta` is sent on each resize; a consumer takes only its geometry, because `truncated` and
+`resized` describe the replay that subscriber was handed when it joined.
+
+**For a PTY, the replay is replaced by a screen checkpoint** when the optional `@xterm/headless`,
+`@xterm/addon-unicode11` and `@xterm/addon-serialize` are installed. The daemon feeds each PTY's
+output and resizes, in order, to its own emulator; a new subscriber gets `meta` with
+`"checkpoint": true` and the geometry the screen was taken at, then one `data` event holding the
+serialized screen, then exactly the live bytes after it, with nothing skipped or repeated. `truncated`
+and `resized` still describe the retained replay; `checkpoint` is what makes the screen sound. It is
+taken only where the parser is between escape sequences. It does not carry scroll margins, a saved
+cursor, cursor visibility or character sets. A process that has exited, or a host without the
+packages, gets the replay as before.
+
 Each chunk is JSON-encoded inside the event, because a newline in the output would otherwise end the
 event early -- a newline is this protocol's frame delimiter.
 
@@ -149,7 +164,8 @@ left waiting. Late attachment is the normal case for a console, not the exceptio
 ## `POST /processes/:id/input`
 
 ```json
-{ "data": "yes" }
+{ "data": "yes
+" }
 ```
 
 `204` on delivery. **`404` when the process is gone** — refused rather than silently dropped, because a
