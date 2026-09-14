@@ -1,0 +1,16 @@
+Agent-detection manifests (claude.json, codex.json, hermes.json)
+
+These files are derived from Herdr's agent-detection manifests:
+  https://github.com/herdrdev/herdr/tree/v0.9.0/distribution/agent-detection
+  tag v0.9.0, commit b99002ac99b09e00b4ca692436cb15a6b0d676f1
+
+Herdr is licensed under the Apache License, Version 2.0; a copy is in LICENSE beside
+this file. Upstream ships no NOTICE file.
+
+Modification: each TOML manifest was parsed with Python's tomllib and written as JSON,
+with a `vendored` block added naming the upstream path, tag, commit and the sha256 of the
+original TOML. The rules themselves are unchanged. scripts/vendor-herdr-manifests.py
+reproduces the conversion.
+
+The test fixtures in tests/screen-rules-follow-herdr.test.js are ported from Herdr's
+src/detect/manifest/tests.rs at the same commit, under the same license.
