@@ -74,12 +74,16 @@ function fakeProcesses({ startThrows = null, size = { cols: 120, rows: 30 } } = 
   //: on where OUTPUT lands cannot: each listener closes over the api that created it, so a leaked one
   //: reports into a different fake and the test inspecting the current api sees nothing wrong.
   const listenerCount = () => listeners.size;
+  //: WHETHER THE PROCESS IS STILL RUNNING, like `Runner.list()`. The host reports only what the
+  //: runner still runs, so a fake that cannot say would make every liveness assertion vacuous.
+  let running = false;
   return {
     calls,
     listenerCount,
     async start(spec) {
       calls.starts.push(spec);
       if (startThrows) throw new Error(startThrows);
+      running = true;
       return { id: "proc-1", pid: 4242, cols: size?.cols ?? 0, rows: size?.rows ?? 0 };
     },
     subscribe(id, onOutput, onExit) {
@@ -100,7 +104,7 @@ function fakeProcesses({ startThrows = null, size = { cols: 120, rows: 30 } } = 
       // prove this host CARRIES them rather than merely registering interest. They fan out to every
       // attached listener, so a test sees exactly what the service would.
       calls.emit = (chunk) => { for (const fn of [...listeners]) fn(chunk); };
-      calls.exit = (code, signal) => { for (const fn of [...exits]) fn(code, signal); };
+      calls.exit = (code, signal) => { running = false; for (const fn of [...exits]) fn(code, signal); };
       return () => {
         listeners.delete(onOutput);
         if (onExit) exits.delete(onExit);
@@ -108,7 +112,8 @@ function fakeProcesses({ startThrows = null, size = { cols: 120, rows: 30 } } = 
     },
     write(id, data) { calls.writes.push({ id, data }); },
     resize(id, cols, rows) { calls.resizes.push({ id, cols, rows }); },
-    async stop(id) { calls.stops.push(id); },
+    async stop(id) { calls.stops.push(id); running = false; },
+    list() { return running ? [{ id: "proc-1", pid: 4242 }] : []; },
   };
 }
 
@@ -579,11 +584,12 @@ test("the book answers EMPTY for an unknown terminal, never the terminal id", as
 test("EVERY PASS REPORTS THE TERMINALS THIS HOST IS RUNNING", async () => {
   const book = createHandleBook();
   const api = fakeApi({ controls: [] });
-  await run({ handles: book });                 // start one, so the host holds it
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });      // start one, so the host holds it
   api.outputs.length = 0;
 
   await runTerminalControlPass({
-    api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS, windows: true,
+    api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true,
     withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
     handles: book,
   });
@@ -597,11 +603,12 @@ test("the liveness frame is EMPTY and carries NO status", async () => {
   // REOPEN a terminal an operator or a reconciler had deliberately closed.
   const book = createHandleBook();
   const api = fakeApi({ controls: [] });
-  await run({ handles: book });
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
   api.outputs.length = 0;
 
   await runTerminalControlPass({
-    api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS, windows: true,
+    api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true,
     withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
     handles: book,
   });
@@ -630,12 +637,13 @@ test("AN EXITED TERMINAL IS NOT REPORTED ALIVE", async () => {
 test("a failed liveness report does not stop the pass", async () => {
   // It would trade a reaped console for a host that stops running anything at all.
   const book = createHandleBook();
-  await run({ handles: book });
+  const processes = fakeProcesses();
+  await run({ handles: book, processes });
   const logs = [];
   const api = fakeApi({ controls: [] });
   api.terminalOutput = async () => { throw new Error("service down"); };
   const result = await runTerminalControlPass({
-    api, processes: fakeProcesses(), environmentId: "e", cwdRoots: ROOTS, windows: true,
+    api, processes, environmentId: "e", cwdRoots: ROOTS, windows: true,
     withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
     handles: book, log: (m) => logs.push(String(m)),
   });
