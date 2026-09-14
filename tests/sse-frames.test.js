@@ -260,6 +260,7 @@ test("A META FRAME ROUND-TRIPS, and it did NOT when the writer shipped without t
   }));
   assert.deepEqual(frames, [{
     type: FRAME_META, cols: 132, rows: 40, truncated: true, resized: false, replayBytes: 65536,
+    checkpoint: false,
   }]);
 });
 

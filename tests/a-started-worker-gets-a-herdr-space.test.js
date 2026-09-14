@@ -282,6 +282,87 @@ test("NOTHING IS WATCHED WHEN NO SPACE WAS OPENED", async () => {
   assert.deepEqual(watched, [], "an exit watch was registered for a worker that got no pane");
 });
 
+/** A real invocation root on disk, because the pane file is a real file the launcher reads. */
+async function onDisk(t) {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = mkdtempSync(join(tmpdir(), "aify-env-pane-file-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  return { root, socket: join(root, "herdr-tui.sock") };
+}
+
+test("A WORKER'S OWN PANE SHOWS ITS STATUS, and its launcher is told which pane that is", async (t) => {
+  // THE DEFECT. The worker's real pane runs `attach`, so Herdr saw no agent in it and showed no status.
+  // (The daemon's pane identity the worker inherited is removed by the Runner; see
+  // a-started-process-is-not-in-the-daemons-pane.test.js.) Driven through the real PluginProcesses.
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { root, socket } = await onDisk(t);
+  const inherited = {
+    HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", HERDR_TAB_ID: "w1:t1", HERDR_WORKSPACE_ID: "w1",
+    HERDR_SOCKET_PATH: socket, HERDR_BIN_PATH: "/herdr/herdr", PATH: "/usr/bin",
+  };
+  const order = [];
+  let paneFile = null;
+  const herdr = fakeHerdr({ onCall: (argv) => {
+    order.push(argv.slice(0, 2).join(" "));
+    // REPORTED BEFORE THE FILE EXISTS, so the worker's first hook cannot be overwritten by this idle.
+    if (argv[1] === "report-agent") assert.equal(fs.existsSync(paneFile), false, "the pane file was written before the idle report");
+    return undefined;
+  } });
+  const watched = new Map();
+  const timers = manualTimers();
+  const openPane = opener({ env: inherited, dedicatedRoot: root, herdr, platform: "linux", timers,
+    watchExit: (id, onExit) => watched.set(id, onExit) });
+
+  let started = null;
+  const runner = { start: async (spec) => { started = spec; paneFile = spec.env.AIFY_HERDR_PANE_FILE; return { id: "proc-1", terminal: true }; } };
+  const processes = new PluginProcesses(runner, { onStarted: openPane, prepare: openPane.prepare });
+  await processes.start({ id: "term-1", label: "lc-lead", launcher: "/home/op/.local/bin/claude-aify", env: inherited });
+
+  // THE HERDR ITSELF STAYS REACHABLE, because the state hook calls it.
+  assert.equal(started.env.HERDR_SOCKET_PATH, socket);
+  assert.equal(started.env.HERDR_BIN_PATH, "/herdr/herdr");
+  assert.equal(started.env.PATH, "/usr/bin");
+  assert.equal(path.dirname(paneFile), path.join(root, "worker-panes"), "the pane file is not under this invocation");
+  assert.equal(inherited.HERDR_PANE_ID, "w1:p1", "the caller's environment object was mutated");
+
+  const report = herdr.calls.find(c => c.argv[1] === "report-agent");
+  assert.deepEqual(report?.argv, ["pane", "report-agent", "w2:p1", "--source", "herdr:aify", "--agent", "claude-aify", "--state", "idle"],
+    "the worker's pane was never given an agent");
+  assert.ok(order.indexOf("pane report-agent") > order.indexOf("pane run"), "the agent was reported before the pane ran attach");
+  assert.equal(fs.readFileSync(paneFile, "utf8"), "w2:p1\n", "the launcher cannot learn which pane is its own");
+
+  // AND THE FILE GOES WITH THE WORKER, at once, so a later hook in a dying worker reports nowhere.
+  watched.get("proc-1")(0, null);
+  assert.equal(fs.existsSync(paneFile), false, "the pane file outlived its worker");
+  timers.flush();
+  assert.deepEqual(herdr.closes(), [["pane", "close", "w2:p1"]]);
+
+  // No spec env means the daemon's, and each worker gets a pane file of its own.
+  const fromDaemon = openPane.prepare({ id: "x" });
+  assert.equal(fromDaemon.env.HERDR_SOCKET_PATH, socket);
+  assert.notEqual(fromDaemon.env.AIFY_HERDR_PANE_FILE, paneFile, "two workers share one pane file");
+});
+
+test("A STATUS REPORT HERDR REFUSES LEAVES THE PANE OPEN, with no pane file", async (t) => {
+  const fs = await import("node:fs");
+  const { root, socket } = await onDisk(t);
+  const logs = [];
+  const herdr = fakeHerdr({ onCall: (argv) => {
+    if (argv[1] === "report-agent") throw new Error("pane is claimed by another source");
+    return undefined;
+  } });
+  const openPane = opener({ env: { HERDR_SOCKET_PATH: socket }, dedicatedRoot: root, herdr, platform: "linux", log: m => logs.push(m) });
+  const spec = openPane.prepare({ id: "t", launcher: "/bin/claude-aify" });
+  const opened = await openPane({ id: "proc-2", label: "sc-tester", terminal: true }, spec);
+  assert.equal(opened?.paneId, "w2:p1", "a refused status report cost the worker its pane");
+  assert.deepEqual(herdr.closes(), []);
+  assert.equal(fs.existsSync(spec.env.AIFY_HERDR_PANE_FILE), false, "a pane with no agent was named to the launcher");
+  assert.ok(logs.some(l => l.includes("with no status")), "a missing status was swallowed silently");
+});
+
 test("THE DAEMON BUILDS ONE, read rather than run, because importing it STARTS a daemon", async () => {
   // A source assertion, used for the one reason that justifies it: importing `bin/aify-env.mjs` runs
   // the daemon, which supersedes whatever serves this host and reaps its managed workers. The gate
@@ -291,7 +372,7 @@ test("THE DAEMON BUILDS ONE, read rather than run, because importing it STARTS a
   const { dirname, join } = await import("node:path");
   const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs"), "utf8");
   assert.match(source, /paneOpenerFor\(\{/, "the daemon never builds a pane opener");
-  assert.match(source, /new PluginProcesses\(runner, \{ onStarted: paneOpener \}\)/, "the opener reaches no start");
+  assert.match(source, /new PluginProcesses\(runner, \{ onStarted: paneOpener, prepare: paneOpener\?\.prepare \}\)/, "the opener reaches no start, or the worker keeps the daemon's pane identity");
   // AND THE EXIT IT CLOSES ON COMES FROM THE RUNNER. An opener built without `watchExit` opens every
   // pane and closes none, which is invisible to every test above -- they inject their own.
   assert.match(source, /watchExit: \(id, on\) => runner\.subscribe\(id, \(\) => \{\}, on\)/, "the opener learns no exit");

@@ -32,6 +32,12 @@ failing: `@xterm/headless` and `@xterm/addon-unicode11` are what let the right-h
 coding agent's SCREEN instead of a notice. Absent, the pane says it cannot draw one and names
 `aify-env attach`, which is exactly what it said before they existed. Nothing else changes.
 
+**A third, `@xterm/addon-serialize`, lets a console join a long-running agent.** With all three
+present the daemon keeps each PTY's screen and hands a late subscriber that screen, then the live
+bytes after it, so the pane and `aify-env attach` draw an agent that has printed more than the 64 KB
+replay. Without any one of them a late subscriber gets the replay as before, and the pane waits for a
+full reset it may never see. A running daemon picks this up only after `npm install` and a restart.
+
 ```bash
 aify-env doctor
 ```

@@ -503,31 +503,27 @@ const server = createServer(async (request, response) => {
     // A QUIET PROCESS MUST NOT LET A VIEWER'S FETCH TIME OUT: Node aborts a body after 300s with no bytes.
     // Idle Claude Code panes died exactly that way on 2026-09-14; the heartbeat's reasons live with it.
     keepStreamAlive(response);
-    // BEFORE THE REPLAY, because the replay is bytes and a screen needs two facts it cannot infer
-    // from them -- the producer's geometry and whether the history is complete. Both are `streamMeta`'s
-    // to answer and it says why; `namedFrame` says why a new fact can join an existing stream safely.
-    const meta = runner.streamMeta?.(result.stream);
-    if (meta) response.write(namedFrame("meta", meta));
-    const unsubscribe = runner.subscribe(
-      result.stream,
-      (chunk) => {
+    // META FIRST, then the replay -- or, for a PTY, the daemon's checkpointed screen -- then live bytes.
+    // `subscribeScreen` owns that order and why it is exact; `namedFrame` says why a new fact can join
+    // an existing stream safely.
+    const unsubscribe = runner.subscribeScreen(result.stream, {
+      onMeta: (meta) => response.write(namedFrame("meta", meta)),
+      onOutput: (chunk) => {
         response.write(dataFrame(chunk));
         traffic.bytesOut += Buffer.byteLength(chunk);
       },
-      (code, signal) => {
+      onExit: (code, signal) => {
         // THEN THE STREAM ENDS. A console told the process is gone has nothing left to wait for, and
         // leaving it open makes a dead agent look like a thinking one -- which is the failure this
         // event exists to prevent. The frame's own rules live in `lib/sse-frames.mjs`.
         response.write(exitFrame(code, signal));
         response.end();
       },
-      // A RESIZE IS A NEW `meta`, not a new frame type. The geometry a console needs is the same fact
-      // it was told before the replay, so it arrives the same way -- and a consumer that already
-      // handles `meta` follows a resize with no further work.
-      ({ cols, rows }) => {
+      // A RESIZE IS A NEW `meta`, not a new frame type; a consumer takes only its geometry.
+      onResize: ({ cols, rows }) => {
         response.write(namedFrame("meta", { ...(runner.streamMeta?.(result.stream) ?? {}), cols, rows }));
       },
-    );
+    });
     if (!unsubscribe) {
       // Raced: the process went between the route check and here.
       response.end();
@@ -738,7 +734,7 @@ server.listen(port, HOST, async () => {
     const host = new PluginHost({
       // INSIDE A HERDR, A STARTED WORKER GETS A SPACE. Null when this is not a dedicated
       // instance, which is every ordinary daemon. See lib/herdr-pane-opener.mjs.
-      processes: new PluginProcesses(runner, { onStarted: paneOpener }),
+      processes: new PluginProcesses(runner, { onStarted: paneOpener, prepare: paneOpener?.prepare }),
       // NOT the environment id: its shape is a service's convention, and the plugin derives it from
       // what this host advertises.
       environmentId: "",

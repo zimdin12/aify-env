@@ -77,7 +77,7 @@ test("a closed stream stops beating, and nothing is written after it ends", () =
 test("THE CALL SITE: the daemon starts a heartbeat on the output stream", async () => {
   const fs = await import("node:fs");
   const source = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
-  const stream = source.slice(source.indexOf("if (result.stream)"), source.indexOf("runner.subscribe("));
+  const stream = source.slice(source.indexOf("if (result.stream)"), source.indexOf("runner.subscribeScreen("));
   assert.match(stream, /keepStreamAlive\(response\)/, "the stream branch no longer keeps an idle stream open");
 });
 
