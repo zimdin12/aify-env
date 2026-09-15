@@ -188,7 +188,9 @@ so listing it would be a menu row that does nothing when chosen. The word surviv
 *vocabulary* — which is what constrains a caller's offer — and no caller offers it.
 
 **STARTING IS THE OTHER DIRECTION AND DOES NOT ASK.** `s` lists the agents this host knows that have
-no worker and starts the one you choose. It ends nothing, and the stop that undoes it is one menu
+no worker and starts the one you choose. It ends nothing the service reports as live: the restart it
+sends is refused if the agent has a live session. The launch itself replaces any leftover or unreported
+instance of that agent still running on this host. The stop that undoes it is one menu
 away — the confirmation is derived from "does this end work you cannot get back", and starting does
 not. It still takes three deliberate keystrokes.
 
