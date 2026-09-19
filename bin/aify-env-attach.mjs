@@ -26,6 +26,7 @@ import { OutputFollower } from "../lib/output-follower.mjs";
 import { DETACH } from "../lib/keys.mjs";
 import { resolveAttachTarget } from "../lib/attach-target.mjs";
 import { passthrough } from "../lib/attach-screen.mjs";
+import { InputSender } from "../lib/input-sender.mjs";
 
 const LF = String.fromCharCode(10);
 const ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
@@ -119,6 +120,12 @@ function leave(code, message) {
 process.stdin.setRawMode(true);
 process.stdin.resume();
 
+// ONE REQUEST IN FLIGHT, COALESCING WHAT IS TYPED MEANWHILE. Sending each chunk on its own raced:
+// independent HTTP requests have no ordering guarantee, so under load two keystrokes could arrive
+// reversed and the operator watched their own typing come out scrambled. See lib/input-sender.mjs.
+const input = new InputSender((data) =>
+  post(`/processes/${encodeURIComponent(target.id)}/input`, { data }));
+
 process.stdin.on("data", (chunk) => {
   const data = chunk.toString("binary");
   // ONLY WHEN THE CHUNK **IS** THE DETACH BYTE, never when it merely contains one: a paste or a
@@ -127,7 +134,7 @@ process.stdin.on("data", (chunk) => {
     leave(0, `detached from ${wanted || target.id}. It is still running.`);
     return;
   }
-  void post(`/processes/${encodeURIComponent(target.id)}/input`, { data });
+  input.write(data);
 });
 
 const sendResize = () => post(`/processes/${encodeURIComponent(target.id)}/resize`, {
