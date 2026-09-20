@@ -50,6 +50,7 @@ if [ "$PLAN_ONLY" = true ]; then
   say "plan only: nothing will be installed and nothing will be asked"
   say "would run: npm install"
   say "would run: npm install -g ."
+  say "would ensure ~/.aify/config.json has transport.localSocket (an existing value is kept)"
   say "then, for each registered service this host can host work for:"
   node scripts/install-credentials.mjs --no-prompt || true
   exit 0
@@ -67,6 +68,10 @@ say "installing the aify-env command"
 npm install -g . --no-audit --no-fund
 
 say "installed: $(command -v aify-env || echo 'NOT ON PATH -- check your npm global bin directory')"
+
+# THE HOST'S TRANSPORT DEFAULT, written once into ~/.aify/config.json so the setting is discoverable.
+# A value already there is left alone: an operator who switched it off meant it.
+node scripts/install-host-config.mjs || true
 
 # AND THE CREDENTIALS, last, because the plan depends on what is registered on this host rather than
 # on what is in this checkout. Its exit status is this script's: a host that cannot claim work has

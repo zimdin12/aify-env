@@ -24,7 +24,14 @@ async function fixture(t) {
   const binary = path.join(root, 'Programs/Herdr/bin/herdr.exe');
   fs.mkdirSync(path.dirname(binary), { recursive: true }); fs.writeFileSync(binary, 'passive detection only');
   const state = { lists: 0, calls: [], initial: [{ id: 'old-p1', label: 'lead', terminal: true }], current: [{ id: 'other-p2', label: 'old-p1', terminal: true }] };
-  const server = http.createServer((q, s) => { assert.equal(q.url, '/processes'); s.end(JSON.stringify({ processes: ++state.lists === 1 ? state.initial : state.current })); });
+  // `/health` is asked first since 2026-09-20: a client learns from it whether this daemon offers a
+  // local input socket. This fixture offers none, which is also the WSL and older-daemon case, so
+  // the client keeps using HTTP -- and the listing assertions below are unchanged.
+  const server = http.createServer((q, s) => {
+    if (q.url === '/health') { s.end(JSON.stringify({ status: 'healthy', inputSocket: '' })); return; }
+    assert.equal(q.url, '/processes');
+    s.end(JSON.stringify({ processes: ++state.lists === 1 ? state.initial : state.current }));
+  });
   const socket = process.platform === 'win32' ? 'identity-' + randomUUID() : path.join(root, 'rpc.sock');
   const rpc = net.createServer(s => { let text = ''; s.on('data', b => {
     text += b; if (!text.includes('\n')) return;

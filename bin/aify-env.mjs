@@ -50,6 +50,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { handleRequest } from "../lib/protocol.mjs";
+import { startInputSocket } from "../lib/input-socket-start.mjs";
+import { readHostConfig } from "../lib/host-config.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
 import { dataFrame, exitFrame, keepStreamAlive, namedFrame } from "../lib/sse-frames.mjs";
@@ -59,11 +61,14 @@ import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-proce
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
 import { killTree } from "../lib/kill-tree.mjs";
 import {
-  looksLikeEnvironment,
   showViewInsteadOfRefusing,
   workLostToSupersession,
 } from "../lib/environment-checks.mjs";
 import { defaultIsAlive } from "../lib/reaper.mjs";
+import { askIncumbent } from "../lib/incumbent.mjs";
+
+/** Whether the thing holding our port is an aify-env, and which pid it is. */
+const incumbent = () => askIncumbent({ host: HOST, port });
 import { homedir, hostname } from "node:os";
 import { PackageBuild } from "../lib/build-identity.mjs";
 import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
@@ -389,7 +394,7 @@ const shutdown = createShutdown({
   beforeStop: async () => { stopDashboard(); await servicePlugins.stopAll(); },
   // A FUNCTION, so `server` is looked up when a signal arrives rather than read here, where it is
   // still in its temporal dead zone.
-  closeServer: () => server.close(),
+  closeServer: () => { void inputSocketServer?.stop(); server.close(); },
   // OURS ONLY, on the way out too. Shutdown emptied the whole file, so an environment stopping
   // normally erased a concurrently-running instance's record exactly as the boot reap did.
   clearOwned: () => clearOwned(OWNED_FILE, {
@@ -419,6 +424,12 @@ let unknown = [];
  * service does elsewhere, and a number here that meant anything wider would be invented.
  */
 const traffic = { requests: 0, bytesOut: 0 };
+
+// The local input socket, once it is listening. Advertised on /health so a client discovers it
+// rather than guessing an address, and empty whenever this host has none.
+let inputSocketAddress = "";
+let inputSocketServer = null;
+const HOST_CONFIG = readHostConfig({ env: process.env });
 
 const server = createServer(async (request, response) => {
   traffic.requests += 1;
@@ -453,6 +464,7 @@ const server = createServer(async (request, response) => {
       { method: request.method, path: new URL(request.url, "http://localhost").pathname, body },
       {
         runner,
+        inputSocket: inputSocketAddress,
         readFile: (path) => readFileSync(path, "utf8"),
         version: VERSION,
         build: BUILD,
@@ -554,32 +566,6 @@ const server = createServer(async (request, response) => {
 //
 // Exit 69 (EX_UNAVAILABLE) rather than 1: a supervisor restarting on failure should not fight the
 // instance that already holds the port.
-/** Whether the thing holding our port is an aify-env, and which pid it is. */
-async function incumbent() {
-  try {
-    const response = await fetch(`http://${HOST}:${port}/health`, { signal: AbortSignal.timeout(3000) });
-    const body = await response.json();
-    // IDENTIFIED BY SHAPE, because the answer to this question decides whose process tree gets killed.
-    // `status: "healthy"` plus a pid was the old test, and it is the most common health body in
-    // existence -- any dev server, any sidecar, anything at all that serves JSON on this port and
-    // reports its own pid passed it, and `killTree` took the pid on the next line. The doctor had
-    // already been hardened against exactly this (see `looksLikeEnvironment`, which describes a
-    // responder mistaken for an environment on the strength of `{"status":"healthy"}`); the KILL path
-    // was left on the weak test. An aify-env is recognised by what it OWNS -- a `processes` array and
-    // a `terminals` object, both of which /health above always sends -- and nothing else on a host has
-    // reason to report those.
-    if (!looksLikeEnvironment({ ok: true, status: response.status, body })) return null;
-    // `processes` travels with the pid: a takeover ENDS them, so the caller must be able to say what
-    // it is about to cost before it costs it.
-    if (Number.isInteger(body?.pid)) {
-      return { pid: body.pid, version: body.version, processes: body.processes };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 let superseding = false;
 /**
  * Set when this process REFUSED a takeover and became a read-only view.
@@ -719,6 +705,16 @@ server.listen(port, HOST, async () => {
     try { publishInstanceReady(instanceContext, { pid: process.pid, envInstance: runner.instance(), port: bound.port, build: BUILD }); }
     catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }
   } else await reapLeftovers();
+
+  // KEYSTROKES OVER A LOCAL SOCKET, when this host wants one. lib/input-socket-start.mjs owns the
+  // platform branches and the rule that failing to listen is not failing to serve.
+  //
+  // IT CARRIES INPUT AND RESIZE, NOTHING ELSE. Those two routes need the runner and nothing more, so
+  // the socket is not a second door onto the whole API: a frame naming any other path is refused.
+  inputSocketServer = await startInputSocket({
+    enabled: HOST_CONFIG.localSocket, port: bound.port, handleRequest, deps: () => ({ runner }), log: logLine,
+  });
+  inputSocketAddress = inputSocketServer?.address ?? "";
 
   // START THE SERVICE PLUGINS, and only now: a plugin claims work, and work claimed before the
   // leftover reap could be killed by it moments later. After LISTENING, because a plugin that claims

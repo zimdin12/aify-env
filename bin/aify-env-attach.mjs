@@ -27,11 +27,22 @@ import { DETACH } from "../lib/keys.mjs";
 import { resolveAttachTarget } from "../lib/attach-target.mjs";
 import { passthrough } from "../lib/attach-screen.mjs";
 import { InputSender } from "../lib/input-sender.mjs";
+import { connectInputSocket } from "../lib/input-socket.mjs";
+import { readHostConfig } from "../lib/host-config.mjs";
 
 const LF = String.fromCharCode(10);
 const ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
 
 const say = (text) => process.stderr.write(`${text}${LF}`);
+
+async function daemonHealth() {
+  // WHERE THE FAST PATH IS, asked rather than computed: the daemon knows whether it has a socket,
+  // and a client that guessed an address would connect to whatever happened to hold that name.
+  try {
+    const response = await fetch(`${ENDPOINT}/health`, { signal: AbortSignal.timeout(2000) });
+    return await response.json();
+  } catch { return {}; }
+}
 
 async function listProcesses() {
   const response = await fetch(`${ENDPOINT}/processes`, { signal: AbortSignal.timeout(5000) });
@@ -61,8 +72,10 @@ if (exactId && (args.length !== 2 || !args[1])) {
 }
 const wanted = exactId ? args[1] : args.find((arg) => !arg.startsWith("-")) ?? "";
 
+let health = {};
 let processes;
 try {
+  health = await daemonHealth();
   processes = await listProcesses();
 } catch (error) {
   say(`aify-env attach: no environment answered at ${ENDPOINT} (${error?.message ?? error}).`);
@@ -109,6 +122,7 @@ function restore() {
   try { process.stdin.setRawMode(false); } catch { /* not a tty any more */ }
   process.stdin.pause();
   try { follower.stop(); } catch { /* already closed */ }
+  try { socket?.close(); } catch { /* already closed */ }
 }
 
 function leave(code, message) {
@@ -120,11 +134,32 @@ function leave(code, message) {
 process.stdin.setRawMode(true);
 process.stdin.resume();
 
+// THE FAST PATH WHEN THIS HOST HAS ONE. A local socket carries keystrokes in ~0.02 ms against
+// ~0.33 ms over `fetch` (measured 2026-09-20, both ends), and the stream itself keeps them in order.
+// It is attempted only when the daemon advertises an address and this host has not switched it off;
+// a WSL client, another machine, or an older daemon simply never gets one and keeps using HTTP.
+//
+// AND IT CAN GO AWAY MID-SESSION. `send` answers false when the socket has closed, and the next
+// keystroke travels by HTTP -- the transport degrades, the session does not end.
+const hostConfig = readHostConfig({ env: process.env });
+let socket = null;
+if (hostConfig.localSocket && typeof health?.inputSocket === "string" && health.inputSocket) {
+  socket = await connectInputSocket({
+    address: health.inputSocket,
+    onRefusal: (frame) => { if (frame?.status === 404) leave(69, `${wanted || target.id} is no longer running here.`); },
+  });
+}
+
 // ONE REQUEST IN FLIGHT, COALESCING WHAT IS TYPED MEANWHILE. Sending each chunk on its own raced:
 // independent HTTP requests have no ordering guarantee, so under load two keystrokes could arrive
 // reversed and the operator watched their own typing come out scrambled. See lib/input-sender.mjs.
-const input = new InputSender((data) =>
-  post(`/processes/${encodeURIComponent(target.id)}/input`, { data }));
+// The socket needs no such care -- a stream is ordered -- but the sender also coalesces, which keeps
+// a paste one write on either transport.
+const inputPath = `/processes/${encodeURIComponent(target.id)}/input`;
+const input = new InputSender(async (data) => {
+  if (socket?.send(inputPath, { data })) return;
+  await post(inputPath, { data });
+});
 
 process.stdin.on("data", (chunk) => {
   const data = chunk.toString("binary");
@@ -137,10 +172,12 @@ process.stdin.on("data", (chunk) => {
   input.write(data);
 });
 
-const sendResize = () => post(`/processes/${encodeURIComponent(target.id)}/resize`, {
-  cols: process.stdout.columns || 0,
-  rows: process.stdout.rows || 0,
-});
+const sendResize = async () => {
+  const size = { cols: process.stdout.columns || 0, rows: process.stdout.rows || 0 };
+  const path = `/processes/${encodeURIComponent(target.id)}/resize`;
+  if (socket?.send(path, size)) return;
+  await post(path, size);
+};
 process.stdout.on("resize", () => void sendResize());
 
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
