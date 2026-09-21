@@ -604,3 +604,18 @@ test("THE PLUGIN NAMES ITSELF ON THE CAPABILITY, because the host tier cannot", 
   // AND IT IS THE PLUGIN'S OWN NAME, not a second spelling of it that could drift.
   assert.equal(plugin.capabilities.agents.service, plugin.name);
 });
+
+test("THE PLUGIN'S OWN MACHINE ID REACHES THE CLAIM, not just the pass that accepts one", async () => {
+  // The pass takes a `machineId` and this call site is what decides whether it ever gets one. It
+  // did not until 2026-09-21, and a unit test of the pass alone would have passed throughout:
+  // the same call-site gap aify-comms' own `service-check` was extracted to close.
+  const bodies = [];
+  const api = { ...fakeApi(), async claim(body) { bodies.push(body); return {}; } };
+  const { plugin } = makePlugin(api, { machineId: "win32:box" });
+  const { host } = makeHost();
+  await plugin.start(host);
+  await new Promise((resolve) => setImmediate(resolve));
+  await plugin.stop();
+  assert.ok(bodies.length >= 1, "the claim loop never reached the service, so this proves nothing");
+  assert.equal(bodies[0].machineId, "win32:box");
+});

@@ -251,3 +251,36 @@ test("a root of / admits every absolute workspace", () => {
   assert.equal(workspaceWithinRoots("/home/dev/projects/blei-cms", ["/home/dev", "/"]), true);
   assert.equal(workspaceWithinRoots("/home/bob", ["/home/bo"]), false);
 });
+
+
+// -- who claimed it -------------------------------------------------------------------------
+
+test("THE CLAIM NAMES THE MACHINE, because the service writes it onto the agent row", async () => {
+  // MEASURED ON THE OPERATOR'S HOST 2026-09-21: every `claim_machine_id` recorded since this host
+  // took claiming over on 2026-09-03 was empty -- 79 rows -- because this call passed none. The
+  // service writes that value to `agents.machine_id` when the spawn reaches `running`, so a blank
+  // ERASES the machine an agent belongs to. A worker that comes up re-registers and puts it back,
+  // which is why only agents whose spawns failed stayed blank; `mp-manager` was one, and it
+  // disappeared from the start menu, which offers only agents on this machine.
+  const bodies = [];
+  const api = {
+    ...fakeApi({ request: REQUEST }),
+    async claim(body) { bodies.push(body); return { spawnRequest: REQUEST }; },
+  };
+  await runClaimPass({ api, environmentId: "e", machineId: "win32:box", cwdRoots: ROOTS, windows: true, ...FS });
+  assert.equal(bodies.length, 1, "the pass did not claim");
+  assert.equal(bodies[0].machineId, "win32:box");
+  assert.equal(bodies[0].environmentId, "e", "the environment id must still travel");
+});
+
+test("CONTROL — a pass told no machine sends none rather than inventing one", async () => {
+  // A host that cannot say which machine it is must not guess: aify-comms compares this value
+  // against the agent row, and a wrong id is worse than an absent one.
+  const bodies = [];
+  const api = {
+    ...fakeApi({ request: REQUEST }),
+    async claim(body) { bodies.push(body); return { spawnRequest: REQUEST }; },
+  };
+  await runClaimPass({ api, environmentId: "e", cwdRoots: ROOTS, windows: true, ...FS });
+  assert.equal(bodies[0].machineId, "");
+});
