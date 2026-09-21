@@ -143,8 +143,11 @@ process.stdin.setRawMode(true);
 const inputPath = `/processes/${encodeURIComponent(target.id)}/input`;
 let socket = null;
 const input = new InputSender(async (data) => {
-  if (socket?.send(inputPath, { data })) return;
-  await post(inputPath, { data });
+  // `encoding: "binary"` because stdin is read raw, one code unit per byte. Without it the daemon
+  // treats the string as text and encodes it again -- typing `e-acute` reached the process as
+  // c383c2a9 instead of c3a9, on both transports, from the first version of this client.
+  if (socket?.send(inputPath, { data, encoding: "binary" })) return;
+  await post(inputPath, { data, encoding: "binary" });
 });
 
 process.stdin.on("data", (chunk) => {
