@@ -61,3 +61,22 @@ test("writing a setting into a damaged file starts a sound one rather than faili
   const after = JSON.parse(withHostSetting("{ truncated", "localSocket", true));
   assert.deepEqual(after, { version: 1, transport: { localSocket: true } });
 });
+
+test("another tier's `version` survives an aify-env install", () => {
+  // EXTERNAL REVIEW, 2026-09-21, finding F. `withHostSetting` wrote `version: 1` unconditionally,
+  // inside the one function whose whole purpose is to leave other tiers' keys alone -- so a file
+  // another tier had stamped came back renumbered the moment an operator reinstalled aify-env.
+  const theirs = JSON.stringify({ version: 2, wrapper: { theme: "dark" } });
+  const written = JSON.parse(withHostSetting(theirs, "localSocket", false));
+  assert.equal(written.version, 2, "the version belongs to whoever stamped it, not to this writer");
+  assert.deepEqual(written.wrapper, { theme: "dark" }, "and the rest of their file is still there");
+  assert.equal(written.transport.localSocket, false);
+});
+
+test("a file nobody has stamped still gets a version", () => {
+  // The control: absent is not the same as set, and a file this writer created needs the field.
+  assert.equal(JSON.parse(withHostSetting("", "localSocket", true)).version, 1);
+  assert.equal(JSON.parse(withHostSetting("{}", "localSocket", true)).version, 1);
+  // Unreadable JSON is replaced rather than merged -- there is nothing in it to preserve.
+  assert.equal(JSON.parse(withHostSetting("not json at all", "localSocket", true)).version, 1);
+});

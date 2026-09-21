@@ -54,6 +54,7 @@ import { startInputSocket } from "../lib/input-socket-start.mjs";
 import { readHostConfig } from "../lib/host-config.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
+import { daemonShutdownHooks } from "../lib/shutdown-hooks.mjs";
 import { dataFrame, exitFrame, keepStreamAlive, namedFrame } from "../lib/sse-frames.mjs";
 import { startDaemonView } from "../lib/daemon-view.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
@@ -382,19 +383,12 @@ let stopDashboard = () => {};
 // it: if aify-env dies, the processes it handles die with it.
 //
 // The record on disk still covers the hard kill that runs no handler at all. Both halves are needed.
-const shutdown = createShutdown({
+const shutdown = createShutdown(daemonShutdownHooks({
   runner,
-  // Stop redrawing first: a frame landing mid-teardown paints a screen already untrue.
-  // Plugins first: one may be mid-claim, and a claim settled after its processes are gone reports a
-  // spawn as running against a host that no longer exists.
-  // THE VIEW STOPS FIRST, AND SYNCHRONOUSLY, because it owns the operator's TERMINAL and this
-  // callback is awaited only up to a budget. `lib/daemon-view.mjs` carries the argument and the
-  // measurement. `stopAll()` -- the offline beat and pending exit markers -- runs before
-  // `runner.stop()` unless that budget, or a second signal, cuts the wait short.
-  beforeStop: async () => { stopDashboard(); await servicePlugins.stopAll(); },
-  // A FUNCTION, so `server` is looked up when a signal arrives rather than read here, where it is
-  // still in its temporal dead zone.
-  closeServer: () => { void inputSocketServer?.stop(); server.close(); },
+  stopView: () => stopDashboard(),
+  inputSocket: () => inputSocketServer,
+  servicePlugins,
+  closeHttpServer: () => server.close(),
   // OURS ONLY, on the way out too. Shutdown emptied the whole file, so an environment stopping
   // normally erased a concurrently-running instance's record exactly as the boot reap did.
   clearOwned: () => clearOwned(OWNED_FILE, {
@@ -402,7 +396,7 @@ const shutdown = createShutdown({
   }),
   exit: (code) => process.exit(code),
   write: (line) => process.stderr.write(line),
-});
+}));
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) {
   try {
     process.on(signal, () => { void shutdown(signal); });

@@ -138,8 +138,15 @@ process.stdin.setRawMode(true);
 // Ctrl-] included, was thrown away. Measured by review: 1 ms on the happy path, up to the 400 ms
 // connect timeout against a busy daemon, which is exactly the load the ordering fix was written for.
 //
-// Early keys therefore travel by HTTP, and the socket takes over the moment it is connected. The
-// sender keeps one send in flight either way, so the changeover cannot reorder anything.
+// Early keys therefore travel by HTTP, and the socket takes over the moment it is connected.
+//
+// WHAT THE SENDER DOES DIFFERS BY TRANSPORT, and saying otherwise was wrong (external review
+// 2026-09-21, finding F). Over HTTP it keeps ONE request in flight and coalesces whatever was typed
+// while the previous one was outstanding, because concurrent posts arrive in any order -- which is
+// the scrambling this work started from. Over the socket `send` returns as soon as the bytes are
+// written, so nothing is ever outstanding and nothing coalesces: the stream itself keeps the order,
+// which is the property that made it worth having. Either way the changeover cannot reorder
+// anything, because the one in flight finishes before the next begins.
 const inputPath = `/processes/${encodeURIComponent(target.id)}/input`;
 let socket = null;
 const input = new InputSender(async (data) => {
