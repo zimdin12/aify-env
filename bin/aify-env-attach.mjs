@@ -132,30 +132,16 @@ function leave(code, message) {
 }
 
 process.stdin.setRawMode(true);
-process.stdin.resume();
 
-// THE FAST PATH WHEN THIS HOST HAS ONE. A local socket carries keystrokes in ~0.02 ms against
-// ~0.33 ms over `fetch` (measured 2026-09-20, both ends), and the stream itself keeps them in order.
-// It is attempted only when the daemon advertises an address and this host has not switched it off;
-// a WSL client, another machine, or an older daemon simply never gets one and keeps using HTTP.
+// THE SENDER AND THE LISTENER EXIST BEFORE stdin IS RESUMED. A resumed stdin with no listener
+// DISCARDS what arrives, and the socket handshake below is awaited -- so every key typed during it,
+// Ctrl-] included, was thrown away. Measured by review: 1 ms on the happy path, up to the 400 ms
+// connect timeout against a busy daemon, which is exactly the load the ordering fix was written for.
 //
-// AND IT CAN GO AWAY MID-SESSION. `send` answers false when the socket has closed, and the next
-// keystroke travels by HTTP -- the transport degrades, the session does not end.
-const hostConfig = readHostConfig({ env: process.env });
-let socket = null;
-if (hostConfig.localSocket && typeof health?.inputSocket === "string" && health.inputSocket) {
-  socket = await connectInputSocket({
-    address: health.inputSocket,
-    onRefusal: (frame) => { if (frame?.status === 404) leave(69, `${wanted || target.id} is no longer running here.`); },
-  });
-}
-
-// ONE REQUEST IN FLIGHT, COALESCING WHAT IS TYPED MEANWHILE. Sending each chunk on its own raced:
-// independent HTTP requests have no ordering guarantee, so under load two keystrokes could arrive
-// reversed and the operator watched their own typing come out scrambled. See lib/input-sender.mjs.
-// The socket needs no such care -- a stream is ordered -- but the sender also coalesces, which keeps
-// a paste one write on either transport.
+// Early keys therefore travel by HTTP, and the socket takes over the moment it is connected. The
+// sender keeps one send in flight either way, so the changeover cannot reorder anything.
 const inputPath = `/processes/${encodeURIComponent(target.id)}/input`;
+let socket = null;
 const input = new InputSender(async (data) => {
   if (socket?.send(inputPath, { data })) return;
   await post(inputPath, { data });
@@ -171,6 +157,23 @@ process.stdin.on("data", (chunk) => {
   }
   input.write(data);
 });
+
+process.stdin.resume();
+
+// THE FAST PATH WHEN THIS HOST HAS ONE. A local socket carries keystrokes in ~0.02 ms against
+// ~0.33 ms over `fetch` (measured 2026-09-20, both ends), and the stream itself keeps them in order.
+// It is attempted only when the daemon advertises an address and this host has not switched it off;
+// a WSL client, another machine, or an older daemon simply never gets one and keeps using HTTP.
+//
+// AND IT CAN GO AWAY MID-SESSION. `send` answers false when the socket has closed, and the next
+// keystroke travels by HTTP -- the transport degrades, the session does not end.
+const hostConfig = readHostConfig({ env: process.env });
+if (hostConfig.localSocket && typeof health?.inputSocket === "string" && health.inputSocket) {
+  socket = await connectInputSocket({
+    address: health.inputSocket,
+    onRefusal: (frame) => { if (frame?.status === 404) leave(69, `${wanted || target.id} is no longer running here.`); },
+  });
+}
 
 const sendResize = async () => {
   const size = { cols: process.stdout.columns || 0, rows: process.stdout.rows || 0 };
