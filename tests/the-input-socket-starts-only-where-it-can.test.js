@@ -10,27 +10,42 @@
 // breaks on the other one.
 
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "node:test";
 
-import { startInputSocket } from "../lib/input-socket-start.mjs";
+import { startInputSocket, SOCKET_MODE } from "../lib/input-socket-start.mjs";
 import { askIncumbent } from "../lib/incumbent.mjs";
-import { MAX_FRAME_BYTES } from "../lib/input-socket.mjs";
+import { MAX_FRAME_BYTES, socketDirectory } from "../lib/input-socket.mjs";
 import { hostConfigPath, readHostConfig } from "../lib/host-config.mjs";
 
-/** A server double that records how it was built and whether it was started. */
+/** A server double that records how it was built, whether it started, and whether it was stopped. */
 function fakeServer({ failOn } = {}) {
   const built = [];
+  const stopped = [];
   const create = (options) => {
     built.push(options);
     return {
       address: options.address,
       async start() {
         if (failOn) throw new Error(failOn);
-        return { address: options.address, started: true };
+        return { address: options.address, started: true, async stop() { stopped.push(options.address); } };
       },
     };
   };
-  return { built, create };
+  return { built, stopped, create };
+}
+
+/** The filesystem the POSIX branch talks to, answering whatever mode the test needs it to. */
+function fakeFs({ dirMode = 0o700, socketMode = SOCKET_MODE, chmodFails = false } = {}) {
+  const calls = { mkdir: [], chmod: [], unlink: [], umask: [] };
+  return {
+    calls,
+    mkdir: (p, options) => calls.mkdir.push([p, options?.mode]),
+    unlink: (p) => calls.unlink.push(p),
+    chmod: (p, mode) => { calls.chmod.push([p, mode]); if (chmodFails) throw new Error("EPERM"); },
+    stat: (p) => ({ mode: p.endsWith(".sock") ? socketMode : dirMode, uid: typeof process.getuid === "function" ? process.getuid() : 0 }),
+    umask: (mode) => { calls.umask.push(mode); return 0o022; },
+  };
 }
 
 test("switched off, nothing is attempted at all", async () => {
@@ -49,27 +64,119 @@ test("on Windows it opens a named pipe and does not touch the filesystem", async
   });
   assert.ok(result.address.includes("pipe"), result.address);
   assert.equal(unlinked, 0, "a pipe leaves no stale file to remove");
-  assert.equal(chmodded, 0, "a pipe has no file mode; its DACL comes from the creating token");
+  assert.equal(chmodded, 0, "a pipe has no file mode to change");
+});
+
+test("a Windows pipe name cannot be guessed, because nothing else about it is private", async () => {
+  // EXTERNAL REVIEW, 2026-09-21, finding D. The comment here USED TO SAY a pipe "inherits the
+  // creating token's default DACL, which already excludes other users". MEASURED on this host with
+  // GetSecurityInfo against a real pipe this module opened, and it is FALSE:
+  //   O:LA G:.. D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LA)(A;;FR;;;WD)(A;;FR;;;AN)
+  // `WD` is Everyone and `AN` is ANONYMOUS LOGON, each with FILE_GENERIC_READ (0x120089). So other
+  // accounts CAN open it. What they cannot do is write to it -- FILE_WRITE_DATA is absent, so it is
+  // not a keystroke injection channel -- nor add an instance, which needs FILE_CREATE_PIPE_INSTANCE.
+  //
+  // WHAT IS LEFT is squatting: create the name BEFORE the daemon and answer the attach client in its
+  // place. Node exposes neither FILE_FLAG_FIRST_PIPE_INSTANCE nor a descriptor, so an unguessable
+  // name is the whole mitigation. POSIX gets this from its 0700 directory instead.
+  const server = fakeServer();
+  const first = await startInputSocket({
+    enabled: true, port: 8802, platform: "win32", handleRequest: () => {}, deps: {}, createServer: server.create,
+  });
+  const second = await startInputSocket({
+    enabled: true, port: 8802, platform: "win32", handleRequest: () => {}, deps: {}, createServer: server.create,
+  });
+  assert.notEqual(first.address, second.address, "the same port twice must not give the same name twice");
+  assert.match(first.address, /aify-env-8802-[0-9a-f]{16}$/, first.address);
 });
 
 test("on POSIX it clears a stale socket file first and locks the new one to this user", async () => {
   const server = fakeServer();
-  const unlinked = [], chmodded = [];
+  const fs = fakeFs();
   const result = await startInputSocket({
-    enabled: true, port: 8802, platform: "linux", handleRequest: () => {}, deps: {},
-    createServer: server.create, unlink: (p) => unlinked.push(p), chmod: (p, mode) => chmodded.push([p, mode]),
+    enabled: true, port: 8802, platform: "linux", handleRequest: () => {}, deps: {}, dir: "/run/user/1000/aify-env",
+    createServer: server.create, ...fs,
   });
   assert.ok(result.address.endsWith(".sock"), result.address);
-  assert.deepEqual(unlinked, [result.address], "a socket file left by a dead daemon refuses the bind");
-  assert.deepEqual(chmodded, [[result.address, 0o600]],
+  assert.deepEqual(fs.calls.unlink, [result.address], "a socket file left by a dead daemon refuses the bind");
+  assert.deepEqual(fs.calls.chmod, [[result.address, 0o600]],
     "a socket anyone can open is a keystroke injection channel into an agent's terminal");
+});
+
+test("the socket is BORN locked, not locked a moment after it is born", async () => {
+  // EXTERNAL REVIEW, 2026-09-21, finding D. The bind came first and the chmod after it, which is a
+  // window in which the socket carries the umask's mode and anyone on the machine can connect.
+  // MEASURED UNDER WSL against this module: mode 755 at bind, 600 after -- and 600 at bind once the
+  // umask is narrowed around it. That run is the evidence; this test holds the mechanism, because
+  // Windows cannot create a unix socket to observe a mode on.
+  const server = fakeServer();
+  const fs = fakeFs();
+  await startInputSocket({
+    enabled: true, port: 1, platform: "linux", handleRequest: () => {}, deps: {}, dir: "/run/user/1000/aify-env",
+    createServer: server.create, ...fs,
+  });
+  assert.deepEqual(fs.calls.umask, [0o177, 0o022],
+    "narrowed before the bind and restored after it: a process-wide umask left narrow is its own defect");
+});
+
+test("a socket that could not be locked is never advertised", async () => {
+  // The other half of D: the chmod sat in `try {} catch {}` and its failure was never consulted, so
+  // the daemon published a 755 socket on /health with nothing in any log. OBSERVED under WSL.
+  const server = fakeServer();
+  const lines = [];
+  const result = await startInputSocket({
+    enabled: true, port: 1, platform: "linux", handleRequest: () => {}, deps: {}, dir: "/run/user/1000/aify-env",
+    createServer: server.create, ...fakeFs({ chmodFails: true }), log: (line) => lines.push(line),
+  });
+  assert.equal(result, null, "clients must use HTTP rather than a socket the wrong people can open");
+  assert.deepEqual(server.stopped.length, 1, "and the listening socket is closed, not left open unadvertised");
+  assert.match(lines.join(" "), /EPERM/);
+});
+
+test("the mode is READ BACK, so a chmod that succeeded and did nothing is still caught", async () => {
+  const server = fakeServer();
+  const lines = [];
+  const result = await startInputSocket({
+    enabled: true, port: 1, platform: "linux", handleRequest: () => {}, deps: {}, dir: "/run/user/1000/aify-env",
+    createServer: server.create, ...fakeFs({ socketMode: 0o660 }), log: (line) => lines.push(line),
+  });
+  assert.equal(result, null);
+  assert.match(lines.join(" "), /mode 660, not 600/, "the reason has to name what it found");
+});
+
+test("a directory other accounts can write to gets no socket at all", async () => {
+  // The predictable-path half: a name in a world-writable directory can be pre-created by anyone,
+  // which refuses the bind and demotes every pane to HTTP silently. PROVEN under WSL by loosening
+  // the directory to 777 and watching the daemon refuse by name.
+  const server = fakeServer();
+  const lines = [];
+  const result = await startInputSocket({
+    enabled: true, port: 1, platform: "linux", handleRequest: () => {}, deps: {}, dir: "/tmp",
+    createServer: server.create, ...fakeFs({ dirMode: 0o777 }), log: (line) => lines.push(line),
+  });
+  assert.equal(result, null);
+  assert.deepEqual(server.built, [], "nothing is bound before the directory is judged");
+  assert.match(lines.join(" "), /open to other accounts/);
+});
+
+test("the directory is this user's own, never the shared temp root", () => {
+  assert.equal(socketDirectory({ platform: "win32" }), "", "a named pipe is not a file and has no directory");
+  assert.equal(socketDirectory({ platform: "linux", env: { XDG_RUNTIME_DIR: "/run/user/1000" } }),
+    path.join("/run/user/1000", "aify-env"), "the per-user runtime directory is where this belongs");
+  // With no XDG_RUNTIME_DIR the temp root is still used, but a per-uid directory inside it carries
+  // the same property -- `/tmp` itself is mode 777 on every host this runs on.
+  const fallback = socketDirectory({ platform: "linux", env: {}, tmpdir: "/tmp", uid: 1000 });
+  assert.equal(fallback, path.join("/tmp", "aify-env-1000"));
+  assert.notEqual(fallback, "/tmp", "a socket directly in the temp root is the arrangement this replaced");
+  // Two accounts on one host get two directories, which is what makes the name unpredictable to them.
+  assert.notEqual(fallback, socketDirectory({ platform: "linux", env: {}, tmpdir: "/tmp", uid: 1001 }));
 });
 
 test("a stale file that cannot be removed does not stop the attempt", async () => {
   const server = fakeServer();
   const result = await startInputSocket({
-    enabled: true, port: 1, platform: "linux", handleRequest: () => {}, deps: {},
-    createServer: server.create, unlink: () => { throw new Error("EPERM"); }, chmod: () => {},
+    enabled: true, port: 1, platform: "linux", handleRequest: () => {}, deps: {}, dir: "/run/user/1000/aify-env",
+    createServer: server.create, ...fakeFs(), unlink: () => { throw new Error("EPERM"); },
   });
   assert.ok(result, "the bind is what decides, not the tidy-up");
 });
