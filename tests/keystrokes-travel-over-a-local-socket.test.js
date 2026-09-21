@@ -187,3 +187,57 @@ test("stopping the server does not wait for an attached client", async () => {
   ]);
   assert.equal(stopped, "stopped");
 });
+
+test("frames keep their order even when the router awaits, across chunks", async () => {
+  // EXTERNAL REVIEW, 2026-09-21, finding B. Each chunk started its own async handler, so anything
+  // awaited inside them could finish in either order: with a deps that did I/O at descending delays,
+  // `hello` reached the router as `olleh`. Ordering is asserted by this module's own header, so it
+  // has to be a property of the code rather than of every handler on the path being synchronous.
+  const seen = [];
+  const delays = [40, 30, 20, 10, 1];
+  let call = 0;
+  const server = await new InputSocketServer({
+    address: addressFor(),
+    deps: async () => {
+      const wait = delays[Math.min(call++, delays.length - 1)];
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      return {};
+    },
+    handleRequest: async (request) => { seen.push(request.body.data); return { status: 204 }; },
+  }).start();
+  const client = await connectInputSocket({ address: server.address });
+  // One chunk per key: a separate `data` event each, which is the case that reordered.
+  for (const key of "hello") { client.send("/processes/a1/input", { data: key }); await new Promise((r) => setTimeout(r, 2)); }
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(seen.join(""), "hello");
+  client.close();
+  await server.stop();
+});
+
+test("this socket carries input and resize, and refuses everything else", async () => {
+  // EXTERNAL REVIEW finding C: the daemon's comment claimed this guard and no guard existed, so
+  // `DELETE /processes/:id` over the keystroke socket reached the runner and stopped a process.
+  const router = recordingRouter();
+  const server = await new InputSocketServer({ address: addressFor(), handleRequest: router.handle, deps: {} }).start();
+  const refusals = [];
+  const client = await connectInputSocket({ address: server.address, onRefusal: (frame) => refusals.push(frame) });
+  client.send("/processes/p1/input", { data: "typed" });
+  client.send("/processes/p1/resize", { cols: 80, rows: 24 });
+  for (const path of ["/processes/p1", "/processes/p1/label", "/health", "/processes"]) client.send(path, {});
+  await settle();
+  assert.deepEqual(router.seen.map((r) => r.path), ["/processes/p1/input", "/processes/p1/resize"],
+    "a path this transport does not carry must never reach the router");
+  assert.equal(refusals.length, 4, "and the client is told, rather than the frame vanishing");
+  assert.equal(refusals[0].status, 400);
+  client.close();
+  await server.stop();
+});
+
+test("the allowlist is a shape, not a list of ids", () => {
+  for (const path of ["/processes/a/input", "/processes/any-id-at-all/resize", "/processes/x%2Fy/input"]) {
+    assert.ok(requestFromFrame({ path }), path);
+  }
+  for (const path of ["/processes/a/stop", "/processes/a/input/extra", "/processes//input", "/health"]) {
+    assert.equal(requestFromFrame({ path }), null, path);
+  }
+});
