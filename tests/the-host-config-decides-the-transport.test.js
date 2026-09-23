@@ -4,11 +4,18 @@
 //
 // WHY THESE CASES. A preference file is read at the worst moment -- daemon start, and every attach
 // -- so the failure that matters is not a wrong value, it is a file that throws. Missing, empty,
-// truncated mid-write, JSON of the wrong shape, or a boolean written as a string: every one of them
-// must yield the default rather than an exception, and the default must be the transport that works.
+// truncated mid-write, or JSON of the wrong shape: every one of them must yield the default rather
+// than an exception. A flag written as a WORD is not the wrong shape: it is read with the same words
+// the environment variable accepts, because the default is ON and `"false"` read as "no opinion"
+// is the opposite of what the operator wrote.
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { HOST_SETTINGS, flagFromEnv, hostConfigFrom, withHostSetting } from "../lib/host-config.mjs";
 
@@ -34,9 +41,20 @@ test("the environment beats the file, in both directions", () => {
 
 test("a file that cannot be used yields the default rather than throwing", () => {
   for (const text of ["", "   ", "{", "not json at all", "[]", "null", '{"transport": 7}',
-                      '{"transport": {"localSocket": "yes"}}']) {
+                      '{"transport": {"localSocket": "maybe"}}', '{"transport": {"localSocket": {}}}']) {
     assert.equal(hostConfigFrom(text, {}).localSocket, true, `refused to default on: ${text}`);
   }
+});
+
+test("a flag the operator wrote as a word is read as that word, not as no opinion", () => {
+  // A hand-edited `"localSocket": "false"` fell through to the default, which is ON -- the one
+  // outcome the operator had just written down that they did not want.
+  for (const word of ["false", "off", "no", "0", " FALSE "]) {
+    const config = hostConfigFrom(JSON.stringify({ transport: { localSocket: word } }), {});
+    assert.equal(config.localSocket, false, word);
+    assert.equal(config.localSocketSource, "file", word);
+  }
+  assert.equal(hostConfigFrom(JSON.stringify({ transport: { localSocket: 0 } }), {}).localSocket, false);
 });
 
 test("only words that mean something are read from the environment", () => {
@@ -79,4 +97,19 @@ test("a file nobody has stamped still gets a version", () => {
   assert.equal(JSON.parse(withHostSetting("{}", "localSocket", true)).version, 1);
   // Unreadable JSON is replaced rather than merged -- there is nothing in it to preserve.
   assert.equal(JSON.parse(withHostSetting("not json at all", "localSocket", true)).version, 1);
+});
+
+test("the installer leaves an operator's value alone, whatever type they wrote it as", (t) => {
+  // It checked `typeof === "boolean"`, so a hand-written `"false"` was replaced with `true` on the
+  // next reinstall -- the installer overruling the operator, which is the one thing it promises not
+  // to do. Presence is the answer; what the value means is the reader's business.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "aify-host-config-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const file = path.join(home, ".aify", "config.json");
+  fs.mkdirSync(path.dirname(file));
+  const theirs = `${JSON.stringify({ version: 1, transport: { localSocket: "false" } })}\n`;
+  fs.writeFileSync(file, theirs);
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "install-host-config.mjs");
+  execFileSync(process.execPath, [script], { env: { ...process.env, HOME: home, USERPROFILE: home } });
+  assert.equal(fs.readFileSync(file, "utf8"), theirs);
 });

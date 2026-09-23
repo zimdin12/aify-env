@@ -9,16 +9,20 @@
 //
 // IT DRIVES THE REAL CLI against a fake daemon, because the defect was in the ORDER of three
 // statements in that file: a unit test of any module here would have passed while the bug shipped.
-// The daemon answers /health slowly on purpose, which is what widens the window enough to observe.
+// The daemon answers /health slowly on purpose, so the key is typed before the client is listening,
+// and the connect is held open by a preload (fixtures/input-socket-connect-never-completes.mjs),
+// because on Linux a failed unix-socket connect leaves no window at all.
 
 import assert from "node:assert/strict";
 import http from "node:http";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { test } from "node:test";
 
-const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env-attach.mjs");
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const CLI = path.join(HERE, "..", "bin", "aify-env-attach.mjs");
+const HOLD_CONNECT = pathToFileURL(path.join(HERE, "fixtures", "input-socket-connect-never-completes.mjs")).href;
 
 /** An address of the right shape for this platform that nothing is listening on. */
 const unreachableSocket = process.platform === "win32"
@@ -73,7 +77,7 @@ test("a key typed before the handshake finishes still reaches the daemon", async
   // raw mode every keystroke is line buffered and Ctrl-C never reaches the program. A piped spawn
   // exits 64 before any of this can be observed, which is how the defect stayed invisible.
   const pty = createRequire(import.meta.url)("node-pty");
-  const child = pty.spawn(process.execPath, [CLI, "--id", "p1"], {
+  const child = pty.spawn(process.execPath, ["--import", HOLD_CONNECT, CLI, "--id", "p1"], {
     name: "xterm-color", cols: 80, rows: 24,
     env: { ...process.env, AIFY_ENV_ENDPOINT: endpoint, AIFY_ENV_LOCAL_SOCKET: "1" },
   });

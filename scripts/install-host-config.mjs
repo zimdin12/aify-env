@@ -28,8 +28,10 @@ let parsed = null;
 try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
 const existing = parsed?.transport?.localSocket;
 
-if (typeof existing === "boolean") {
-  process.stdout.write(`[aify-env] ${file}: transport.localSocket is already ${existing}; left alone\n`);
+// PRESENT IS ANSWERED, whatever its type. This asked `typeof === "boolean"`, so a hand-written
+// `"false"` was replaced with `true` on the next reinstall.
+if (existing !== undefined) {
+  process.stdout.write(`[aify-env] ${file}: transport.localSocket is already ${JSON.stringify(existing)}; left alone\n`);
   process.exit(0);
 }
 

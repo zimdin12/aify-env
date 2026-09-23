@@ -10,6 +10,8 @@
 // breaks on the other one.
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -36,14 +38,15 @@ function fakeServer({ failOn } = {}) {
 }
 
 /** The filesystem the POSIX branch talks to, answering whatever mode the test needs it to. */
-function fakeFs({ dirMode = 0o700, socketMode = SOCKET_MODE, chmodFails = false } = {}) {
+function fakeFs({ dirMode = 0o700, socketMode = SOCKET_MODE, chmodFails = false,
+  dirUid = typeof process.getuid === "function" ? process.getuid() : 0 } = {}) {
   const calls = { mkdir: [], chmod: [], unlink: [], umask: [] };
   return {
     calls,
     mkdir: (p, options) => calls.mkdir.push([p, options?.mode]),
     unlink: (p) => calls.unlink.push(p),
     chmod: (p, mode) => { calls.chmod.push([p, mode]); if (chmodFails) throw new Error("EPERM"); },
-    stat: (p) => ({ mode: p.endsWith(".sock") ? socketMode : dirMode, uid: typeof process.getuid === "function" ? process.getuid() : 0 }),
+    stat: (p) => ({ mode: p.endsWith(".sock") ? socketMode : dirMode, uid: dirUid, isSymbolicLink: () => false }),
     umask: (mode) => { calls.umask.push(mode); return 0o022; },
   };
 }
@@ -157,6 +160,44 @@ test("a directory other accounts can write to gets no socket at all", async () =
   assert.equal(result, null);
   assert.deepEqual(server.built, [], "nothing is bound before the directory is judged");
   assert.match(lines.join(" "), /open to other accounts/);
+});
+
+test("a directory owned by another account gets no socket, even at mode 700", async (t) => {
+  // The mode check alone passes a 0700 directory someone else made at our predictable path -- and
+  // its owner can then read, replace or impersonate whatever is placed inside it.
+  if (typeof process.getuid !== "function") { t.skip("no uids on this platform"); return; }
+  const server = fakeServer();
+  const lines = [];
+  const result = await startInputSocket({
+    enabled: true, port: 1, platform: "linux", handleRequest: () => {}, deps: {}, dir: "/tmp/aify-env-1000",
+    createServer: server.create, ...fakeFs({ dirUid: process.getuid() + 1 }), log: (line) => lines.push(line),
+  });
+  assert.equal(result, null);
+  assert.deepEqual(server.built, [], "nothing is bound before the directory is judged");
+  assert.match(lines.join(" "), /belongs to uid/);
+});
+
+test("a directory that is a symbolic link gets no socket, even when its target is ours", async (t) => {
+  // `stat` judged the link's TARGET. In a shared temp root another account can plant the link, pass
+  // the check by aiming it at a private directory of ours, and repoint it once the address is
+  // advertised -- so the next attach connects to THEIR socket and types into it.
+  if (process.platform === "win32") { t.skip("the unix branch needs real unix symlinks"); return; }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "aify-socket-dir-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, "ours");
+  fs.mkdirSync(target, { mode: 0o700 });
+  fs.chmodSync(target, 0o700);
+  const link = path.join(root, "aify-env-link");
+  fs.symlinkSync(target, link);
+  const server = fakeServer();
+  const lines = [];
+  const result = await startInputSocket({
+    enabled: true, port: 1, platform: "linux", handleRequest: () => {}, deps: {}, dir: link,
+    createServer: server.create, log: (line) => lines.push(line),
+  });
+  assert.equal(result, null);
+  assert.deepEqual(server.built, [], "no socket is placed through a link");
+  assert.match(lines.join(" "), /symbolic link/);
 });
 
 test("the directory is this user's own, never the shared temp root", () => {
