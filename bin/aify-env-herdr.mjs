@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
-import { detectHerdr, endpoint, HerdrClient, listWorkers, selectWorker, openWorker } from '../lib/herdr.mjs';
+import { detectHerdr, herdrCandidates, endpoint, HerdrClient, listWorkers, selectWorker, openWorker } from '../lib/herdr.mjs';
 
 try {
   const args = process.argv.slice(2);
   if (args.length > 1 || args.some(a => a.startsWith('-'))) throw new Error('Usage: aify-env herdr [process-id-or-label]. Set AIFY_ENV_ENDPOINT and HERDR_SOCKET_PATH first');
   if (process.platform !== 'win32') throw new Error('This adapter currently supports Windows PowerShell panes only');
   const binary = detectHerdr();
-  if (!binary) throw new Error('Herdr not found on PATH or LOCALAPPDATA/Programs/Herdr/bin. Install separately: https://herdr.dev/docs/quick-start/ . Nothing installed or started');
+  if (!binary) throw new Error(`Herdr not found. Looked in: ${herdrCandidates().join(', ') || '(nowhere to look)'}. Install separately: https://herdr.dev/docs/quick-start/ . Nothing installed or started`);
   const base = endpoint(process.env.AIFY_ENV_ENDPOINT);
   const client = new HerdrClient(process.env.HERDR_SOCKET_PATH);
   const workers = await listWorkers(base);

@@ -17,13 +17,13 @@ The supported configuration is Windows, Herdr 0.9.0 protocol 22, and PowerShell 
 default_shell = "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
 ```
 
-Install Herdr separately using <https://herdr.dev/docs/quick-start/>. Keep the complete Windows package, including `conpty/`. The adapter checks PATH and `%LOCALAPPDATA%/Programs/Herdr/bin/herdr.exe` by reading the filesystem; it never runs the detected executable, even for a version check.
+Install Herdr separately using <https://herdr.dev/docs/quick-start/>. Keep the complete Windows package, including `conpty/`. The adapter looks where aify-wrapper's `herdr-aify` looks, in the same order: `HERDR_BIN_PATH`, Herdr's standalone package (`HERDR_HOME`, default `~/.herdr`, then `packages/standalone/current` or the newest release), `HERDR_INSTALL_DIR` (default `%LOCALAPPDATA%/Programs/Herdr/bin`), then PATH. At an ordinary Windows prompt Herdr is usually not on PATH. It reads the filesystem only and never runs the detected executable, even for a version check; a refusal lists every place it looked.
 
-Start/manage Herdr separately, outside this command. Use the same `HERDR_SOCKET_PATH` with which that server was started. The aify-env daemon must also already be running outside Herdr. For example, in PowerShell, substitute your existing daemon's port and Herdr socket name:
+Start/manage Herdr separately, outside this command. Use the same `HERDR_SOCKET_PATH` with which that server was started. On Windows Herdr 0.9.0 uses a filesystem socket (its own default is `...config\herdr\herdr.sock`), so give an absolute `.sock` path: aify-wrapper measured Herdr refusing a named pipe (`\\.\pipe\...`) with `PermissionDenied`. A bare name is still mapped to a named pipe by this adapter, which will only reach a server that is listening on one. The aify-env daemon must also already be running outside Herdr. For example, in PowerShell, substitute your existing daemon's port and Herdr socket name:
 
 ```powershell
 $env:AIFY_ENV_ENDPOINT = 'http://127.0.0.1:12345'
-$env:HERDR_SOCKET_PATH = 'my-herdr.sock'
+$env:HERDR_SOCKET_PATH = 'C:/Users/me/.config/herdr/herdr.sock'
 aify-env herdr worker-label
 # Or display a numbered picker from the real daemon process list:
 aify-env herdr

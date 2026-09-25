@@ -72,7 +72,9 @@ test('known Windows install detection is passive and needs no PATH entry', t => 
   const binary = path.join(root, 'Programs/Herdr/bin/herdr.exe');
   fs.mkdirSync(path.dirname(binary), { recursive: true });
   fs.writeFileSync(binary, 'not executable');
-  assert.equal(detectHerdr({ PATH: '', LOCALAPPDATA: root }), binary);
+  // SEALED: `home` points at the temp root, so a Herdr really installed under this host's ~/.herdr
+  // cannot answer first (the detector asks the standalone package before the bin directory).
+  assert.equal(detectHerdr({ PATH: '', LOCALAPPDATA: root }, { platform: 'win32', home: root }), binary);
 });
 
 test('unsupported shell receives no command or destructive rollback', async () => {
