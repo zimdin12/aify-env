@@ -26,7 +26,7 @@ import { OutputFollower } from "../lib/output-follower.mjs";
 import { DETACH } from "../lib/keys.mjs";
 import { resolveAttachTarget } from "../lib/attach-target.mjs";
 import { passthrough } from "../lib/attach-screen.mjs";
-import { InputSender } from "../lib/input-sender.mjs";
+import { InputSender, postJson } from "../lib/input-sender.mjs";
 import { connectInputSocket } from "../lib/input-socket.mjs";
 import { readHostConfig } from "../lib/host-config.mjs";
 
@@ -50,18 +50,10 @@ async function listProcesses() {
   return Array.isArray(body?.processes) ? body.processes : [];
 }
 
-async function post(path, body) {
-  // BEST-EFFORT AND SILENT. A keystroke that did not land is not worth taking the screen down for,
-  // and a resize that failed will be corrected by the next one. The follower's own status is what
-  // reports a connection that has stopped working.
-  try {
-    await fetch(`${ENDPOINT}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(5000),
-    });
-  } catch { /* the stream is the instrument that reports a dead connection */ }
+async function postQuietly(path, body) {
+  // A RESIZE IS BEST-EFFORT AND SILENT: one that failed is corrected by the next. The follower's own
+  // status is what reports a connection that has stopped working.
+  try { await postJson(`${ENDPOINT}${path}`, body); } catch { /* see above */ }
 }
 
 const args = process.argv.slice(2);
@@ -154,15 +146,32 @@ const input = new InputSender(async (data) => {
   // treats the string as text and encodes it again -- typing `e-acute` reached the process as
   // c383c2a9 instead of c3a9, on both transports, from the first version of this client.
   if (socket?.send(inputPath, { data, encoding: "binary" })) return;
-  await post(inputPath, { data, encoding: "binary" });
+  // THROWS when the send did not land, so the sender can count it (v0.7 scan, F22).
+  await postJson(`${ENDPOINT}${inputPath}`, { data, encoding: "binary" });
 });
 
+// WHAT WAS TYPED BEFORE Ctrl+] IS SENT BEFORE LEAVING (v0.7 scan, F22). `leave()` exits the process,
+// so detaching straight away dropped whatever was still queued behind a send in flight -- the loaded
+// host this sender exists for. Bounded, so a daemon that stopped answering cannot hold the terminal.
+const DETACH_DRAIN_MS = 500;
+let detaching = false;
+async function detach() {
+  detaching = true;
+  const sent = await input.drainedWithin(DETACH_DRAIN_MS);
+  const notes = [];
+  if (!sent) notes.push("some typed input was still unsent and was dropped");
+  if (input.failed) notes.push(`${input.failed} keystroke send(s) failed`);
+  leave(0, `detached from ${wanted || target.id}. It is still running.`
+    + (notes.length ? ` (${notes.join("; ")})` : ""));
+}
+
 process.stdin.on("data", (chunk) => {
+  if (detaching) return;
   const data = chunk.toString("binary");
   // ONLY WHEN THE CHUNK **IS** THE DETACH BYTE, never when it merely contains one: a paste or a
   // program sending 0x1d mid-stream must reach the process. `lib/keys.mjs` draws the same line.
   if (data === DETACH) {
-    leave(0, `detached from ${wanted || target.id}. It is still running.`);
+    void detach();
     return;
   }
   input.write(data);
@@ -189,7 +198,7 @@ const sendResize = async () => {
   const size = { cols: process.stdout.columns || 0, rows: process.stdout.rows || 0 };
   const path = `/processes/${encodeURIComponent(target.id)}/resize`;
   if (socket?.send(path, size)) return;
-  await post(path, size);
+  await postQuietly(path, size);
 };
 process.stdout.on("resize", () => void sendResize());
 
