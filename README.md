@@ -202,7 +202,8 @@ not. It still takes three deliberate keystrokes.
 
 **What the pane can draw depends on what it is given.** A coding agent paints with cursor moves, so
 with the emulator installed the pane runs one at the PRODUCER's geometry and shows the real screen --
-cropped to the pane's width, which the title says when it happens. Without the emulator, or before a
+cropped to the pane's width and, when the screen is taller than the pane, to its last painted rows,
+where an agent's prompt and input box are. The title says when either crop happens. Without the emulator, or before a
 trustworthy baseline exists, it says so rather than showing a reconstruction that may be wrong.
 
 ## Why it exists

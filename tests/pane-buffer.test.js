@@ -288,7 +288,8 @@ test("a screen is clipped to the pane, like every other row", () => {
   buffer.append(`${ESC}[2;1Hpainted`);
   const rows = ["r1", "r2", "r3", "r4", "r5"];
   const view = buffer.view({ height: 3, width: 40, screen: { rows, problem: "" } });
-  assert.deepEqual(view, ["r1", "r2", "r3"]);
+  // The LAST painted rows since v0.7 (F5): an agent's live edge is at the bottom.
+  assert.deepEqual(view, ["r3", "r4", "r5"]);
 });
 
 

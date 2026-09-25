@@ -58,16 +58,17 @@ test("screenIsBlank answers from the ROWS, not from what fits", () => {
   // and the caller would then say so.
   const rows = ["", "", "", "", "here"];
   assert.equal(screenIsBlank(rows), false, "this screen has content and must not read as empty");
-  assert.deepEqual(screenLines(rows, { width: 40, height: 3 }), [],
-    "the visible part is genuinely empty, which is a different fact");
+  // AND SINCE v0.7 (F5) THE PANE SHOWS THAT CONTENT: the crop keeps the last painted rows, so
+  // content below the pane's height is exactly what a short pane draws.
+  assert.deepEqual(screenLines(rows, { width: 40, height: 3 }), ["", "", "here"]);
 });
 
-test("the screen is CROPPED from the top when it is taller than the pane", () => {
+test("the screen keeps its LAST painted rows when it is taller than the pane", () => {
   // The emulator runs at the PRODUCER's geometry, so this is the ordinary case rather than a
-  // wrong-size one: a 26-row agent screen in a 20-row pane. Which part to crop belongs to the caller;
-  // this function takes what it is handed and does not guess.
+  // wrong-size one: a 26-row agent screen in a 20-row pane. The top was kept until v0.7 (F5), which
+  // dropped an agent's prompt and input box -- its live edge is at the bottom.
   const rows = ["r1", "r2", "r3", "r4", "r5"];
-  assert.deepEqual(screenLines(rows, { width: 40, height: 3 }), ["r1", "r2", "r3"]);
+  assert.deepEqual(screenLines(rows, { width: 40, height: 3 }), ["r3", "r4", "r5"]);
 });
 
 test("rows are clipped by VISIBLE COLUMNS, not by character count", () => {
