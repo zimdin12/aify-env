@@ -5,15 +5,14 @@
 // already says that coalescing is ordinary on this daemon, and the picker handled it; the dashboard,
 // the menu and the start list did not.
 //
-// THE SAFETY RULE IS KEPT: a confirmation is answered only by a chunk that is exactly `y`. So when a
-// chunk's keys lead INTO a confirmation, the rest of that chunk is dropped rather than read as the
-// answer -- a paste must never be able to say yes.
+// ONLY NAVIGATION IS SPLIT. Any other read is taken whole, so a paste on the list matches no key and
+// does nothing, and a confirmation is still answered only by a chunk that is exactly `y`.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 
-import { splitKeys } from "../lib/keys.mjs";
+import { isNavigationKey, splitKeys } from "../lib/keys.mjs";
 import { ConsoleSession } from "../lib/console-session.mjs";
 import { startDashboard } from "../lib/dashboard.mjs";
 
@@ -27,6 +26,11 @@ test("a chunk is split into keys: escape sequences whole, everything else one ch
   assert.deepEqual(splitKeys(`${ESC}OA${ESC}[1;5B`), [`${ESC}OA`, `${ESC}[1;5B`]);
   assert.deepEqual(splitKeys("é😀"), ["é", "😀"], "a character was split into code units");
   assert.deepEqual(splitKeys(ESC), [ESC], "a bare escape is a key");
+});
+
+test("only the cursor keys count as navigation", () => {
+  for (const key of [DOWN, `${ESC}[A`, "j", "k"]) assert.equal(isNavigationKey(key), true, JSON.stringify(key));
+  for (const key of ["o", "m", "y", "g", "\r", `${ESC}[C`, "jj"]) assert.equal(isNavigationKey(key), false, JSON.stringify(key));
 });
 
 const session = (rows = 4) => {
@@ -53,14 +57,19 @@ test("`jj` in one read moves twice, on the dashboard and in the menu", () => {
   assert.equal(s.focus.menuAt, 1);
 });
 
-test("A CHUNK THAT LEADS INTO A CONFIRMATION CANNOT ANSWER IT", () => {
-  // `m`, down to `stop`, Enter, then `y` -- all in one read. The prompt opens; the `y` is dropped.
-  const s = session();
-  const results = s.handleChunk(`m${DOWN}\ry`);
-  assert.equal(s.focus.mode, "confirm", "the prompt did not open");
-  assert.ok(results.every((r) => !r.perform), "a pasted y confirmed a stop");
-  // CONTROL: a y typed on its own does confirm.
-  assert.equal(s.handleChunk("y")[0].perform?.action, "stop");
+test("A PASTE ON THE LIST DOES NOTHING: only a read made of navigation keys is split", () => {
+  // v0.7 TUI review, proven against the real session: split, `ok` plus Enter moved the selection from
+  // agent-2 to agent-1 and attached the keyboard to it, and `mk` plus Enter opened a stop prompt.
+  for (const paste of ["ok\r", "ok\n", "mk\r", "2026-09-26", `m${DOWN}\ry`, "make it work\r"]) {
+    const s = session();
+    s.handleChunk(DOWN);
+    s.handleChunk(DOWN);
+    const before = { ...s.focus };
+    const results = s.handleChunk(paste);
+    assert.equal(s.focus.selected, before.selected, `${JSON.stringify(paste)} moved the selection`);
+    assert.equal(s.focus.mode, before.mode, `${JSON.stringify(paste)} changed the mode`);
+    assert.ok(results.every((r) => !r.perform && !r.toPty), `${JSON.stringify(paste)} did something`);
+  }
 });
 
 test("CONTROL: in a confirmation a multi-key chunk still cancels, and the picker takes text whole", () => {
@@ -70,9 +79,10 @@ test("CONTROL: in a confirmation a multi-key chunk still cancels, and the picker
   s.handleChunk("\r");
   assert.equal(s.focus.mode, "confirm");
   assert.equal(s.handleChunk("yy")[0].action, "confirm-cancel");
-  s.handleChunk("gage");
+  s.handleChunk("g");
+  s.handleChunk("age");
   assert.equal(s.focus.mode, "picker");
-  assert.equal(s.focus.query, "age", "the rest of the chunk did not reach the search");
+  assert.equal(s.focus.query, "age", "a chunk typed into the search was split");
 });
 
 class FakeInput extends EventEmitter {
