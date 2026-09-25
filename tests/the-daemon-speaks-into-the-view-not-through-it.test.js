@@ -108,6 +108,11 @@ test("THE MESSAGE THE OPERATOR SAW REACHES THE VIEW, driven through startDashboa
     clearScreen: false,
     once: true,
     columns: 140,
+    // TALL ENOUGH FOR THE WHOLE FRAME. At the default 24 rows this frame is 25 lines, and it passed
+    // only because the height fitting skipped notices on an idle host and the compositor cut TRAFFIC
+    // instead (v0.7 scan, F12). Notices now give way first, as they do on a busy host, so a frame
+    // that must show one needs the room for it.
+    rows: 40,
     color: false,
     notices,
   });
