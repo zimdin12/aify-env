@@ -94,13 +94,27 @@ other.
 A running daemon keeps the code it loaded at boot, so an update reaches it only when it restarts.
 Stopping it takes its processes with it, and the next instance reaps anything a hard kill left behind.
 
-### Optional Herdr attachment, not integrated mode
+### Herdr: two ways in
 
-The full env-first workspace, native available-agent list, automatic workspace lifecycle and aify-aware cold restore are **not implemented**. Implementation is on hold while plugin-style and other extension options are evaluated. See [the integration boundary](docs/HERDR.md#full-integration-remains-blocked) before choosing this optional adapter.
+**`herdr-aify env`, a dedicated instance.** aify-wrapper's launcher starts a Herdr of its own (its
+own socket, config and state roots), runs this daemon in its first space with `--instance-context`,
+and attaches the Herdr TUI. In that instance the daemon opens a Herdr space for every worker a
+service plugin starts -- the pane runs `aify-env attach --id <id>` against the worker that is already
+running, so the worker stays this daemon's and its console keeps streaming -- and closes that pane
+when the worker exits. The view there offers `s` to start an agent and no console pane or Enter
+attach, because every worker already has a space. **Leaving that Herdr session ends the environment
+and every worker in it**; that lifetime is the launcher's, and it is described with the rest of the
+mode in [aify-wrapper's HERDR.md](https://github.com/zimdin12/aify-wrapper/blob/main/HERDR.md).
 
-`aify-env herdr <process-id-or-label>` opens an existing worker in a new Herdr workspace. With no argument it offers a numbered picker. This is a Windows PowerShell adapter for Herdr 0.9.0. Both servers must already be running, and `AIFY_ENV_ENDPOINT` and `HERDR_SOCKET_PATH` must explicitly name them. Neither server is started or stopped by this command.
+**`aify-env herdr [agent]`, one worker into a Herdr you already run.** It opens an existing worker
+in a new Herdr workspace; with no argument it offers a numbered picker. This is a Windows PowerShell
+adapter for Herdr 0.9.0. Both servers must already be running, `AIFY_ENV_ENDPOINT` and
+`HERDR_SOCKET_PATH` must name them, and neither is started or stopped by this command.
 
-Herdr is not bundled or installed automatically. Detection checks PATH and the standard Windows user install location. Keep `herdr.exe` with its app-local ConPTY runtime. See [docs/HERDR.md](docs/HERDR.md) for setup, usage, lifecycle behavior, and the real integration test.
+Herdr is not bundled or installed. Detection looks where aify-wrapper looks: `HERDR_BIN_PATH`,
+Herdr's standalone package, `HERDR_INSTALL_DIR`, then PATH. Keep `herdr.exe` with its app-local
+ConPTY runtime. See [docs/HERDR.md](docs/HERDR.md) for setup, usage, lifecycle behaviour and the
+real integration test.
 
 ### Which services it knows about
 

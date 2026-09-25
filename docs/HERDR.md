@@ -1,12 +1,34 @@
-# Herdr attach client
+# Herdr and aify-env
+
+There are two ways to see aify-env's workers in Herdr, and they have opposite lifetimes.
+
+## The dedicated instance: `herdr-aify env`
+
+aify-wrapper's `herdr-aify env` starts a Herdr of its own, with its own socket and its own config and
+state roots, runs the actual aify-env daemon in its first space with `--instance-context`, and
+attaches the Herdr TUI. The launcher owns the lifetime; aify-env owns the workers.
+
+- **A space per worker.** When a service plugin starts a worker (from the view's `s` start list or from
+  the service's dashboard), the daemon opens a Herdr pane for it that runs `aify-env attach --id <id>`
+  against the worker that is already running (`lib/herdr-pane-opener.mjs`). The worker keeps its PTY,
+  its output keeps streaming to the web console, and closing the pane does not stop it. A process
+  started through the generic `POST /processes` route gets no space.
+- **The pane goes with the worker.** When the worker exits, however it exits, its pane is closed. Only
+  that pane: an unrelated pane an operator moved into the same space is left alone.
+- **The view gives way.** In this mode the daemon's view offers no console pane and no Enter attach,
+  because every worker already has a space; the actions menu offers `stop`.
+- **Leaving ends everything.** Closing or detaching from that Herdr session ends the launcher, the
+  environment and every worker in it. That is the mode's intended lifetime, and it is the opposite of
+  plain `herdr-aify`, where detaching is harmless.
+
+Only a daemon started with an instance context opens spaces. A daemon started from a pane of your
+ordinary Herdr inherits a `HERDR_SOCKET_PATH` too, and that socket is not its own, so it opens none.
+The mode, its install step and its limits are documented in
+[aify-wrapper's HERDR.md](https://github.com/zimdin12/aify-wrapper/blob/main/HERDR.md).
+
+## One worker into a Herdr you already run: `aify-env herdr`
 
 This optional command opens an existing aify-env terminal-backed worker in a new Herdr workspace. It does not start workers, install software, start either server, stop the daemon, or own the fleet.
-
-## Full integration remains blocked
-
-The requested integrated mode would launch Herdr with the actual env daemon in the first workspace, list available agents before they have terminals, start them through the service, synchronize worker workspaces on spawn and kill, and preserve aify identity and native context on cold restore. The command below does not implement that mode.
-
-Stock Herdr 0.9.0 builds its native agent list from existing terminal panes. Its native restore constructs agent CLI commands rather than restoring aify-owned launches. Full integration is on hold while extension options are evaluated, including an external controller and upstream extension points. The manual adapter is not its replacement or completion; retaining stock Herdr does not establish that a permanent fork is the only alternative.
 
 ## Requirements and usage
 
@@ -39,7 +61,7 @@ The command creates and focuses one workspace, validates its foreground shell th
 - Closing an attached pane ends its local clients, not the worker or external daemon. Repeating the command attaches again to the same worker.
 - A worker exit appears in the pane as an exit message. The pane returns to its shell.
 - Closing the last Herdr pane may create a replacement shell. Herdr owns that shell.
-- No locked daemon pane, unopened-worker sidebar, service start picker, agent-status synchronization, or automatic Herdr TUI launch is provided. The numbered picker lists existing terminal workers only.
+- This command starts nothing and launches no Herdr TUI; its numbered picker lists existing terminal workers only. Starting agents, a space per worker and the Herdr TUI launch belong to `herdr-aify env`, above.
 - Verification uses Windows PowerShell and a synthetic Node worker. PowerShell Core is accepted by the shell check but was not exercised. Real agent credentials, agent readiness, long-running sessions, and UI performance were not tested.
 - Herdr 0.9.0 has a Windows shutdown limitation: `src/platform/windows.rs::signal_processes` opens a handle with `PROCESS_QUERY_LIMITED_INFORMATION` and calls `TerminateProcess`, which requires termination access. An idle replacement shell can survive server shutdown. This adapter does not patch upstream or kill Herdr-owned processes in normal use. Do not interpret a disappearing pane or server process as proof that every Herdr shell exited.
 
