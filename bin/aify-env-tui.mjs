@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { startDashboard } from "../lib/dashboard.mjs";
+import { createClientInput } from "../lib/client-input.mjs";
 import {
   CLIENT_ACTIONS,
   listStartableAgents,
@@ -49,21 +50,8 @@ const view = await startDashboard({
     process.exit(0);
   },
   // Writing to a process is the daemon's business. A view asks; it does not reach into a PTY.
-  onInput: async (target, data) => {
-    if (!target) return;
-    try {
-      await fetch(`${endpoint}/processes/${encodeURIComponent(target.id)}/input`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ data }),
-      });
-    } catch {
-      // A keystroke that did not land is not worth taking the screen down for; the pane's own status
-      // is what reports a connection that has stopped working. The daemon answers 404 rather than
-      // dropping a write to a process that has gone, which is what stops an operator typing into a
-      // void and concluding the agent is ignoring them -- the pane shows that as `gone`.
-    }
-  },
+  // IN THE ORDER TYPED: one request in flight per agent, the rest coalesced. See the module.
+  onInput: createClientInput({ endpoint }),
   // WHAT THIS CLIENT CAN PERFORM. The same two the daemon offers, reached differently: a client owns
   // no processes, so it ASKS over HTTP where the daemon calls its own runner. Restart is absent from
   // both because respawning a managed agent is the service's business and neither tier has a
