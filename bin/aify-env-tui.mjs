@@ -17,6 +17,7 @@ import { join } from "node:path";
 
 import { startDashboard } from "../lib/dashboard.mjs";
 import { createClientInput } from "../lib/client-input.mjs";
+import { createNotices } from "../lib/notices.mjs";
 import {
   CLIENT_ACTIONS,
   listStartableAgents,
@@ -59,7 +60,9 @@ const view = await startDashboard({
   // ONE LINE, because the logic lives where a test can reach it: importing this file STARTS a view
   // that talks to a daemon, so anything written here can only ever be read, never exercised.
   actions: CLIENT_ACTIONS,
-  onAction: (chosen) => { void performClientAction(chosen, { endpoint }); },
+  // THE ANSWER IS RETURNED, and the view reports it in its own NOTICES (v0.7 scan, F9).
+  onAction: (chosen) => performClientAction(chosen, { endpoint }),
+  notices: createNotices(),
   // STARTING A KNOWN AGENT, over the same one hop and for the same reason: this process holds no
   // aify-comms credential and no service endpoint. The daemon holds the plugin that holds both, so
   // the client asks the daemon and both tiers reach one implementation.
