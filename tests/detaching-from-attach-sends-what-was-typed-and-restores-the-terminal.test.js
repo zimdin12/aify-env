@@ -113,3 +113,20 @@ test("drainedWithin says whether the queue emptied in time, and never waits past
   assert.ok(Date.now() - started < 1000, "a dead daemon held the detach");
   assert.equal(await new InputSender(async () => {}).drainedWithin(0), true, "an idle sender is drained");
 });
+
+test("detaching turns the cursor back on for the operator's shell", async (t) => {
+  // The one mode reset this can observe through ConPTY, which re-renders the stream it carries and
+  // does not pass every private mode through. Which modes the leave sequence carries is asserted on
+  // the sequence itself, in the test below.
+  const { afterDetach } = await attachAndDetach(t);
+  assert.ok(afterDetach.includes(`${String.fromCharCode(27)}[?25h`),
+    `nothing turned the cursor back on after detaching: ${JSON.stringify(afterDetach)}`);
+});
+
+test("the leave sequence resets every mode an agent commonly sets", async () => {
+  const { LOCAL_SCREEN_LEAVE } = await import("../lib/attach-screen.mjs");
+  const ESC = String.fromCharCode(27);
+  for (const mode of ["?1049l", "?25h", "?1000l", "?1002l", "?1003l", "?1006l", "?2004l", "<u", "0m"]) {
+    assert.ok(LOCAL_SCREEN_LEAVE.includes(`${ESC}[${mode}`), `the leave sequence does not reset ${mode}`);
+  }
+});

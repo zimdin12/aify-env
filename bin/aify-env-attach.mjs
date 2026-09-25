@@ -28,6 +28,7 @@ import { resolveAttachTarget } from "../lib/attach-target.mjs";
 import { passthrough } from "../lib/attach-screen.mjs";
 import { InputSender, postJson } from "../lib/input-sender.mjs";
 import { connectInputSocket } from "../lib/input-socket.mjs";
+import { LOCAL_SCREEN_LEAVE } from "../lib/attach-screen.mjs";
 import { readHostConfig } from "../lib/host-config.mjs";
 
 const LF = String.fromCharCode(10);
@@ -112,6 +113,9 @@ function restore() {
   // ON EVERY PATH OUT. A client that leaves the terminal in raw mode hands the operator a shell that
   // does not echo and does not respond to Ctrl-C -- worse than the problem it was solving.
   try { process.stdin.setRawMode(false); } catch { /* not a tty any more */ }
+  // AND THE AGENT'S TERMINAL MODES ARE TURNED OFF (v0.7 scan, F10): the alternate screen, a hidden
+  // cursor, mouse tracking, bracketed paste. See `LOCAL_SCREEN_LEAVE`.
+  try { process.stdout.write(LOCAL_SCREEN_LEAVE); } catch { /* not a tty any more */ }
   process.stdin.pause();
   try { follower.stop(); } catch { /* already closed */ }
   try { socket?.close(); } catch { /* already closed */ }
