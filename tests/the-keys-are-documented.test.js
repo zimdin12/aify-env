@@ -23,7 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { MENU_ACTIONS, MODES, VIEW_KEYS, initialFocus, routeKey } from "../lib/keys.mjs";
+import { MENU_ACTIONS, MODES, VIEW_KEYS, initialFocus, keyName, routeKey } from "../lib/keys.mjs";
 import { CLIENT_ACTIONS } from "../lib/client-actions.mjs";
 import { USAGE } from "../lib/usage.mjs";
 import { renderDashboard, width } from "../lib/tui.mjs";
@@ -71,11 +71,14 @@ test("EVERY KEY THE ROUTER BINDS TO A FEATURE IS DECLARED", () => {
 test("EVERY DECLARED KEY IS IN `aify-env --help` AND IN THE README", () => {
   // The two documents an operator reaches for without running the view. `--help` is the one that
   // rotted, because adding a binding touches neither file and nothing complained.
+  // BY NAME, because a control key (Ctrl+L) cannot be searched for as its raw byte.
   for (const key of Object.keys(VIEW_KEYS)) {
-    assert.ok(new RegExp(`^\\s+${key}\\s{2,}`, "m").test(USAGE),
-      `\`${key}\` is bound and \`aify-env --help\` does not list it`);
-    assert.ok(README.includes(`| \`${key}\` |`),
-      `\`${key}\` is bound and the README key table does not list it`);
+    const name = keyName(key);
+    const escaped = name.replace(/[+]/g, "\\+");
+    assert.ok(new RegExp(`^\\s+${escaped}\\s{2,}`, "m").test(USAGE),
+      `\`${name}\` is bound and \`aify-env --help\` does not list it`);
+    assert.ok(README.includes(`| \`${name.toLowerCase()}\` |`),
+      `\`${name}\` is bound and the README key table does not list it`);
   }
 });
 

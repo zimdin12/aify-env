@@ -171,6 +171,7 @@ decisions rather than bindings.
 | `m` | actions for the selected agent |
 | `s` | start an agent this host knows that has no worker |
 | `ctrl+]` | back, from anywhere |
+| `ctrl+l` | redraw the screen, if anything has smeared it (outside an attached pane, where it is the agent's) |
 | `q` | leave, where leaving is offered |
 | `ctrl+c` | back out of a menu, the start list or find; on the list, leave `aify-env tui`, or in the daemon's own terminal ask before stopping the environment |
 
