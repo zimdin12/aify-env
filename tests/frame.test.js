@@ -44,8 +44,10 @@ test("one changed row touches ONLY that row", () => {
 });
 
 test("the line is erased AFTER the text, so a changed row never blanks first", () => {
-  const bytes = frameUpdate(FRAME, ["one", "CHANGED", "three"]);
-  assert.ok(bytes.indexOf("CHANGED") < bytes.indexOf(ERASE_LINE, bytes.indexOf("CHANGED")),
+  // A SHORTER row, because only a shorter row needs an erase at all (v0.7 scan, F13): one at least as
+  // wide covers every cell the old one used.
+  const bytes = frameUpdate(FRAME, ["one", "tw", "three"]);
+  assert.ok(bytes.indexOf("tw") < bytes.indexOf(ERASE_LINE, bytes.indexOf("tw")),
             "the row was cleared before it was rewritten, which is a visible flash");
 });
 
