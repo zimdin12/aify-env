@@ -172,6 +172,12 @@ decisions rather than bindings.
 | `s` | start an agent this host knows that has no worker |
 | `ctrl+]` | back, from anywhere |
 | `q` | leave, where leaving is offered |
+| `ctrl+c` | back out of a menu, the start list or find; on the list, leave `aify-env tui`, or in the daemon's own terminal ask before stopping the environment |
+
+**Ctrl+C IN THE DAEMON'S OWN TERMINAL ASKS FIRST.** There it stops the environment and every worker
+it owns, so the view asks `stop the environment and its N workers?` and only a single `y` goes
+ahead. In a menu, the start list or find it backs out instead, and inside an attached pane it goes to
+the agent. A SIGINT sent by a signal rather than typed still stops the daemon at once.
 
 **THE CONSOLE STARTS HIDDEN, and that is deliberate.** It costs half the width to show one process,
 against a list of every agent on the host -- and the operator's stated priority for this view is

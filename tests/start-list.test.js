@@ -95,7 +95,8 @@ test("EVERY OTHER KEY IS INERT IN THE LIST, so nothing acts on the dashboard beh
   }
   // POSITIVE CONTROL: the two keys that DO work here still work.
   assert.equal(routeKey(DETACH, open).action, "start-close");
-  assert.equal(routeKey(String.fromCharCode(3), open).action, "interrupt");
+  // Ctrl+C backs out too (v0.7, F1): it used to stop the whole environment from this list.
+  assert.equal(routeKey(String.fromCharCode(3), open).action, "start-close");
 });
 
 test("THE MODE SURVIVES AN EMPTY PROCESS LIST, which is the host it exists for", () => {

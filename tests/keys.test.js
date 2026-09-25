@@ -56,7 +56,8 @@ test("when the last process goes, the pane closes rather than pointing at nothin
   // `paneHidden` goes back to the default here because there is nothing left to show in a pane.
   assert.deepEqual(reconcileFocus(pty(2, 3), 0),
     { mode: "dashboard", selected: -1, count: 0, query: "", paneHidden: true,
-      menuAt: 0, confirming: null, menuActions: null, startAt: 0, startCount: 0 });
+      menuAt: 0, confirming: null, menuActions: null, startAt: 0, startCount: 0,
+      confirmInterrupt: false });
 });
 
 test("reconciling keeps pty mode while there is still something to show", () => {
@@ -245,10 +246,10 @@ test("Ctrl+] CLOSES THE MENU, which is the one way back from every mode", () => 
   assert.equal(closed.state.mode, "dashboard");
 });
 
-test("Ctrl+C STILL INTERRUPTS from inside a menu, because it stops the environment", () => {
-  // The daemon renders this view in the terminal it was started from. A modal that swallowed Ctrl+C
-  // would take away the operator's way of stopping the whole thing.
-  assert.equal(routeKey(CTRL_C, routeKey("m", menu()).state).action, "interrupt");
+test("Ctrl+C BACKS OUT of a menu rather than stopping the environment (v0.7, F1)", () => {
+  // It used to interrupt from here, which in the daemon's terminal ended every worker on the host
+  // from exactly the mode an operator reaches for Ctrl+C to leave.
+  assert.equal(routeKey(CTRL_C, routeKey("m", menu()).state).action, "menu-close");
 });
 
 test("CONFIRMATION IS DERIVED FROM A PROPERTY, not from a second list", () => {

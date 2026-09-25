@@ -150,10 +150,10 @@ test("Ctrl+C is an INTERRUPT and q is a QUIT, in every dashboard state", () => {
   assert.equal(routeKey(CTRL_C, dash(-1, 0)).action, "interrupt", "an empty host still interrupts");
 });
 
-test("Ctrl+C in the PICKER is still an interrupt", () => {
-  // Otherwise an operator who opened the picker on a runaway host would have to work out how to
-  // close it before they could stop anything.
-  assert.equal(routeKey(CTRL_C, picking(0, 4, "sc")).action, "interrupt");
+test("Ctrl+C in the PICKER cancels the search (v0.7, F1)", () => {
+  // It used to interrupt, which in the daemon's terminal stopped every worker from a search box. It
+  // closes the picker now; a second Ctrl+C on the dashboard is the interrupt.
+  assert.equal(routeKey(CTRL_C, picking(0, 4, "sc")).action, "picker-close");
 });
 
 test("NEGATIVE CONTROL: Ctrl+C inside the PANE still reaches the process", () => {
