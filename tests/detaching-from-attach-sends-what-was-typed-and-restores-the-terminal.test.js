@@ -126,7 +126,9 @@ test("detaching turns the cursor back on for the operator's shell", async (t) =>
 test("the leave sequence resets every mode an agent commonly sets", async () => {
   const { LOCAL_SCREEN_LEAVE } = await import("../lib/attach-screen.mjs");
   const ESC = String.fromCharCode(27);
-  for (const mode of ["?1049l", "?25h", "?1000l", "?1002l", "?1003l", "?1006l", "?2004l", "<u", "0m"]) {
+  // ?1004 (focus reporting) and ?1 (application cursor keys) were missing (v0.7.1 review, E10): an
+  // agent that set either left the shell receiving ESC[I and ESC[O on every focus change.
+  for (const mode of ["?1049l", "?25h", "?1000l", "?1002l", "?1003l", "?1006l", "?2004l", "?1004l", "?1l", "<u", "0m"]) {
     assert.ok(LOCAL_SCREEN_LEAVE.includes(`${ESC}[${mode}`), `the leave sequence does not reset ${mode}`);
   }
 });
