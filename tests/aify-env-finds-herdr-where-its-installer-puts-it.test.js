@@ -41,6 +41,15 @@ test("a release directory is used when the `current` link is missing", () => {
   assert.equal(win({ PATH: "" }, fakeFs([release], ["0.8.0", "0.9.0"])), release);
 });
 
+test("of two releases, the NEWER one is tried first, by version and not by spelling", () => {
+  // v0.7.1 review, E7: sorted as strings, "0.10.0" sorts below "0.9.0" and the older one won.
+  const releases = path.join(HOME, ".herdr", "packages", "standalone", "releases");
+  const older = path.join(releases, "0.9.0", "herdr.exe");
+  const newer = path.join(releases, "0.10.0", "herdr.exe");
+  assert.equal(win({ PATH: "" }, fakeFs([older, newer], ["0.9.0", "0.10.0"])), newer);
+  assert.equal(win({ PATH: "" }, fakeFs([older, newer], ["0.10.0", "0.9.0"])), newer, "the answer depended on listing order");
+});
+
 test("HERDR_INSTALL_DIR replaces the default bin directory", () => {
   const bin = path.join("F:", "bin", "herdr.exe");
   assert.equal(win({ PATH: "", HERDR_INSTALL_DIR: path.join("F:", "bin") }, fakeFs([bin])), bin);
