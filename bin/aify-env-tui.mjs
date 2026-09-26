@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { startDashboard } from "../lib/dashboard.mjs";
 import { createClientInput } from "../lib/client-input.mjs";
 import { createNotices } from "../lib/notices.mjs";
+import { LEAVING_SIGNALS } from "../lib/view-exit.mjs";
 import {
   CLIENT_ACTIONS,
   listStartableAgents,
@@ -85,8 +86,9 @@ const view = await startDashboard({
 
 if (!once) {
   // THIS process is only a view: it owns nothing, so exiting is the whole of its shutdown. The daemon
-  // does not get to reuse this handler, which is why it lives here and not in lib.
-  for (const signal of ["SIGINT", "SIGTERM"]) {
+  // does not get to reuse this handler, which is why it lives here and not in lib. Ctrl+Break and a
+  // hangup too (v0.7.1 review, E2); an uncaught exception is covered by the view itself.
+  for (const signal of LEAVING_SIGNALS) {
     process.on(signal, () => {
       view.stop();
       process.exit(0);
