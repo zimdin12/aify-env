@@ -37,7 +37,7 @@ function slowDaemon(delaysMs) {
 
 test("keys typed into one agent arrive in the order they were typed", async () => {
   const daemon = slowDaemon([40, 30, 20, 10, 1]);
-  const send = createClientInput({ endpoint: "http://127.0.0.1:1", fetchImpl: daemon.fetchImpl });
+  const { send } = createClientInput({ endpoint: "http://127.0.0.1:1", fetchImpl: daemon.fetchImpl });
   const alpha = { id: "p1" };
   // The view does not await these -- `dashboard.mjs` hands each chunk over and moves on.
   for (const key of "hello") void send(alpha, key);
@@ -47,7 +47,7 @@ test("keys typed into one agent arrive in the order they were typed", async () =
 
 test("one agent's slow send does not hold another agent's keys", async () => {
   const daemon = slowDaemon([60, 1]);
-  const send = createClientInput({ endpoint: "http://127.0.0.1:1", fetchImpl: daemon.fetchImpl });
+  const { send } = createClientInput({ endpoint: "http://127.0.0.1:1", fetchImpl: daemon.fetchImpl });
   void send({ id: "p1" }, "a");
   void send({ id: "p2" }, "b");
   await wait(20);
@@ -58,7 +58,7 @@ test("one agent's slow send does not hold another agent's keys", async () => {
 
 test("no target, no request", async () => {
   const daemon = slowDaemon([1]);
-  const send = createClientInput({ endpoint: "http://127.0.0.1:1", fetchImpl: daemon.fetchImpl });
+  const { send } = createClientInput({ endpoint: "http://127.0.0.1:1", fetchImpl: daemon.fetchImpl });
   await send(null, "x");
   await wait(10);
   assert.deepEqual(daemon.arrived, []);
@@ -69,7 +69,8 @@ test("THE CLIENT USES IT: bin/aify-env-tui.mjs routes its keys through createCli
   // source. The behaviour is proven above; this only proves the entrypoint is wired to it.
   const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
   const source = fs.readFileSync(path.join(here, "..", "bin", "aify-env-tui.mjs"), "utf8");
-  assert.match(source, /onInput:\s*createClientInput\(/);
+  assert.match(source, /const clientInput = createClientInput\(/);
+  assert.match(source, /onInput:\s*clientInput\.send/);
   assert.doesNotMatch(source, /\/input`/, "the client still builds its own input request");
 });
 

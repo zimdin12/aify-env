@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { startDashboard } from "../lib/dashboard.mjs";
 import { createClientInput } from "../lib/client-input.mjs";
 import { createNotices } from "../lib/notices.mjs";
-import { LEAVING_SIGNALS } from "../lib/view-exit.mjs";
+import { LEAVING_SIGNALS, quitView } from "../lib/view-exit.mjs";
 import {
   CLIENT_ACTIONS,
   listStartableAgents,
@@ -38,6 +38,9 @@ const endpoint = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
 // calls the same function and deliberately passes no input for the same reason.
 const interactive = !once && Boolean(process.stdin.isTTY);
 
+// ONE INPUT FOR THE LIFE OF THE VIEW, so quitting can wait for what it still holds.
+const clientInput = createClientInput({ endpoint });
+
 const view = await startDashboard({
   endpoint,
   registryPath,
@@ -46,14 +49,12 @@ const view = await startDashboard({
   input: interactive ? process.stdin : null,
   rows: process.stdout.rows || 24,
   // THIS process is only a view, so quitting is the whole of its shutdown -- but the decision stays
-  // here rather than in lib, which owns no lifecycle on purpose.
-  onQuit: () => {
-    view.stop();
-    process.exit(0);
-  },
+  // here rather than in lib, which owns no lifecycle on purpose. What was typed into an agent is
+  // sent first, bounded (v0.7.1 review, E3).
+  onQuit: () => quitView({ stop: view.stop, drainedWithin: clientInput.drainedWithin, exit: (code) => process.exit(code) }),
   // Writing to a process is the daemon's business. A view asks; it does not reach into a PTY.
   // IN THE ORDER TYPED: one request in flight per agent, the rest coalesced. See the module.
-  onInput: createClientInput({ endpoint }),
+  onInput: clientInput.send,
   // WHAT THIS CLIENT CAN PERFORM. The same two the daemon offers, reached differently: a client owns
   // no processes, so it ASKS over HTTP where the daemon calls its own runner. Restart is absent from
   // both because respawning a managed agent is the service's business and neither tier has a
