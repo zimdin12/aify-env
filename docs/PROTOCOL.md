@@ -189,8 +189,12 @@ and a console sending one should be told rather than taking the environment down
 
 ## `DELETE /processes/:id`
 
-`204`, always. Stopping is idempotent: a caller retrying, or a reaper racing one, must not get an error
-for having been second.
+`204` when the process is gone. Stopping is idempotent: a caller retrying, or a reaper racing one, must
+not get an error for having been second, so an id this environment does not hold is `204` too.
+
+**`500` with `{stopped: false, problem}` when the process is still running after the kill.** Its pid is
+checked for up to a second after the kill lands, because the entry is released from the list before the
+kill and a survivor would otherwise vanish from every view while a caller was told it had stopped.
 
 ## Known limitation: a TOCTOU window
 

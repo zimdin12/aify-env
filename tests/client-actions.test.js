@@ -36,7 +36,7 @@ test("POSITIVE CONTROL: a confirmed stop reaches the daemon", async () => {
     { action: "stop", process: { id: "abc-p1" } },
     { endpoint: "http://127.0.0.1:8802", fetchImpl: f.impl },
   );
-  assert.equal(sent, true);
+  assert.deepEqual(sent, { ok: true, problem: "" });
   assert.deepEqual(f.calls.map((c) => [c.method, c.url]),
     [["DELETE", "http://127.0.0.1:8802/processes/abc-p1"]]);
 });
@@ -90,12 +90,12 @@ test("IT NEVER THROWS, because this runs inside a keyboard handler", async () =>
   // A request that did not land must not take the operator's screen down. A failed stop shows as the
   // process still being listed on the next refresh, which is the honest signal.
   const refused = recordingFetch({ throws: true });
-  assert.equal(await performClientAction({ action: "stop", process: { id: "p1" } },
-    { endpoint: "http://x", fetchImpl: refused.impl }), false);
+  assert.equal((await performClientAction({ action: "stop", process: { id: "p1" } },
+    { endpoint: "http://x", fetchImpl: refused.impl })).ok, false);
 
   const rejected = recordingFetch({ ok: false });
-  assert.equal(await performClientAction({ action: "stop", process: { id: "p1" } },
-    { endpoint: "http://x", fetchImpl: rejected.impl }), false,
+  assert.equal((await performClientAction({ action: "stop", process: { id: "p1" } },
+    { endpoint: "http://x", fetchImpl: rejected.impl })).ok, false,
     "a non-ok response was reported as a successful stop");
 });
 

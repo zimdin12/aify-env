@@ -125,7 +125,9 @@ test("a launcher that cannot be READ is refused, not assumed fine", async () => 
 });
 
 test("DELETE /processes/:id stops it", async () => {
-  const d = deps();
+  // The pid is checked after the kill (v0.7.1, E8), so whether it is alive is sealed here rather
+  // than asked of whatever process holds that number on this machine.
+  const d = deps({ isAlive: () => false });
   const res = await handleRequest({ method: "DELETE", path: "/processes/p1" }, d);
   assert.equal(res.status, 204);
   assert.deepEqual(d.runner.stopped, ["p1"]);
