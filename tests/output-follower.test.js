@@ -167,13 +167,20 @@ test("A STREAM THAT ENDS WITHOUT AN EXIT IS `failed`, not `exited`", async () =>
   assert.equal(f.exit, null);
 });
 
-test("an ABORT is not a failure -- a closed pane must not read as a broken one", async () => {
+test("an ABORT CAUSED BY stop() is not a failure -- a closed pane must not read as a broken one", async () => {
+  // THE STOP IS WHAT MAKES IT BENIGN. An AbortError nobody asked for is a failed connection, and the
+  // pane reconnects from it: tests/an-abort-nobody-asked-for-is-a-failure.test.js (v0.7.1, W13).
+  // The request waits on the follower's own signal, as a real fetch does, and rejects when it fires.
   const f = new OutputFollower({
     endpoint: "http://x",
     id: "p",
-    fetchImpl: async () => { const e = new Error("aborted"); e.name = "AbortError"; throw e; },
+    fetchImpl: (_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    }),
   });
-  await f.start();
+  const started = f.start();
+  f.stop();
+  await started;
   assert.notEqual(f.status, FAILED);
 });
 
