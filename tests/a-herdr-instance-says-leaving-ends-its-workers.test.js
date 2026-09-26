@@ -11,6 +11,7 @@ import test from "node:test";
 
 import { renderDashboard } from "../lib/tui.mjs";
 import { startDaemonView } from "../lib/daemon-view.mjs";
+import { startDashboard } from "../lib/dashboard.mjs";
 
 const snapshot = {
   version: "0.7.0", endpoint: "http://127.0.0.1:8802", terminals: { available: true },
@@ -35,4 +36,28 @@ test("the daemon turns it on exactly where it opens a Herdr space per worker", a
   await startDaemonView({ endpoint: "e", registryPath: "r", stdout: tty, stdin: tty, herdrSpaces: false, start });
   assert.equal(calls[0].endsWithHerdr, true);
   assert.equal(Boolean(calls[1].endsWithHerdr), false);
+});
+
+// THE LINK BETWEEN THE TWO TESTS ABOVE (v0.7.1 review, E5). The renderer is tested with the flag and
+// the daemon is tested passing it, and deleting the line in `startDashboard` that hands it to the
+// renderer left all three green. This drives the view itself.
+test("the view hands the flag to the renderer it draws with", async () => {
+  const frame = async (endsWithHerdr) => {
+    let written = "";
+    await startDashboard({
+      endpoint: "http://127.0.0.2:1",
+      registryPath: "/nonexistent/services.json",
+      once: true,
+      clearScreen: false,
+      columns: 120,
+      rows: 40,
+      endsWithHerdr,
+      write: (text) => { written += text; },
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => snapshot }),
+      readFile: () => { throw new Error("no registry"); },
+    });
+    return written;
+  };
+  assert.match(await frame(true), /leaving this Herdr session ends this environment and its 2 workers/);
+  assert.doesNotMatch(await frame(false), /leaving this Herdr/, "CONTROL: the line was drawn without the flag");
 });
