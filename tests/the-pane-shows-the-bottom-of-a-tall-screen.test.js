@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { screenLines } from "../lib/screen-render.mjs";
+import { paintedRowCount, screenLines } from "../lib/screen-render.mjs";
 import { paneTitle } from "../lib/console-view.mjs";
 
 /** A 40-row agent screen: old transcript at the top, the prompt on the second-last row. */
@@ -37,6 +37,12 @@ test("a short screen with blank rows below it is not pushed off the top", () => 
   // empty bottom does not cost the rows that carry something.
   const rows = ["header", "body", ...Array.from({ length: 38 }, () => "")];
   assert.deepEqual(screenLines(rows, { width: 80, height: 20 }), ["header", "body"]);
+});
+
+test("the painted rows of a screen run to its last non-blank row, whatever is blank above it", () => {
+  // What the title's crop claim is counted from (v0.7.1 review, E4): 39, not the PTY's 40, and not 2.
+  assert.equal(paintedRowCount(tallScreen()), 39);
+  assert.equal(paintedRowCount(["", "  ", ""]), 0);
 });
 
 test("the title says when the producer has painted more rows than the pane", () => {

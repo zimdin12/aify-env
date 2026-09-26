@@ -16,7 +16,7 @@ import test from "node:test";
 import { EventEmitter } from "node:events";
 
 import { ConsoleSession } from "../lib/console-session.mjs";
-import { PASTE_END, PASTE_START, PASTE_QUIET_MS } from "../lib/bracketed-paste.mjs";
+import { PASTE_END, PASTE_START, PASTE_QUIET_MS, PasteReader } from "../lib/bracketed-paste.mjs";
 import { ENTER_VIEW, LEAVE_VIEW } from "../lib/frame.mjs";
 import { startDashboard } from "../lib/dashboard.mjs";
 import { STREAMING } from "../lib/output-follower.mjs";
@@ -210,4 +210,22 @@ test("the agent's own bracketed-paste mode is read off its emulated screen", asy
   await screen.write(`${ESC}[?2004l`);
   assert.equal(screen.bracketedPaste, false);
   screen.dispose();
+});
+
+test("a held tail that turns out not to be a marker is typed, in order, however it ends", () => {
+  // The reader holds `ESC [ 2` in case it is the start of a paste. An arrow key finishing it, or
+  // quiet, must hand it back as typing -- a lone ESC typed into an attached pane included.
+  const reader = new PasteReader();
+  assert.deepEqual(reader.read(`a${ESC}[2`), [{ paste: false, text: "a" }]);
+  assert.deepEqual(reader.read("~b"), [{ paste: false, text: `${ESC}[2~b` }], "the Insert key was not typed");
+  assert.deepEqual(reader.read(ESC), []);
+  assert.ok(reader.waitMs > 0 && reader.waitMs < PASTE_QUIET_MS, "a held ESC waits as long as a lost paste");
+  assert.deepEqual(reader.flush(), [{ paste: false, text: ESC }]);
+  assert.equal(reader.waitMs, null);
+});
+
+test("attached, a lone ESC reaches the agent once the terminal has gone quiet", () => {
+  const s = attached();
+  assert.deepEqual(s.handleChunk(ESC).map((r) => r.toPty).filter(Boolean), [], "positive control: it was held");
+  assert.equal(forwarded(s.flushInput()), ESC);
 });
