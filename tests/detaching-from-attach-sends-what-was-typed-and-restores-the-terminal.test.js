@@ -27,7 +27,7 @@ const CLI = path.join(HERE, "..", "bin", "aify-env-attach.mjs");
 const DETACH = String.fromCharCode(29);
 
 /** A daemon that answers each keystroke after `inputDelayMs`, recording it on ARRIVAL. */
-function slowInputDaemon({ inputDelayMs }) {
+function slowInputDaemon({ inputDelayMs, output = "" }) {
   const received = [];
   const server = http.createServer((request, response) => {
     const body = [];
@@ -52,6 +52,9 @@ function slowInputDaemon({ inputDelayMs }) {
       if (url.endsWith("/resize")) { response.writeHead(204); response.end(); return; }
       if (url.endsWith("/output")) {
         response.writeHead(200, { "content-type": "text/event-stream" });
+        if (output) response.write(`data: ${JSON.stringify(output)}
+
+`);
         return;
       }
       response.writeHead(404); response.end("{}");
@@ -62,8 +65,8 @@ function slowInputDaemon({ inputDelayMs }) {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function attachAndDetach(t) {
-  const daemon = slowInputDaemon({ inputDelayMs: 200 });
+async function attachAndDetach(t, { stream = "" } = {}) {
+  const daemon = slowInputDaemon({ inputDelayMs: 200, output: stream });
   await new Promise((resolve) => daemon.server.listen(0, "127.0.0.1", resolve));
   const endpoint = `http://127.0.0.1:${daemon.server.address().port}`;
   const pty = createRequire(import.meta.url)("node-pty");
@@ -128,7 +131,29 @@ test("the leave sequence resets every mode an agent commonly sets", async () => 
   const ESC = String.fromCharCode(27);
   // ?1004 (focus reporting) and ?1 (application cursor keys) were missing (v0.7.1 review, E10): an
   // agent that set either left the shell receiving ESC[I and ESC[O on every focus change.
-  for (const mode of ["?1049l", "?25h", "?1000l", "?1002l", "?1003l", "?1006l", "?2004l", "?1004l", "?1l", "<u", "0m"]) {
+  for (const mode of ["?1049l", "?25h", "?1000l", "?1002l", "?1003l", "?1006l", "?2004l", "?1004l", "?1l", "0m"]) {
     assert.ok(LOCAL_SCREEN_LEAVE.includes(`${ESC}[${mode}`), `the leave sequence does not reset ${mode}`);
   }
+  // The keyboard-protocol pop is NOT unconditional: it is owed only for levels the agent pushed.
+  // See detaching-pops-only-the-keyboard-levels-the-agent-pushed.test.js (v0.7.1 review, W14).
+  assert.ok(!LOCAL_SCREEN_LEAVE.includes(`${ESC}[<`), "the fixed leave sequence pops a level nobody pushed");
+});
+
+// ── the keyboard-protocol pop, through the real binary (v0.7.1 review, W14) ────────────────────────
+//
+// ConPTY carries `CSI < n u` through to this side (observed while writing these), so the pop the
+// binary writes on detach can be read here. Which levels it owes is tested on the ledger itself in
+// detaching-pops-only-the-keyboard-levels-the-agent-pushed.test.js; these prove the binary writes it.
+
+test("detaching pops a keyboard level the agent pushed", async (t) => {
+  const ESC = String.fromCharCode(27);
+  const { afterDetach } = await attachAndDetach(t, { stream: `hi${ESC}[>1uthere` });
+  assert.ok(afterDetach.includes(`${ESC}[<1u`), `the pushed level was not popped: ${JSON.stringify(afterDetach)}`);
+});
+
+test("detaching pops nothing when the agent pushed nothing", async (t) => {
+  const ESC = String.fromCharCode(27);
+  const { afterDetach } = await attachAndDetach(t, { stream: "hithere" });
+  assert.ok(afterDetach.includes(`${ESC}[?25h`), `positive control: nothing was restored at all: ${JSON.stringify(afterDetach)}`);
+  assert.ok(!afterDetach.includes(`${ESC}[<`), `a level nobody pushed was popped: ${JSON.stringify(afterDetach)}`);
 });
