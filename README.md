@@ -194,6 +194,10 @@ it owns, so the view asks `stop the environment and its N workers?` and only a s
 ahead. In a menu, the start list or find it backs out instead, and inside an attached pane it goes to
 the agent. A SIGINT sent by a signal rather than typed still stops the daemon at once.
 
+**A PASTE IS NEVER A KEY.** While the view has the screen it turns on bracketed paste, so the terminal
+marks every paste however it splits it: on the list, in a menu, the start list or a question a paste
+does nothing, in find it is text, and in an attached pane it reaches the agent whole.
+
 **THE CONSOLE STARTS HIDDEN, and that is deliberate.** It costs half the width to show one process,
 against a list of every agent on the host -- and the operator's stated priority for this view is
 seeing which agents are working. `p` brings it back. While it is hidden nothing is streamed at all:
