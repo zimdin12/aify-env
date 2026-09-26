@@ -39,10 +39,10 @@ test("a short screen with blank rows below it is not pushed off the top", () => 
   assert.deepEqual(screenLines(rows, { width: 80, height: 20 }), ["header", "body"]);
 });
 
-test("the title says when the producer has more rows than the pane", () => {
-  const pane = { status: "streaming", label: "alpha", screenCols: 80, screenRows: 40 };
-  assert.match(paneTitle(pane, 80, 20), /40 rows, cropped/);
+test("the title says when the producer has painted more rows than the pane", () => {
+  const pane = { status: "streaming", label: "alpha", screenCols: 80, paintedRows: 40 };
+  assert.match(paneTitle(pane, 80, 20), /20 rows above, cropped/);
   // CONTROL: silent when it fits, like the column note.
-  assert.doesNotMatch(paneTitle({ ...pane, screenRows: 20 }, 80, 20), /rows/);
+  assert.doesNotMatch(paneTitle({ ...pane, paintedRows: 20 }, 80, 20), /rows/);
   assert.doesNotMatch(paneTitle(pane, 80), /rows/, "a caller that gave no height is claimed nothing about");
 });
