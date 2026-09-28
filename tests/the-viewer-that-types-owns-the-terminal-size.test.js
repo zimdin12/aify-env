@@ -17,6 +17,7 @@ import { Runner } from "../lib/runner.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
 import { PluginProcesses } from "../lib/service-plugins.mjs";
 import { CONTROL_FAILED, createHandleBook, runOneControl } from "../lib/plugins/aify-comms/terminal-controls.mjs";
+import { DASHBOARD_VIEWER, viewerOfControl } from "../lib/plugins/aify-comms/control-viewer.mjs";
 import { MAX_VIEWERS, TerminalSizeOwner, viewerFrom } from "../lib/terminal-size-owner.mjs";
 
 const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
@@ -197,7 +198,7 @@ test("dashboard control: a key withheld from the dashboard is reported FAILED", 
   const reports = [];
   const result = await runOneControl({
     handles,
-    control: { id: "ctl-1", terminalId: "term-1", action: "input", body: "k" },
+    control: { id: "ctl-1", terminalId: "term-1", action: "input", body: "k", requestedBy: "dashboard" },
     api: { async reportControl(controlId, patch) { reports.push({ controlId, ...patch }); } },
     processes: new PluginProcesses(runner),
   });
@@ -205,4 +206,36 @@ test("dashboard control: a key withheld from the dashboard is reported FAILED", 
   assert.equal(reports[0]?.status, CONTROL_FAILED);
   assert.match(String(reports[0]?.error), /could not give the terminal dashboard's size first/);
   assert.deepEqual(log, [], "the dashboard's key reached the process at the pane's size");
+});
+
+// ── only the dashboard's own surfaces are the dashboard (external review, 2026-09-29) ───────
+// An auto-answer or an agent typing into a console is not a viewer: it must never snap the PTY back
+// to the size of a dashboard console opened once, which scrambles the Herdr pane.
+
+test("viewerOfControl: the dashboard's surfaces are one viewer, every other requester none", () => {
+  for (const requestedBy of ["dashboard", "dashboard-attach", "dashboard-refresh", " dashboard "]) {
+    assert.equal(viewerOfControl({ requestedBy }), DASHBOARD_VIEWER, requestedBy);
+  }
+  for (const requestedBy of ["console-prompt", "sc-lead", "dashboardx", "", undefined]) {
+    assert.equal(viewerOfControl({ requestedBy }), "", String(requestedBy));
+  }
+});
+
+test("an auto-answer through the real control path types without resizing the pane's terminal", async () => {
+  const { runner, id, log } = await watchedTerminal();
+  const handles = createHandleBook();
+  handles.remember("term-1", id, "sc-lead");
+  const processes = new PluginProcesses(runner);
+  const api = { async reportControl() {} };
+  const send = (over) => runOneControl({ handles, api, processes, control: { id: "c", terminalId: "term-1", ...over } });
+
+  await send({ action: "resize", cols: 157, rows: 32, requestedBy: "dashboard-attach" });
+  runner.resize(id, 157, 40, "attach:pane");
+  log.length = 0;
+  await send({ action: "input", body: "1", requestedBy: "console-prompt" });
+  await send({ action: "input", body: "x", requestedBy: "sc-lead" });
+  assert.deepEqual(log, ["write 1", "write x"], "an automated key resized the terminal to the dashboard's size");
+
+  await send({ action: "input", body: "d", requestedBy: "dashboard" });
+  assert.deepEqual(log.slice(2), ["resize 157x32", "write d"], "CONTROL: a key typed IN the dashboard still takes its size");
 });

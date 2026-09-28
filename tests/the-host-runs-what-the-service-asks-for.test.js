@@ -287,11 +287,11 @@ test("input, resize and stop reach the host and are reported", async () => {
   // AS THE DASHBOARD VIEWER, so a key typed there gives the terminal its size back (terminal-size-owner.mjs).
   const book = createHandleBook();
   await run({ handles: book });  // start it first, so this host knows what to address
-  const write = await run({ handles: book, control: control({ action: "input", body: "hello" }) });
+  const write = await run({ handles: book, control: control({ action: "input", body: "hello", requestedBy: "dashboard" }) });
   assert.deepEqual(write.processes.calls.writes, [{ id: "proc-1", data: "hello", viewer: "dashboard" }]);
   assert.equal(write.api.reports[0].terminalStatus, "attached");
 
-  const resize = await run({ handles: book, control: control({ action: "resize", cols: 120, rows: 40 }) });
+  const resize = await run({ handles: book, control: control({ action: "resize", cols: 120, rows: 40, requestedBy: "dashboard-attach" }) });
   assert.deepEqual(resize.processes.calls.resizes, [{ id: "proc-1", cols: 120, rows: 40, viewer: "dashboard" }]);
 
   const stop = await run({ handles: book, control: control({ action: "stop" }) });
