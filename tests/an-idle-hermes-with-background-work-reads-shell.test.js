@@ -69,6 +69,34 @@ test("the transcript talking about background work is not the dock", () => {
   assert.equal(judge(screenWith([], { above: farAbove })).state, "idle");
 });
 
+// REVIEW 2026-09-28 (comms-senior-dev, REVISE of a441dab): a transcript line QUOTING the dock, glyph
+// and all, sat in the last 30 rows and read as shell. These are its three counterexamples verbatim,
+// beside the transcript's real shapes: `┊` answer lines, `├─` tool lines, four-space continuations.
+test("a dock line quoted in the transcript near the prompt is not the dock", () => {
+  for (const quoted of [
+    " ┊  I copied this line: ▸ 2 live agents · 1 procs · Ctrl+T expand",
+    " ┊  The screenshot said ▾ 4 live agents · Ctrl+R collapse",
+    " ┊  Our log included ▾ Processes · 1 running · 2 done",
+    " ┊  ▾ 4 live agents · Ctrl+T expand · Ctrl+R collapse",
+    "    ▸ 2 live agents · 1 procs · Ctrl+T expand",
+    "   ├─ ● Terminal(\"echo ▾ Processes · 1 running\") (0.2s)",
+    "    1 background task running",
+  ]) {
+    const screen = screenWith([], { above: [...TRANSCRIPT, quoted] });
+    assert.equal(judge(screen).rule, "osc_title_idle", `CONTROL: ${quoted} is judged on an idle screen`);
+    assert.equal(judge(screen).state, "idle", quoted);
+  }
+});
+
+test("the dock where hermes draws it, one column in, still reads shell", () => {
+  for (const dock of [
+    [" ▾ 4 live agents · +1 more · Ctrl+T expand · Ctrl+R collapse"],
+    [" ▸ 2 live agents · 1 procs · last: listening on :8080 · Ctrl+T expand · Ctrl+R restore"],
+    [" ▾ Processes · 1 running · 2 done · Ctrl+T expand · Ctrl+R collapse"],
+    [" 1 background task running"],
+  ]) assert.equal(judge(screenWith(dock)).state, "shell", dock[0]);
+});
+
 test("mid-turn with live agents is working, not shell: the screenshot's own screen", () => {
   // The turn owns the subagents here; `shell` is only for an idle prompt.
   const screen = screenWith(["▾ 4 live agents · +1 more · Ctrl+T expand · Ctrl+R collapse"], { prompt: " ❯ Ctrl+C to interrupt…" });
