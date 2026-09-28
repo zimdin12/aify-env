@@ -16,7 +16,7 @@ import test from "node:test";
 import { EventEmitter } from "node:events";
 
 import { ConsoleSession } from "../lib/console-session.mjs";
-import { PASTE_END, PASTE_START, PASTE_QUIET_MS, PasteReader } from "../lib/bracketed-paste.mjs";
+import { PASTE_END, PASTE_LOST_MS, PASTE_START, PASTE_QUIET_MS, PasteReader } from "../lib/bracketed-paste.mjs";
 import { ENTER_VIEW, LEAVE_VIEW } from "../lib/frame.mjs";
 import { startDashboard } from "../lib/dashboard.mjs";
 import { STREAMING } from "../lib/output-follower.mjs";
@@ -228,4 +228,80 @@ test("attached, a lone ESC reaches the agent once the terminal has gone quiet", 
   const s = attached();
   assert.deepEqual(s.handleChunk(ESC).map((r) => r.toPty).filter(Boolean), [], "positive control: it was held");
   assert.equal(forwarded(s.flushInput()), ESC);
+});
+
+// ── a paste that pauses is still one paste (external review, 2026-09-26 and -29) ────────────
+// A terminal on a loaded host can pause mid-paste for longer than PASTE_QUIET_MS. The paste used to be
+// closed at the pause, and the rest arrived as typing: its newlines submitted the agent's half-written
+// prompt early. What arrived is now given up AS PASTE at the pause, and the paste stays open.
+
+test("a paste that pauses is given up in part AS PASTE, and the rest is paste too", () => {
+  const reader = new PasteReader({ release: DETACH });
+  assert.deepEqual(reader.read(`${PASTE_START}line1\r`), []);
+  assert.deepEqual(reader.flush(), [{ paste: true, text: "line1\r" }], "the pause gave up what had arrived");
+  assert.deepEqual(reader.read(`line2\r${PASTE_END}ok`), [
+    { paste: true, text: "line2\r" },
+    { paste: false, text: "ok" },
+  ], "the rest of the paste came out as typing");
+  assert.equal(reader.waitMs, null, "the end marker closed it");
+});
+
+test("attached, a paused paste never sends its later lines as keys", () => {
+  const s = attached();
+  s.handleChunk(`${PASTE_START}line1\r`);
+  assert.equal(forwarded(s.flushInput()), `${PASTE_START}line1\r${PASTE_END}`, "positive control: the pause");
+  assert.equal(forwarded(feed(s, [`line2\r`, `line3\r${PASTE_END}`])),
+    `${PASTE_START}line2\rline3\r${PASTE_END}`,
+    "a line after the pause reached the agent as typing");
+});
+
+test("an end marker that never comes is given up after PASTE_LOST_MS, and the keyboard types again", () => {
+  const reader = new PasteReader({ release: DETACH });
+  reader.read(`${PASTE_START}abc`);
+  assert.equal(reader.waitMs, PASTE_QUIET_MS);
+  assert.deepEqual(reader.flush(), [{ paste: true, text: "abc" }]);
+  assert.equal(reader.waitMs, PASTE_LOST_MS, "an open paste given up in part waits for its lost end");
+  assert.deepEqual(reader.flush(), [], "the lost end closes nothing new");
+  assert.deepEqual(reader.read("x"), [{ paste: false, text: "x" }], "the keyboard is still inside the paste");
+});
+
+test("the detach key alone ends a paste given up in part; inside more text it is paste", () => {
+  const reader = new PasteReader({ release: DETACH });
+  reader.read(`${PASTE_START}abc`);
+  reader.flush();
+  assert.deepEqual(reader.read(`a${DETACH}b`), [], "CONTROL: mixed in with paste text it is paste");
+  reader.flush();
+  assert.deepEqual(reader.read(DETACH), [{ paste: false, text: DETACH }], "the detach key was swallowed");
+});
+
+test("the view times the lost end too: after PASTE_LOST_MS a typed Enter is a key again", async (t) => {
+  // The view's flush timer must re-arm after giving a paste up in part, or an open paste is never
+  // closed and every later key is swallowed as paste. In find, a pasted Enter is dropped and a typed
+  // one accepts, which is what tells the two apart here.
+  class FakeInput extends EventEmitter {
+    setRawMode() { return this; }
+    resume() { return this; }
+    pause() { return this; }
+  }
+  const input = new FakeInput();
+  const frames = [];
+  const view = await startDashboard({
+    endpoint: "http://127.0.0.2:1",
+    registryPath: "/nonexistent/services.json",
+    write: (text) => frames.push(text),
+    clearScreen: false,
+    intervalMs: 60_000,
+    columns: 120,
+    rows: 40,
+    input,
+    fetchImpl: async () => ({ ok: true, status: 200, body: null, json: async () => ({ processes: PROCS }) }),
+    readFile: () => { throw new Error("no registry"); },
+  });
+  t.after(view.stop);
+  input.emit("data", "g");
+  input.emit("data", `${PASTE_START}charl`);
+  await new Promise((resolve) => setTimeout(resolve, PASTE_QUIET_MS + PASTE_LOST_MS + 300));
+  assert.match(frames.at(-1), /find charl▌/, "positive control: the paste reached find");
+  input.emit("data", "\r");
+  assert.doesNotMatch(frames.at(-1), /find \S*▌/, "a typed Enter was swallowed by a paste whose end was lost");
 });
