@@ -22,6 +22,8 @@
 // repo -- aify-dashboard and aify-project-graph will attach to processes they started through the
 // same routes, and nothing in this file would need to change for them.
 
+import { randomUUID } from "node:crypto";
+
 import { OutputFollower } from "../lib/output-follower.mjs";
 import { DETACH } from "../lib/keys.mjs";
 import { resolveAttachTarget } from "../lib/attach-target.mjs";
@@ -144,14 +146,17 @@ process.stdin.setRawMode(true);
 // which is the property that made it worth having. Either way the changeover cannot reorder
 // anything, because the one in flight finishes before the next begins.
 const inputPath = `/processes/${encodeURIComponent(target.id)}/input`;
+// THIS CLIENT'S NAME AS A VIEWER, on every keystroke and resize: a key typed here gives the terminal
+// back this screen's size before it lands, whoever resized it last (lib/terminal-size-owner.mjs).
+const viewer = `attach:${randomUUID().slice(0, 8)}`;
 let socket = null;
 const input = new InputSender(async (data) => {
   // `encoding: "binary"` because stdin is read raw, one code unit per byte. Without it the daemon
   // treats the string as text and encodes it again -- typing `e-acute` reached the process as
   // c383c2a9 instead of c3a9, on both transports, from the first version of this client.
-  if (socket?.send(inputPath, { data, encoding: "binary" })) return;
+  if (socket?.send(inputPath, { data, encoding: "binary", viewer })) return;
   // THROWS when the send did not land, so the sender can count it (v0.7 scan, F22).
-  await postJson(`${ENDPOINT}${inputPath}`, { data, encoding: "binary" });
+  await postJson(`${ENDPOINT}${inputPath}`, { data, encoding: "binary", viewer });
 });
 
 // WHAT WAS TYPED BEFORE Ctrl+] IS SENT BEFORE LEAVING (v0.7 scan, F22). `leave()` exits the process,
@@ -199,7 +204,7 @@ if (hostConfig.localSocket && typeof health?.inputSocket === "string" && health.
 }
 
 const sendResize = async () => {
-  const size = { cols: process.stdout.columns || 0, rows: process.stdout.rows || 0 };
+  const size = { cols: process.stdout.columns || 0, rows: process.stdout.rows || 0, viewer };
   const path = `/processes/${encodeURIComponent(target.id)}/resize`;
   if (socket?.send(path, size)) return;
   await postQuietly(path, size);

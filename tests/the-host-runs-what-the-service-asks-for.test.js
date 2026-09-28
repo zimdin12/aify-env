@@ -110,8 +110,8 @@ function fakeProcesses({ startThrows = null, size = { cols: 120, rows: 30 } } = 
         if (onExit) exits.delete(onExit);
       };
     },
-    write(id, data) { calls.writes.push({ id, data }); },
-    resize(id, cols, rows) { calls.resizes.push({ id, cols, rows }); },
+    write(id, data, viewer) { calls.writes.push({ id, data, viewer }); },
+    resize(id, cols, rows, viewer) { calls.resizes.push({ id, cols, rows, viewer }); },
     async stop(id) { calls.stops.push(id); running = false; },
     list() { return running ? [{ id: "proc-1", pid: 4242 }] : []; },
   };
@@ -284,14 +284,15 @@ test("input, resize and stop reach the host and are reported", async () => {
   // ADDRESSED BY THE RUNNER'S HANDLE, which the service carries on the control because this host
   // reported it at start. The runner does not answer to a terminal id, so a write sent that way
   // reaches nothing and reports success — the same silence as the subscription above.
+  // AS THE DASHBOARD VIEWER, so a key typed there gives the terminal its size back (terminal-size-owner.mjs).
   const book = createHandleBook();
   await run({ handles: book });  // start it first, so this host knows what to address
   const write = await run({ handles: book, control: control({ action: "input", body: "hello" }) });
-  assert.deepEqual(write.processes.calls.writes, [{ id: "proc-1", data: "hello" }]);
+  assert.deepEqual(write.processes.calls.writes, [{ id: "proc-1", data: "hello", viewer: "dashboard" }]);
   assert.equal(write.api.reports[0].terminalStatus, "attached");
 
   const resize = await run({ handles: book, control: control({ action: "resize", cols: 120, rows: 40 }) });
-  assert.deepEqual(resize.processes.calls.resizes, [{ id: "proc-1", cols: 120, rows: 40 }]);
+  assert.deepEqual(resize.processes.calls.resizes, [{ id: "proc-1", cols: 120, rows: 40, viewer: "dashboard" }]);
 
   const stop = await run({ handles: book, control: control({ action: "stop" }) });
   assert.deepEqual(stop.processes.calls.stops, ["proc-1"]);
