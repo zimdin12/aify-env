@@ -329,8 +329,13 @@ test("A WORKER'S OWN PANE SHOWS ITS STATUS, and its launcher is told which pane 
   assert.equal(inherited.HERDR_PANE_ID, "w1:p1", "the caller's environment object was mutated");
 
   const report = herdr.calls.find(c => c.argv[1] === "report-agent");
-  assert.deepEqual(report?.argv, ["pane", "report-agent", "w2:p1", "--source", "herdr:aify", "--agent", "claude-aify", "--state", "idle"],
+  assert.deepEqual(report?.argv.slice(0, -2), ["pane", "report-agent", "w2:p1", "--source", "herdr:aify", "--agent", "claude-aify", "--state", "idle"],
     "the worker's pane was never given an agent");
+  // Herdr drops a report with no seq once a seq'd one has landed (0.9.1), and the worker's hooks send
+  // microseconds since the epoch, so this one must carry a seq on that clock.
+  assert.equal(report.argv.at(-2), "--seq");
+  assert.match(report.argv.at(-1), /^[0-9]{16}$/);
+  assert.ok(Math.abs(Number(report.argv.at(-1)) - Date.now() * 1000) < 600_000_000, `${report.argv.at(-1)} is not microseconds since the epoch`);
   assert.ok(order.indexOf("pane report-agent") > order.indexOf("pane run"), "the agent was reported before the pane ran attach");
   assert.equal(fs.readFileSync(paneFile, "utf8"), "w2:p1\n", "the launcher cannot learn which pane is its own");
 
