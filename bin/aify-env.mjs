@@ -90,6 +90,7 @@ import {
   revokesAcceptance,
 } from "../lib/advertise.mjs";
 import { credentialRoot } from "../lib/credential-fs.mjs";
+import { CredentialAclCache } from "../lib/credential-acl-cache.mjs";
 import { createNotices } from "../lib/notices.mjs";
 import {
   credentialForTarget,
@@ -326,6 +327,11 @@ function currentAdvertisementBody() {
   };
 }
 
+/** How this daemon reads a stored key: fresh bytes every time, one icacls per change of the file
+ *  (credential-acl-cache.mjs; per read, it was 80% of the event loop on 2026-09-28). */
+const CREDENTIAL_ACL = new CredentialAclCache();
+const credentialReading = () => ({ env: process.env, root: credentialRoot(), acl: CREDENTIAL_ACL });
+
 /** The key for the service a plugin serves, resolved PER CALL through the same store-aware path the
  *  advertiser uses -- so a credential written while this daemon runs reaches a running plugin. */
 async function resolvePluginCredential() {
@@ -337,7 +343,7 @@ async function resolvePluginCredential() {
   // the daemon's own advertiser -- which does take `.value`, forty lines below -- kept working. Two
   // callers of one function, one of them wrong, and the symptom was indistinguishable from having no
   // credential at all.
-  return credentialValue(await credentialForTarget(target, { env: process.env, root: credentialRoot() }));
+  return credentialValue(await credentialForTarget(target, credentialReading()));
 }
 
 // An escape hatch for anyone who wants the daemon in a terminal without the view taking it over.
@@ -474,9 +480,7 @@ const server = createServer(async (request, response) => {
         // NAMES AND A BOOLEAN, never a key. Without this, a daemon with no credential is invisible:
         // every advertisement is refused, `advertising` stays false, the bridge correctly keeps
         // describing the host, and the operator sees a daemon that runs and is never believed.
-        advertiseCredentials: await credentialReadinessFor(advertisingTargets, {
-          env: process.env, root: credentialRoot(),
-        }),
+        advertiseCredentials: await credentialReadinessFor(advertisingTargets, credentialReading()),
         // The outcome of the last beat per target, so a reader can tell a refusal from an outage.
         // No response BODY travels -- a service's error text is its own, and could carry anything.
         advertiseAttempts: attemptsByService(advertisingTargets, lastAttempts),
@@ -935,9 +939,7 @@ async function advertiseOnce() {
   // this daemon inventing one.
   const results = await advertiseTo({
     targets, body, post: postAdvertisement, env: process.env,
-    credential: async (target) => (await credentialForTarget(target, {
-      env: process.env, root: credentialRoot(),
-    })).value,
+    credential: async (target) => (await credentialForTarget(target, credentialReading())).value,
   });
   for (const result of results) {
     lastAttempts.set(acceptanceKey(result), {
