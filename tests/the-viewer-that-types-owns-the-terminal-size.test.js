@@ -16,6 +16,7 @@ import { test } from "node:test";
 import { Runner } from "../lib/runner.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
 import { PluginProcesses } from "../lib/service-plugins.mjs";
+import { CONTROL_FAILED, createHandleBook, runOneControl } from "../lib/plugins/aify-comms/terminal-controls.mjs";
 import { MAX_VIEWERS, TerminalSizeOwner, viewerFrom } from "../lib/terminal-size-owner.mjs";
 
 const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
@@ -23,6 +24,8 @@ const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(Stri
 /** A Runner over one fake terminal that logs every write and resize, in order. */
 async function watchedTerminal() {
   const log = [];
+  //: Set true to make the PTY refuse every later resize, as node-pty does once the process is exiting.
+  const pty = { refuseResize: false };
   const runner = new Runner({
     openTerminal: () => ({
       pid: 4242,
@@ -32,13 +35,16 @@ async function watchedTerminal() {
       onExit: () => {},
       write: (data) => { log.push(`write ${data}`); },
       kill: () => {},
-      resize: (cols, rows) => { log.push(`resize ${cols}x${rows}`); },
+      resize: (cols, rows) => {
+        if (pty.refuseResize) throw new Error("ioctl failed");
+        log.push(`resize ${cols}x${rows}`);
+      },
     }),
   });
   const { id } = await runner.start({
     service: "s", fileText: ALLOWED, command: process.execPath, args: ["-e", ""],
   });
-  return { runner, id, log };
+  return { runner, id, log, pty };
 }
 
 test("a key from a viewer that is not the owner gives the terminal that viewer's size FIRST", async () => {
@@ -146,4 +152,57 @@ test("viewerFrom: an older client that names no viewer is accepted as the unname
   }
   assert.deepEqual(viewerFrom({ viewer: "attach:1a2b3c4d" }), { ok: true, value: "attach:1a2b3c4d" });
   assert.equal(viewerFrom({ viewer: 7 }).ok, false);
+});
+
+// ── an owed resize the PTY refuses withholds the key (review 2026-09-29) ─────────────────────
+// Written anyway, the key lands at the OTHER viewer's size and the sender is told it landed.
+
+/** Both viewers have sized the terminal (the dashboard last), then the PTY stops accepting resizes. */
+async function refusingAfterTwoViewers() {
+  const terminal = await watchedTerminal();
+  terminal.runner.resize(terminal.id, 157, 40, "attach:pane");
+  terminal.runner.resize(terminal.id, 157, 32, "dashboard");
+  terminal.pty.refuseResize = true;
+  terminal.log.length = 0;
+  return terminal;
+}
+
+test("Runner: a refused owed resize withholds the key and says why", async () => {
+  const { runner, id, log } = await refusingAfterTwoViewers();
+  const written = runner.write(id, "k", "attach:pane");
+  assert.equal(written.ok, false);
+  assert.match(written.error, /could not give the terminal attach:pane's size first: ioctl failed/);
+  assert.deepEqual(log, [], "the key was written at the other viewer's size");
+  assert.equal(runner.write(id, "d", "dashboard").ok, true, "CONTROL: the owner, owing nothing, still types");
+  assert.deepEqual(log, ["write d"]);
+});
+
+test("protocol: the withheld key is a 409, not a 204", async () => {
+  const { runner, id, log } = await refusingAfterTwoViewers();
+  const answer = await handleRequest(
+    { method: "POST", path: `/processes/${id}/input`, body: { data: "k", viewer: "attach:pane" } }, { runner });
+  assert.equal(answer.status, 409);
+  assert.deepEqual(log, []);
+});
+
+test("dashboard control: a key withheld from the dashboard is reported FAILED", async () => {
+  const { runner, id, log, pty } = await watchedTerminal();
+  runner.resize(id, 157, 32, "dashboard");
+  runner.resize(id, 157, 40, "attach:pane");
+  // Now the dashboard owes a resize, and the PTY refuses it.
+  pty.refuseResize = true;
+  log.length = 0;
+  const handles = createHandleBook();
+  handles.remember("term-1", id, "sc-lead");
+  const reports = [];
+  const result = await runOneControl({
+    handles,
+    control: { id: "ctl-1", terminalId: "term-1", action: "input", body: "k" },
+    api: { async reportControl(controlId, patch) { reports.push({ controlId, ...patch }); } },
+    processes: new PluginProcesses(runner),
+  });
+  assert.equal(result.outcome, "refused");
+  assert.equal(reports[0]?.status, CONTROL_FAILED);
+  assert.match(String(reports[0]?.error), /could not give the terminal dashboard's size first/);
+  assert.deepEqual(log, [], "the dashboard's key reached the process at the pane's size");
 });

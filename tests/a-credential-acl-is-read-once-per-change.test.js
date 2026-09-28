@@ -58,6 +58,31 @@ test("an answer older than the TTL is asked again even for an unchanged file", a
   assert.equal(calls(), 2);
 });
 
+test("a clock that goes BACKWARDS expires the answer instead of stretching it (review 2026-09-29)", async () => {
+  // The reviewer's probe: ttl 100, read at 10000, the ACL changes where ctime cannot show it, the clock
+  // is set back to 0. A negative age read as fresh kept serving "private" for ever.
+  let clock = 10_000;
+  const { cache, calls } = counted(["private", "world-readable"], { ttlMs: 100, now: () => clock });
+  assert.equal(await cache.read("k", stats()), "private");
+  clock = 0;
+  assert.equal(await cache.read("k", stats()), "world-readable");
+  assert.equal(calls(), 2);
+});
+
+test("the default clock is monotonic: a wall clock jumping ahead does not expire a fresh answer", async (t) => {
+  // Distinguishes the clock SOURCE: with Date.now as the default this jump re-asks at once. Date.now
+  // is replaced BEFORE the cache exists, because a default captures the function it was given.
+  const realNow = Date.now;
+  let jump = 0;
+  t.after(() => { Date.now = realNow; });
+  Date.now = () => realNow() + jump;
+  const { cache, calls } = counted(["first", "second"]);
+  assert.equal(await cache.read("k", stats()), "first");
+  jump = 10 * ACL_CACHE_MS;
+  assert.equal(await cache.read("k", stats()), "first");
+  assert.equal(calls(), 1);
+});
+
 test("a failed read is not kept: empty, or a reader that throws, is asked again next time", async () => {
   const { cache, calls } = counted(["", new Error("icacls went away"), "ACL"]);
   assert.equal(await cache.read("k", stats()), "");
