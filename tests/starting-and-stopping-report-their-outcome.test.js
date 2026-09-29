@@ -115,3 +115,13 @@ test("THE DAEMON'S handlers hand the outcome back instead of dropping it", async
   assert.deepEqual(await calls[0].onStartAgent({ id: "bravo" }), { started: false, problem: "bravo is live" });
   assert.deepEqual(await calls[0].onAction({ action: "stop", process: { id: "p1" } }), { ok: false, problem: "denied" });
 });
+
+test("an attach refused on a narrow terminal says why (external review, T2)", async () => {
+  // Below 80 columns there is no pane to type into, so attach is refused. The refusal was returned
+  // and never read: Enter did nothing and said nothing.
+  const { input, notices, stop } = await view({ columns: 60 });
+  input.emit("data", "\r");
+  await settle();
+  stop();
+  assert.ok(texts(notices).some((t) => /80 columns/.test(t)), `the refusal left no trace: ${JSON.stringify(texts(notices))}`);
+});

@@ -296,3 +296,10 @@ test("THE README NAMES NO ACTION THIS TIER CANNOT PERFORM", () => {
       `the README's menu paragraph names \`${action}\`, which no caller offers`);
   }
 });
+
+test("WHERE NO PANE CAN BE DRAWN the hint offers neither the console nor attach (external review, T2)", () => {
+  const narrow = hintFor("dashboard", { paneDrawable: false });
+  assert.ok(narrow, "CONTROL: a hint was rendered");
+  assert.doesNotMatch(narrow, /attach|console/, narrow);
+  assert.match(hintFor("dashboard", { paneDrawable: true }), /attach/, "CONTROL: a drawable pane still offers attach");
+});
