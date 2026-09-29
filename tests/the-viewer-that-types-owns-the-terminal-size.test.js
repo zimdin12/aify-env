@@ -198,7 +198,7 @@ test("dashboard control: a key withheld from the dashboard is reported FAILED", 
   const reports = [];
   const result = await runOneControl({
     handles,
-    control: { id: "ctl-1", terminalId: "term-1", action: "input", body: "k", requestedBy: "dashboard-console" },
+    control: { id: "ctl-1", terminalId: "term-1", action: "input", body: "k", requestedBy: "dashboard:console" },
     api: { async reportControl(controlId, patch) { reports.push({ controlId, ...patch }); } },
     processes: new PluginProcesses(runner),
   });
@@ -213,11 +213,14 @@ test("dashboard control: a key withheld from the dashboard is reported FAILED", 
 // to the size of a dashboard console opened once, which scrambles the Herdr pane.
 
 test("viewerOfControl: the dashboard's surfaces are one viewer, every other requester none", () => {
-  for (const requestedBy of ["dashboard-console", "dashboard-attach", "dashboard-refresh", " dashboard-console "]) {
+  for (const requestedBy of ["dashboard:console", "dashboard:attach", "dashboard:refresh", " dashboard:console "]) {
     assert.equal(viewerOfControl({ requestedBy }), DASHBOARD_VIEWER, requestedBy);
   }
   // Bare `dashboard` is what a chat message, a Compact and a defaulted input carry: none is a screen.
-  for (const requestedBy of ["dashboard", "console-prompt", "sc-lead", "dashboardx", "", undefined]) {
+  // `dashboard-manager` is a live agent's id, and `dashboard-console` the old surface name: an agent id
+  // can take that shape, so neither may be the viewer (review of 0.7.6).
+  for (const requestedBy of ["dashboard", "dashboard-manager", "dashboard-console", "console-prompt", "sc-lead",
+    "dashboardx", "", undefined]) {
     assert.equal(viewerOfControl({ requestedBy }), "", String(requestedBy));
   }
 });
@@ -230,15 +233,17 @@ test("an auto-answer through the real control path types without resizing the pa
   const api = { async reportControl() {} };
   const send = (over) => runOneControl({ handles, api, processes, control: { id: "c", terminalId: "term-1", ...over } });
 
-  await send({ action: "resize", cols: 157, rows: 32, requestedBy: "dashboard-attach" });
+  await send({ action: "resize", cols: 157, rows: 32, requestedBy: "dashboard:attach" });
   runner.resize(id, 157, 40, "attach:pane");
   log.length = 0;
   await send({ action: "input", body: "1", requestedBy: "console-prompt" });
   await send({ action: "input", body: "x", requestedBy: "sc-lead" });
   // A chat message or a Compact from the dashboard (review of 0.7.6, ST1).
   await send({ action: "input", body: "m", requestedBy: "dashboard" });
-  assert.deepEqual(log, ["write 1", "write x", "write m"], "an automated key resized the terminal to the dashboard's size");
+  // An agent whose id starts `dashboard-` typing into a console (review of 0.7.6).
+  await send({ action: "input", body: "a", requestedBy: "dashboard-manager" });
+  assert.deepEqual(log, ["write 1", "write x", "write m", "write a"], "an automated key resized the terminal to the dashboard's size");
 
-  await send({ action: "input", body: "d", requestedBy: "dashboard-console" });
-  assert.deepEqual(log.slice(3), ["resize 157x32", "write d"], "CONTROL: a key typed IN the dashboard still takes its size");
+  await send({ action: "input", body: "d", requestedBy: "dashboard:console" });
+  assert.deepEqual(log.slice(4), ["resize 157x32", "write d"], "CONTROL: a key typed IN the dashboard still takes its size");
 });
