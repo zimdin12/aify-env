@@ -65,7 +65,9 @@ async function knock(url) {
 
 const checks = await collectEnvironmentChecks({
   endpoint: ENV_ENDPOINT,
-  discoverEndpoint: () => discoverServingEndpoint({
+  // ONLY WHEN NO ENDPOINT WAS NAMED. An explicit AIFY_ENV_ENDPOINT is the one to judge: judging a
+  // daemon found elsewhere instead reported a stopped environment as running.
+  discoverEndpoint: process.env.AIFY_ENV_ENDPOINT ? null : () => discoverServingEndpoint({
     receipts: readyReceipts(HERDR_PROFILE),
     fetchHealth: async (endpoint) => {
       const answer = await knock(`${endpoint}/health`);
