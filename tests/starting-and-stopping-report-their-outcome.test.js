@@ -92,7 +92,7 @@ test("a FAILED stop is reported, and a successful one too", async () => {
 });
 
 test("the outcome words, from the two shapes the tiers answer in", () => {
-  assert.equal(startOutcomeNotice({ id: "a", name: "alpha" }, { started: true }), "starting alpha");
+  assert.equal(startOutcomeNotice({ id: "a", name: "alpha" }, { started: true }), "starting alpha…");
   assert.equal(startOutcomeNotice({ id: "a" }, { started: false, problem: "no" }), "start of a refused: no");
   assert.equal(actionOutcomeNotice({ action: "stop", process: { id: "p1", label: "alpha" } }, true), "stopped alpha");
   assert.equal(actionOutcomeNotice({ action: "stop", process: { id: "p1" } }, false),
@@ -124,4 +124,29 @@ test("an attach refused on a narrow terminal says why (external review, T2)", as
   await settle();
   stop();
   assert.ok(texts(notices).some((t) => /80 columns/.test(t)), `the refusal left no trace: ${JSON.stringify(texts(notices))}`);
+});
+
+test("the outcome stays above the hint, and a start says so again when its worker appears (v0.7.7)", async () => {
+  // NOTICES is the first section fitting trims, so the result of a start used to vanish at 24 rows.
+  const frames = [];
+  let processes = [{ id: "p1", label: "alpha" }];
+  const { input, stop } = await view({
+    write: (chunk) => frames.push(String(chunk)),
+    intervalMs: 20,
+    rows: 24,
+    fetchImpl: async () => ({ ok: true, status: 200, body: null, json: async () => ({ processes }) }),
+    onStartList: async () => ({ agents: [{ id: "bravo", name: "bravo" }] }),
+    onStartAgent: async () => ({ started: true, problem: "" }),
+  });
+  input.emit("data", "s");
+  await settle();
+  input.emit("data", "\r");
+  await settle();
+  const before = frames.join("");
+  processes = [...processes, { id: "p2", label: "bravo" }];
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  stop();
+  assert.match(before, /starting bravo…/, "the accepted start is not on screen");
+  assert.doesNotMatch(before, /bravo is running/, "CONTROL: it did not claim the worker before it existed");
+  assert.match(frames.join(""), /bravo is running/, "the worker arrived and the outcome line did not say so");
 });

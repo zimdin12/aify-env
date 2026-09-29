@@ -62,12 +62,6 @@ test("THE START CURSOR NEVER MOVES THE PROCESS SELECTION", () => {
   assert.equal(routeKey(UP, { ...open, startAt: 0 }).state.startAt, 3);
 });
 
-test("`j` AND `k` MOVE HERE, because there is nothing to type into", () => {
-  const open = { ...dash(3), mode: "start", startAt: 0, startCount: 3 };
-  assert.equal(routeKey("j", open).state.startAt, 1);
-  assert.equal(routeKey("k", open).state.startAt, 2);
-});
-
 test("ENTER ON AN EMPTY LIST REPORTS NOTHING, rather than choosing row 0 of nothing", () => {
   // Reporting a choice for an empty list is how a caller ends up starting `undefined`.
   const { action } = routeKey(ENTER, { ...dash(3), mode: "start", startAt: 0, startCount: 0 });
@@ -86,12 +80,16 @@ test("STARTING DOES NOT CONFIRM, and that follows the rule rather than excusing 
   assert.equal(state.confirming ?? null, null);
 });
 
-test("EVERY OTHER KEY IS INERT IN THE LIST, so nothing acts on the dashboard behind it", () => {
-  const open = { ...dash(3), mode: "start", startAt: 0, startCount: 2 };
+test("EVERY OTHER KEY IS TEXT FOR THE SEARCH, so nothing acts on the dashboard behind it", () => {
+  // v0.7.7: the list is searched, so a letter or a digit is a character of the query. What must not
+  // happen is `q` quitting, a digit jumping or `m` opening a menu behind the list.
+  const open = { ...dash(3), mode: "start", startAt: 0, startCount: 2, startQuery: "" };
   for (const key of ["q", "1", "m", "p", "g", "x"]) {
     const { state, action } = routeKey(key, open);
-    assert.equal(action, null, `${key} did something in the start list`);
+    assert.equal(action, "start-query", `${key} did something other than search in the start list`);
     assert.equal(state.mode, "start");
+    assert.equal(state.startQuery, key);
+    assert.equal(state.selected, open.selected, `${key} moved the process selection behind the list`);
   }
   // POSITIVE CONTROL: the two keys that DO work here still work.
   assert.equal(routeKey(DETACH, open).action, "start-close");

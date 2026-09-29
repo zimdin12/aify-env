@@ -94,9 +94,14 @@ test("in the menu and the start list, a paste split anywhere chooses nothing", (
     const start = session();
     start.handleInput("s");
     start.noteStartable([{ id: "a1" }, { id: "a2" }]);
-    assert.deepEqual(acted(feed(start, reads)), [], `the start list acted on split ${JSON.stringify(reads)}`);
+    // THE START LIST IS SEARCHED (v0.7.7): a paste types into the search, as in the finder, and
+    // chooses nothing.
+    const typed = feed(start, reads);
+    assert.deepEqual(acted(typed).filter((r) => r.action !== "start-query"), [],
+      `the start list acted on split ${JSON.stringify(reads)}`);
     assert.equal(start.focus.mode, "start");
     assert.equal(start.focus.startAt, 0);
+    assert.equal(start.focus.startQuery, "jj[Bq2mskyg", `split ${JSON.stringify(reads)} typed something else`);
   }
 });
 

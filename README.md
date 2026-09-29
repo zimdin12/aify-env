@@ -183,7 +183,7 @@ decisions rather than bindings.
 | `p` | show or hide the console pane |
 | `enter` | attach -- every keystroke then goes into that agent's terminal |
 | `m` | actions for the selected agent |
-| `s` | start an agent this host knows that has no worker |
+| `s` | start an agent this host knows that has no worker: the list replaces the table, typing searches it, arrows move, Enter starts |
 | `ctrl+]` | back, from anywhere |
 | `ctrl+l` | redraw the screen, if anything has smeared it (outside an attached pane, where it is the agent's) |
 | `q` | leave, where leaving is offered |
@@ -195,8 +195,8 @@ ahead. In a menu, the start list or find it backs out instead, and inside an att
 the agent. A SIGINT sent by a signal rather than typed still stops the daemon at once.
 
 **A PASTE IS NEVER A KEY.** While the view has the screen it turns on bracketed paste, so the terminal
-marks every paste however it splits it: on the list, in a menu, the start list or a question a paste
-does nothing, in find it is text, and in an attached pane it reaches the agent whole.
+marks every paste however it splits it: on the list, in a menu or a question a paste does nothing,
+in find and the start list it is search text, and in an attached pane it reaches the agent whole.
 
 **THE CONSOLE STARTS HIDDEN, and that is deliberate.** It costs half the width to show one process,
 against a list of every agent on the host -- and the operator's stated priority for this view is
@@ -213,7 +213,9 @@ so listing it would be a menu row that does nothing when chosen. The word surviv
 *vocabulary* — which is what constrains a caller's offer — and no caller offers it.
 
 **STARTING IS THE OTHER DIRECTION AND DOES NOT ASK.** `s` lists the agents this host knows that have
-no worker and starts the one you choose. It ends nothing the service reports as live: the restart it
+no worker, in place of the table, and starts the one you choose. Type to search it (`j` and `k` are
+letters there); the list says how many of how many match, and the agents it leaves out are summarised
+with the reason. "starting X…" stays on the line above the hints until X's worker appears. It ends nothing the service reports as live: the restart it
 sends is refused if the agent has a live session. The launch itself replaces any leftover or unreported
 instance of that agent still running on this host. The stop that undoes it is one menu
 away — the confirmation is derived from "does this end work you cannot get back", and starting does
