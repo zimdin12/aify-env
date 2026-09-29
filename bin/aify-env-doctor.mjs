@@ -23,6 +23,7 @@ import { EXIT, summarise } from "../lib/health.mjs";
 // for exactly this (A3) and could not call a script. What stays here is the DISPLAY, which is the
 // seam this file's own header has always named.
 import { collectEnvironmentChecks } from "../lib/environment-report.mjs";
+import { discoverServingEndpoint, readyReceipts } from "../lib/serving-endpoint.mjs";
 import { credentialRoot, listCredentialStore } from "../lib/credential-fs.mjs";
 import { terminalSupport } from "../lib/runner.mjs";
 
@@ -32,6 +33,8 @@ const strict = args.includes("--strict");
 
 const REGISTRY_PATH = process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json");
 const ENV_ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
+/** Where `herdr-aify env` daemons leave their ready.json receipts (lib/serving-endpoint.mjs). */
+const HERDR_PROFILE = join(homedir(), ".aify", "herdr");
 /** Short: a probe that hangs is a probe that turned a verifier into a wait. */
 const PROBE_TIMEOUT_MS = Number(process.env.AIFY_PROBE_TIMEOUT_MS || 2000);
 
@@ -62,6 +65,13 @@ async function knock(url) {
 
 const checks = await collectEnvironmentChecks({
   endpoint: ENV_ENDPOINT,
+  discoverEndpoint: () => discoverServingEndpoint({
+    receipts: readyReceipts(HERDR_PROFILE),
+    fetchHealth: async (endpoint) => {
+      const answer = await knock(`${endpoint}/health`);
+      return answer.ok ? answer.body : null;
+    },
+  }),
   knock,
   readRegistry,
   terminalSupport,
