@@ -95,11 +95,55 @@ test("launches that never became ready cannot crowd out an older live daemon (re
   assert.equal(await found({ ...scan, fetchHealth }), LIVE.endpoint);
 });
 
-test("a malformed newer receipt does not use up a slot the live one needs", () => {
+/** The environment check from a discovery answer, with the configured address silent. */
+async function environmentFrom(answer, envBody = { processes: [], terminals: { available: true } }) {
+  const checks = await collectEnvironmentChecks({
+    endpoint: "http://127.0.0.1:8802",
+    discoverEndpoint: async () => answer,
+    knock: async (url) => (answer.endpoint && url.startsWith(answer.endpoint)
+      ? { ok: true, status: 200, body: envBody } : { ok: false, error: "ECONNREFUSED" }),
+    readRegistry: () => ({ missing: true }),
+    terminalSupport: () => ({ available: true }),
+    readCredentialStore: async () => ({ names: [] }),
+  });
+  return checks.find((c) => c.id === "environment");
+}
+
+test("content opens are capped whatever the receipts hold, and the rest is unchecked (review, T3 round 3)", async () => {
+  // Capping VALID receipts let 1,000 malformed ready.json files cost 1,000 opens.
+  const dirs = Object.fromEntries(Array.from({ length: 1000 }, (_, n) => [`bad-${n}`, { mtime: n, ready: "{not json" }]));
+  const { io, reads } = fakeFs(dirs);
+  const scan = readyReceipts("/root", io);
+  assert.equal(reads.length, RECEIPT_LIMIT, `${reads.length} receipt files opened`);
+  assert.deepEqual(scan, { receipts: [], unread: 1000 - RECEIPT_LIMIT });
+  const answer = await discoverServingEndpoint({ ...scan, fetchHealth });
+  assert.deepEqual(answer, { endpoint: "", unchecked: 1000 - RECEIPT_LIMIT });
+  assert.equal((await environmentFrom(answer)).state, STATE.UNANSWERED, "a partial look claimed no environment");
+});
+
+test("eight malformed newer receipts leave an older live one unchecked, and say so", async () => {
   const dirs = { live: { mtime: 1, ready: receiptFor(1) } };
   for (let n = 0; n < 8; n += 1) dirs[`bad-${n}`] = { mtime: 10 + n, ready: "{not json" };
   const { io } = fakeFs(dirs);
-  assert.deepEqual(readyReceipts("/root", io).receipts.map((r) => r.pid), [2]);
+  assert.deepEqual(readyReceipts("/root", io), { receipts: [], unread: 1 });
+});
+
+test("a live daemon found among the checked receipts is judged, and unchecked older ones are named (review, T3 round 3)", async () => {
+  // NARROWED GUARANTEE: uniqueness holds among the receipts checked. On the operator's host 15 ready
+  // receipts sat under a cap of 8, so "unresolved whenever any went unchecked" would read UNANSWERED on
+  // every run. A second live daemon among the unchecked ones is not looked for, and the detail says so.
+  const dirs = {};
+  for (let n = 0; n < 9; n += 1) dirs[`inv-${n}`] = { mtime: n, ready: receiptFor(n) };
+  const live = (n) => receiptFor(n).endpoint;
+  const { io } = fakeFs(dirs);
+  const answer = await discoverServingEndpoint({
+    ...readyReceipts("/root", io),
+    fetchHealth: async (e) => ([8, 0].map(live).includes(e) ? { pid: Number(e.split(":")[2]) - 40000 + 1, instance: `i${Number(e.split(":")[2]) - 40000}` } : null),
+  });
+  assert.deepEqual(answer, { endpoint: live(8), unchecked: 1 }, "the newest live receipt among those checked");
+  const environment = await environmentFrom(answer);
+  assert.equal(environment.state, STATE.PASSED);
+  assert.match(environment.detail, /1 older herdr-aify env receipt was not checked/, environment.detail);
 });
 
 test("a live daemon older than eight valid stale receipts is reported as unchecked, not as none", async () => {
@@ -146,7 +190,7 @@ test("a receipt or an answer without a real pid and instance authorizes nothing 
   assert.deepEqual(readyReceipts("/root", io).receipts.map((r) => r.pid), [4], "a malformed receipt became a candidate");
 });
 
-test("the doctor judges the discovered daemon when the configured address is silent", async () => {
+test("the doctor judges the discovered daemon when the configured address is silent, and adds nothing when all were checked", async () => {
   const envBody = { processes: [], terminals: { available: true } };
   const knock = async (url) => (url.startsWith(LIVE.endpoint) ? { ok: true, status: 200, body: envBody } : { ok: false, error: "ECONNREFUSED" });
   const checks = await collectEnvironmentChecks({
@@ -161,6 +205,7 @@ test("the doctor judges the discovered daemon when the configured address is sil
   assert.ok(environment, `CONTROL: an environment check was produced: ${checks.map((c) => c.id)}`);
   assert.equal(environment.state, STATE.PASSED, JSON.stringify(environment));
   assert.match(environment.detail, /63204/, "the check names the daemon it found");
+  assert.doesNotMatch(environment.detail, /not checked/, "CONTROL: nothing unchecked, nothing said");
 });
 
 test("nothing found and nothing unchecked is still a plain failure", async () => {
