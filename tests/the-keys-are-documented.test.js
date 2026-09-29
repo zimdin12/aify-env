@@ -120,6 +120,9 @@ test("A HINT NEVER NAMES A KEY THAT DOES NOTHING IN THAT MODE", () => {
       const state = { ...dash(), mode, menuActions: ["attach", "stop"], startCount: 1, confirming: mode === "confirm" ? "stop" : null };
       const { action } = routeKey(promised, state);
       if (!action) failures.push(`${mode}: the hint offers \`${promised}\` and it does nothing`);
+      // DOING SOMETHING IS NOT DOING WHAT IT SAYS. The finder's hint offered `q quit` while `q` typed
+      // into its search: the key had an action, so the line above passed (external review, T1).
+      else if (promised === "q" && action !== "quit") failures.push(`${mode}: the hint offers \`q quit\` and q does \`${action}\``);
     }
   }
   assert.deepEqual(failures, [], failures.join("; "));
