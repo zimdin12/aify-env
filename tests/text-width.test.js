@@ -23,7 +23,7 @@ import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { clip, clipToWidth, pad, width, widthMemoSizeForTests } from "../lib/text-width.mjs";
+import { clip, clipToWidth, pad, width, widthMemoSizeForTests, wrapToWidth } from "../lib/text-width.mjs";
 
 const ESC = String.fromCharCode(27);
 const dim = (s) => `${ESC}[2m${s}${ESC}[0m`;
@@ -282,4 +282,11 @@ test("a cached key does not hold on to the string it was sliced out of", () => {
     `the cache retained ${seen.attributableBytes} bytes for ${seen.sliceUnitsCached} units of `
     + "cached text; it is holding the parents of the strings it was given",
   );
+});
+
+test("wrapToWidth fills lines by display width and gives an overlong word its own line", () => {
+  // Two wide characters are four columns, so "你好 ab" does not fit in 6 and "ab" moves down.
+  assert.deepEqual(wrapToWidth("你好 ab cd", 6), ["你好", "ab cd"]);
+  assert.deepEqual(wrapToWidth("a abcdefghij b", 4), ["a", "abcdefghij", "b"]);
+  assert.deepEqual(wrapToWidth("", 10), []);
 });

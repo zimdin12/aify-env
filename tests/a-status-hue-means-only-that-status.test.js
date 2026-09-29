@@ -45,11 +45,16 @@ test("the start menu shows each agent's status dot in the dashboard's colour for
   assert.ok(text.includes(painted("grey", "●")), "stopped is not painted grey");
 });
 
-test("an agent printing output gets the working colour, not online's", () => {
+test("an agent printing output gets no status colour: printing is not working", () => {
+  // THE OPERATOR, 2026-09-29: "i see working status (yellow dot) in aify-env for all agents". An
+  // idle hermes redraws its status-bar clock every second, so amber here claimed a status nobody
+  // measured. The mark says output, and wears no status's colour.
   const row = render({ mode: "dashboard" }).split("\n").find((line) => line.includes("comms-senior-dev"));
   assert.ok(row, "CONTROL: the process row is drawn");
-  assert.ok(row.includes(painted(hueOf("working"), "●")), "the recent-output mark is not in the working colour");
-  assert.ok(!row.includes(painted("green", "●")), "the recent-output mark reads as online");
+  assert.ok(row.includes("●"), "CONTROL: the recent-output mark is drawn");
+  for (const hue of new Set(Object.values(AGENT_STATUS_HUES))) {
+    assert.ok(!row.includes(painted(hue, "●")), `the recent-output mark is painted ${hue}, a status colour`);
+  }
 });
 
 test("no status hue is spent on selection, ids or the title", () => {

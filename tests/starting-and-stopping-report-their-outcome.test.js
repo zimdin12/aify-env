@@ -150,3 +150,23 @@ test("the outcome stays above the hint, and a start says so again when its worke
   assert.doesNotMatch(before, /bravo is running/, "CONTROL: it did not claim the worker before it existed");
   assert.match(frames.join(""), /bravo is running/, "the worker arrived and the outcome line did not say so");
 });
+
+test("a refusal longer than the terminal is wrapped, so its reason is read whole (2026-09-29)", async () => {
+  // THE OPERATOR SAW ONLY "409": the line was clipped to the width, and a refusal's reason is its tail.
+  const frames = [];
+  const reason = `the restart was not accepted: 409 ${"because ".repeat(20)}the-reason-at-the-end`;
+  const { input, stop } = await view({
+    write: (chunk) => frames.push(String(chunk)),
+    columns: 80,
+    onStartList: async () => ({ agents: [{ id: "bravo", name: "bravo" }] }),
+    onStartAgent: async () => ({ started: false, problem: reason }),
+  });
+  input.emit("data", "s");
+  await settle();
+  input.emit("data", "\r");
+  await settle();
+  stop();
+  const screen = frames.join("");
+  assert.match(screen, /start of bravo refused/, "CONTROL: the refusal is on screen at all");
+  assert.match(screen, /the-reason-at-the-end/, "the tail of the refusal was cut off");
+});
