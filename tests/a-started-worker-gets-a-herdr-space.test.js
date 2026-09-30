@@ -170,6 +170,25 @@ test("THE CALL SITE: PluginProcesses runs the opener after the start, and surviv
   assert.deepEqual(await plain.start({ id: "c" }), { id: "c", terminal: true });
 });
 
+test("space: false STARTS THE SAME PROCESS WITH NO SPACE, and the Runner never sees the field", async () => {
+  // THE OPERATOR, 2026-09-30: "start agents that do not show up in herdr-aify".
+  const given = [];
+  const hooked = [];
+  const runner = { start: async spec => { given.push(spec); return { id: spec.id, terminal: true }; } };
+  const processes = new PluginProcesses(runner, {
+    onStarted: record => { hooked.push(`opened ${record.id}`); },
+    prepare: spec => { hooked.push(`prepared ${spec.id}`); return spec; },
+  });
+
+  assert.deepEqual(await processes.start({ id: "hidden", space: false }), { id: "hidden", terminal: true });
+  assert.deepEqual(hooked, [], "a space was prepared or opened for a worker told to have none");
+  assert.deepEqual(given, [{ id: "hidden" }], "the Runner was handed this tier's own field");
+
+  // CONTROL: the same start without the field is decorated exactly as before.
+  await processes.start({ id: "shown" });
+  assert.deepEqual(hooked, ["prepared shown", "opened shown"]);
+});
+
 test("THE SECOND DEFECT: the worker's PANE closes when the worker goes, and nothing else does", async () => {
   // TAKEN FROM THE RUNNER, not from the stop call: a worker killed from outside, or one that simply
   // dies, must take its pane with it too.

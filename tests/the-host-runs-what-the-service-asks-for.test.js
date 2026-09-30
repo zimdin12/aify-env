@@ -156,6 +156,14 @@ test("a start control RUNS what the service asked for, with its argv", async () 
   assert.equal(spec.id, "term-1");
 });
 
+test("an agent the operator keeps out of herdr is started with space: false, and only then", async () => {
+  // The service's per-agent setting (`herdrSpace` on the launch). Absent -- an older service -- is a space.
+  const hidden = await run({ api: fakeApi({ launch: { ...LAUNCH, herdrSpace: false } }) });
+  assert.equal(hidden.processes.calls.starts[0].space, false, "the setting did not reach the start");
+  const shown = await run();
+  assert.equal(shown.processes.calls.starts[0].space, true, "a launch without the field lost its space");
+});
+
 test("THE SIZE THE PTY OPENED AT IS REPORTED BACK, beside the pid", async () => {
   // The service asks for a start WITHOUT a size -- measured on a live host, every start control
   // carries cols 0 -- so this report is the only way it can ever learn one. Without it a terminal

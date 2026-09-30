@@ -23,6 +23,7 @@ import {
   CLIENT_ACTIONS,
   listStartableAgents,
   performClientAction,
+  setAgentHerdrSpace,
   startKnownAgent,
 } from "../lib/client-actions.mjs";
 
@@ -73,6 +74,7 @@ const view = await startDashboard({
   // daemon -- anything written here can only ever be read, never exercised.
   onStartList: () => listStartableAgents({ endpoint }),
   onStartAgent: (agent) => startKnownAgent(agent?.id, { endpoint }),
+  onSetHerdrSpace: (agent, show) => setAgentHerdrSpace(agent?.id, show, { endpoint }),
   // A pipe gets no escapes: --once is what a script or a test uses, and colour in captured output is
   // noise that has to be stripped again by whoever reads it.
   columns: process.stdout.columns || 100,

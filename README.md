@@ -183,7 +183,7 @@ decisions rather than bindings.
 | `p` | show or hide the console pane |
 | `enter` | attach -- every keystroke then goes into that agent's terminal |
 | `m` | actions for the selected agent |
-| `s` | start an agent this host knows that has no worker: the list replaces the table, typing searches it, arrows move, Enter starts |
+| `s` | start an agent this host knows that has no worker: the list replaces the table, typing searches it, arrows move, Enter starts, Tab switches whether the highlighted agent gets a herdr space from its next start (aify-comms keeps the setting) |
 | `ctrl+]` | back, from anywhere |
 | `ctrl+l` | redraw the screen, if anything has smeared it (outside an attached pane, where it is the agent's) |
 | `q` | leave, where leaving is offered |
