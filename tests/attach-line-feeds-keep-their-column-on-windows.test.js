@@ -15,7 +15,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { lineFeedsAsIndex } from "../lib/attach-screen.mjs";
+import { ConsoleLineFeeds } from "../lib/attach-screen.mjs";
 import { ScreenEmulator } from "../lib/screen-emulator.mjs";
 
 const ESC = String.fromCharCode(27);
@@ -65,6 +65,54 @@ test("CONTROL: the same bytes untranslated land at column 1 on this console", on
   assert.equal(rows[5], "next");
 });
 
-test("Index is written for every LF and nothing else changes", () => {
-  assert.equal(lineFeedsAsIndex(`a\r\nb\nc${ESC}[1;2H`), `a\r${ESC}Db${ESC}Dc${ESC}[1;2H`);
+// PARSER PARITY (review of e880d48): an emulator must end in the same state -- rows, cursor, title --
+// whether it reads the stream or the translated stream. A blanket replace failed four of these: an LF
+// inside a CSI is executed and the sequence goes on, and one inside an OSC is part of the title.
+const PARITY = {
+  "LF at ground, and on the bottom row": `${ESC}[2;3Hab\ncd${ESC}[6;1Hbottom\nnext`,
+  "LF inside a CSI before its final byte": `${ESC}[1;\n5HX`,
+  "LF and CR inside a CSI": `${ESC}[3;\r\n9HY`,
+  "LF inside an escape with an intermediate": `${ESC}(\nBZ`,
+  "LF inside an OSC ended by BEL": `${ESC}]0;BEFORE\nAFTER\x07X`,
+  "LF inside an OSC ended by ESC \\": `${ESC}]0;ONE\nTWO${ESC}\\X\nY`,
+  "LF inside a DCS": `${ESC}Pq\n#0${ESC}\\A\nB`,
+  "a CSI aborted by CAN, then LF": `${ESC}[12\x18Q\nR`,
+  "an ESC restarting a CSI with an LF inside": `${ESC}[5${ESC}[2;\n4HW`,
+};
+
+async function parserState(chunks) {
+  const screen = await ScreenEmulator.create({ cols: 40, rows: 6 });
+  assert.ok(screen, "@xterm/headless is absent, so nothing here is measured");
+  const titles = [];
+  screen.term.onTitleChange((title) => titles.push(title));
+  for (const chunk of chunks) await screen.write(chunk);
+  const buffer = screen.term.buffer.active;
+  const state = { rows: screen.rows(), cursor: [buffer.cursorX, buffer.cursorY], titles };
+  screen.dispose();
+  return state;
+}
+
+function translated(chunks) {
+  const lineFeeds = new ConsoleLineFeeds();
+  return chunks.map((chunk) => lineFeeds.translate(chunk));
+}
+
+test("THE TRANSLATION LEAVES AN EMULATOR IN THE SAME STATE, whole and split at every point", async () => {
+  for (const [name, text] of Object.entries(PARITY)) {
+    const expected = await parserState([text]);
+    for (let cut = 0; cut <= text.length; cut += 1) {
+      const chunks = [text.slice(0, cut), text.slice(cut)];
+      assert.deepEqual(await parserState(translated(chunks)), expected, `${name}, split at ${cut}`);
+    }
+  }
+});
+
+test("CONTROL: the parity gate fails a blanket replace", async () => {
+  const text = PARITY["LF inside a CSI before its final byte"];
+  const blanket = text.replace(/\n/g, `${ESC}D`);
+  assert.notDeepEqual(await parserState([blanket]), await parserState([text]));
+});
+
+test("Index replaces an LF at ground and nothing else there changes", () => {
+  assert.equal(new ConsoleLineFeeds().translate(`a\r\nb\nc${ESC}[1;2H`), `a\r${ESC}Db${ESC}Dc${ESC}[1;2H`);
 });
