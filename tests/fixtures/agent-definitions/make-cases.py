@@ -206,9 +206,16 @@ for v in AGENT_VECTORS:
     v.update(golden(v["agent"]))
 
 
+def utf16_order(text):
+    """UTF-16 code-unit order, which is what JavaScript's string comparison gives. Python's own str
+    order is by code point, and the two differ once an id (an invalid entry's filename can hold any
+    character) mixes an astral character with one from U+E000-U+FFFF."""
+    return text.encode("utf-16-be")
+
+
 def canonical_entries(entries):
     out = []
-    for e in sorted(entries, key=lambda e: e["id"]):
+    for e in sorted(entries, key=lambda e: utf16_order(e["id"])):
         e = dict(e)
         if "problems" in e:
             e["problems"] = sorted(e["problems"])
@@ -218,6 +225,10 @@ def canonical_entries(entries):
 
 SNAPSHOT_VECTORS = [
     {"name": "empty", "entries": []},
+    {"name": "invalid filename ids ordered by UTF-16 code unit: U+1F600 before U+E000", "entries": [
+        {"id": "", "state": "invalid", "problems": ["id: pattern"]},
+        {"id": "\U0001F600", "state": "invalid", "problems": ["id: pattern"]},
+    ]},
     {"name": "entries out of order, problems out of order, the largest safe counters", "entries": [
         {"state": "valid", "id": "zeta", "revision": MAX_SAFE, "incarnation": MAX_SAFE,
          "definitionDigest": AGENT_VECTORS[1]["sha256"], "available": True},

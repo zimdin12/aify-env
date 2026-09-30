@@ -2056,6 +2056,27 @@
    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   {
+   "name": "invalid filename ids ordered by UTF-16 code unit: U+1F600 before U+E000",
+   "entries": [
+    {
+     "id": "\ue000",
+     "state": "invalid",
+     "problems": [
+      "id: pattern"
+     ]
+    },
+    {
+     "id": "\ud83d\ude00",
+     "state": "invalid",
+     "problems": [
+      "id: pattern"
+     ]
+    }
+   ],
+   "canonical": "[{\"id\":\"\ud83d\ude00\",\"problems\":[\"id: pattern\"],\"state\":\"invalid\"},{\"id\":\"\ue000\",\"problems\":[\"id: pattern\"],\"state\":\"invalid\"}]",
+   "sha256": "a4e0fd251f84a8be398d4334aad9455d6676d2042e1b36c00ab799d226093438"
+  },
+  {
    "name": "entries out of order, problems out of order, the largest safe counters",
    "entries": [
     {

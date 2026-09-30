@@ -67,16 +67,20 @@ export function parseAgentsArgs(argv) {
   return { verb, id, changes, problem: "" };
 }
 
-/** The agent `set` writes: the current definition (or a new one's defaults) with the changes applied. */
+/**
+ * The agent `set` writes: the current definition (or a new one's defaults) with the changes applied.
+ * The env is carried as a Map and rebuilt with Object.fromEntries, which defines own properties: an
+ * assignment would run Object.prototype's `__proto__` setter, and `env.__proto__=x` would vanish.
+ */
 export function applyChanges(current, changes) {
-  const agent = { ...NEW_DEFINITION, ...(current ?? {}), env: { ...(current?.env ?? NEW_DEFINITION.env) } };
-  delete agent.id;
+  const { id: _id, env: currentEnv, ...fields } = { ...NEW_DEFINITION, ...(current ?? {}) };
+  const env = new Map(Object.entries(currentEnv ?? {}));
   for (const change of changes) {
-    if (change.unsetEnv !== undefined) delete agent.env[change.unsetEnv];
-    else if (change.env !== undefined) agent.env[change.env] = change.value;
-    else agent[change.key] = change.value;
+    if (change.unsetEnv !== undefined) env.delete(change.unsetEnv);
+    else if (change.env !== undefined) env.set(change.env, change.value);
+    else fields[change.key] = change.value;
   }
-  return agent;
+  return { ...fields, env: Object.fromEntries(env) };
 }
 
 function describe(entry) {
@@ -95,9 +99,9 @@ function conflictLines(conflict) {
 }
 
 /** Run one parsed intent against a store. Returns the lines to print and the exit code. */
-export async function runAgents(intent, { store, installed, dir }) {
+export async function runAgents(intent, { store, installed, unlock = () => DefinitionStore.unlock() }) {
   if (intent.verb === "unlock") {
-    const removed = DefinitionStore.unlock({ dir });
+    const removed = unlock();
     return { code: EXIT_OK, lines: [removed ? `removed the lock left by process ${removed.pid ?? "unknown"}, which is not running` : "the store is not locked"] };
   }
   if (intent.verb === "recover") {
@@ -119,9 +123,12 @@ export async function runAgents(intent, { store, installed, dir }) {
     return { code: EXIT_OK, lines: [...lines, JSON.stringify(entry, null, 2)] };
   }
   if (intent.verb === "set") {
+    // Read and write are two lock holds, so the write is conditional on what was read: the pair seen,
+    // or null for "not defined". A change that lands in between is refused, never overwritten.
     const { definitions } = await store.list();
-    const current = definitions.find((d) => d.id === intent.id && !d.problems.length);
-    const result = await store.set(intent.id, applyChanges(current?.agent, intent.changes), { installed });
+    const seen = definitions.find((d) => d.id === intent.id);
+    const expect = seen?.incarnation ? { incarnation: seen.incarnation, revision: seen.revision } : null;
+    const result = await store.set(intent.id, applyChanges(seen?.agent, intent.changes), { installed, expect });
     return { code: EXIT_OK, lines: [`${result.id}: incarnation ${result.incarnation} revision ${result.revision}`] };
   }
   const removed = await store.remove(intent.id);
@@ -138,7 +145,7 @@ async function main() {
   const store = new DefinitionStore();
   const installed = new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client));
   try {
-    const { code, lines } = await runAgents(intent, { store, installed, dir: store.dir });
+    const { code, lines } = await runAgents(intent, { store, installed });
     process.stdout.write(lines.join(EOL) + EOL);
     process.exitCode = code;
   } catch (error) {
