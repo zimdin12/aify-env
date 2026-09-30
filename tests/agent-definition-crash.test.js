@@ -124,6 +124,11 @@ test("THE BEFORE BYTES PUT BACK after step 2 settle exactly like a crash before 
     assert.deepEqual([got.outcome, got.a.revision, got.a.agent.name], ["unknown", 3, "Before"]);
     assert.equal(got.record.requestId, "req-7", "the request's id survives in the record");
   }
+  // Its replay carries the pair it was made against, which has moved: refused (C4 step 4).
+  for (const { store } of [restored, early]) {
+    await assert.rejects(store.set("a", agent("After"), { installed: ALL, expect: { incarnation: 1, revision: 1 }, requestId: "req-7" }),
+      /changed on the host/);
+  }
   // Each store was written at its own time, so each record's `before` is its own before bytes' digest.
   const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
   assert.equal(a.record.before, digest(restored.before));
