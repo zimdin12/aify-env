@@ -166,6 +166,7 @@ const SUBCOMMANDS = {
   run: "./aify-env-run.mjs",
   credential: "./aify-env-credential.mjs",
   herdr: "./aify-env-herdr.mjs",
+  agents: "./aify-env-agents.mjs",
 };
 const firstArg = args[0];
 if (firstArg && !firstArg.startsWith("-")) {
