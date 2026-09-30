@@ -3,7 +3,7 @@
 //
 // THE DEFECT (2026-09-30), the scrambled herdr pane. ConPTY moves the cursor down with a bare LF,
 // meaning "same column". Written by a program to a Windows console, LF becomes CR+LF, so the row
-// landed at column 1 and the cells it did not cover kept the old text ("bot-" for "both").
+// went back to column 1 and the cells it did not cover kept the old text ("bot-" for "both").
 //
 // MEASURED THROUGH A REAL CONPTY, the path the bytes take in a herdr pane: a child writes through
 // `passthrough` inside node-pty, and a real emulator reads what the console made of it. The control
@@ -65,29 +65,55 @@ test("CONTROL: the same bytes untranslated land at column 1 on this console", on
   assert.equal(rows[5], "next");
 });
 
-// PARSER PARITY (review of e880d48): an emulator must end in the same state -- rows, cursor, title --
-// whether it reads the stream or the translated stream. A blanket replace failed four of these: an LF
-// inside a CSI is executed and the sequence goes on, and one inside an OSC is part of the title.
+// PARITY (reviews of e880d48 and 0557d21). Two properties, over every input whole and split:
+//   parser   an emulator ends in the same state -- rows, cursor, titles, replies -- reading the stream
+//            or the translated stream. A blanket replace broke LF inside a CSI and inside an OSC.
+//   console  the translated stream read by an emulator that turns LF into CR+LF, as a Windows console
+//            does, ends where the original does in a VT parser: every LF a parser executes was
+//            translated. Only the over-limit sequence is exempt, by its stated boundary.
+const BEL = "\x07";
+const CAN = "\x18";
+const SUB = "\x1a";
+const ST = `${ESC}\\`;
+const C1_CSI = "\x9b";
+const C1_OSC = "\x9d";
+const C1_ST = "\x9c";
 const PARITY = {
-  "LF at ground, and on the bottom row": `${ESC}[2;3Hab\ncd${ESC}[6;1Hbottom\nnext`,
+  "LF at ground, and on the bottom row": CHUNK,
   "LF inside a CSI before its final byte": `${ESC}[1;\n5HX`,
   "LF and CR inside a CSI": `${ESC}[3;\r\n9HY`,
   "LF inside an escape with an intermediate": `${ESC}(\nBZ`,
-  "LF inside an OSC ended by BEL": `${ESC}]0;BEFORE\nAFTER\x07X`,
-  "LF inside an OSC ended by ESC \\": `${ESC}]0;ONE\nTWO${ESC}\\X\nY`,
-  "LF inside a DCS": `${ESC}Pq\n#0${ESC}\\A\nB`,
-  "a CSI aborted by CAN, then LF": `${ESC}[12\x18Q\nR`,
+  "LF inside an OSC ended by BEL": `${ESC}]0;BEFORE\nAFTER${BEL}X`,
+  "LF inside an OSC ended by ST": `${ESC}]0;ONE\nTWO${ST}X\nY`,
+  "LF inside a DCS": `${ESC}Pq\n#0${ST}A\nB`,
+  "BEL does not end a DCS": `${ESC}PqDATA${BEL}\nTAIL${ST}X`,
+  "BEL does not end an SOS": `${ESC}XDATA${BEL}\nTAIL${ST}X`,
+  "BEL does not end a PM": `${ESC}^DATA${BEL}\nTAIL${ST}X`,
+  "BEL does not end an APC": `${ESC}_DATA${BEL}\nTAIL${ST}X`,
+  "a CSI aborted by CAN, then LF": `${ESC}[12${CAN}Q\nR`,
+  "an OSC cancelled by CAN, then LF": `${ESC}[1;5H${ESC}]0;DATA${CAN}\nX`,
+  "an OSC cancelled by SUB, then LF": `${ESC}[1;5H${ESC}]0;DATA${SUB}\nX`,
+  "a DCS cancelled by CAN, then LF": `${ESC}[1;5H${ESC}PqDATA${CAN}\nX`,
+  "a DCS cancelled by SUB, then LF": `${ESC}[1;5H${ESC}PqDATA${SUB}\nX`,
   "an ESC restarting a CSI with an LF inside": `${ESC}[5${ESC}[2;\n4HW`,
+  "a C1 CSI with an LF inside": `${C1_CSI}1;\n5HX`,
+  "a C1 OSC ended by C1 ST, then LF": `${ESC}[1;5H${C1_OSC}0;T\nI${C1_ST}\nX`,
+  "a CSI longer than the hold, with an LF inside": `${ESC}[${"0".repeat(5000)}1;\n5HX`,
 };
+//: Past the hold an LF inside that one sequence passes as it came: parser parity, not console parity.
+const CONSOLE_EXEMPT = new Set(["a CSI longer than the hold, with an LF inside"]);
 
-async function parserState(chunks) {
+async function parserState(chunks, { lineFeedReturns = false } = {}) {
   const screen = await ScreenEmulator.create({ cols: 40, rows: 6 });
   assert.ok(screen, "@xterm/headless is absent, so nothing here is measured");
+  screen.term.options.convertEol = lineFeedReturns;
   const titles = [];
+  const replies = [];
   screen.term.onTitleChange((title) => titles.push(title));
+  screen.term.onData((data) => replies.push(data));
   for (const chunk of chunks) await screen.write(chunk);
   const buffer = screen.term.buffer.active;
-  const state = { rows: screen.rows(), cursor: [buffer.cursorX, buffer.cursorY], titles };
+  const state = { rows: screen.rows(), cursor: [buffer.cursorX, buffer.cursorY], titles, replies };
   screen.dispose();
   return state;
 }
@@ -97,14 +123,29 @@ function translated(chunks) {
   return chunks.map((chunk) => lineFeeds.translate(chunk));
 }
 
-test("THE TRANSLATION LEAVES AN EMULATOR IN THE SAME STATE, whole and split at every point", async () => {
+/** Every two-chunk split of a short input; a long one is cut at about forty points, ends included. */
+function splits(text) {
+  const step = Math.max(1, Math.floor(text.length / 40));
+  const cuts = new Set([text.length, text.length - 1, text.length - 4, text.length - 5]);
+  for (let cut = 0; cut <= text.length; cut += step) cuts.add(cut);
+  return [...cuts].filter((cut) => cut >= 0).sort((a, b) => a - b).map((cut) => [text.slice(0, cut), text.slice(cut)]);
+}
+
+test("THE TRANSLATION LEAVES AN EMULATOR IN THE SAME STATE, whole and split", async () => {
   for (const [name, text] of Object.entries(PARITY)) {
     const expected = await parserState([text]);
-    for (let cut = 0; cut <= text.length; cut += 1) {
-      const chunks = [text.slice(0, cut), text.slice(cut)];
-      assert.deepEqual(await parserState(translated(chunks)), expected, `${name}, split at ${cut}`);
+    for (const chunks of splits(text)) {
+      const out = translated(chunks);
+      const at = `${name}, split at ${chunks[0].length}`;
+      assert.deepEqual(await parserState(out), expected, `parser: ${at}`);
+      if (!CONSOLE_EXEMPT.has(name)) assert.deepEqual(await parserState(out, { lineFeedReturns: true }), expected, `console: ${at}`);
     }
   }
+});
+
+test("CONTROL: the console model shows a bare LF losing its column", async () => {
+  const text = `${ESC}[1;5HA\nB`;
+  assert.notDeepEqual(await parserState([text], { lineFeedReturns: true }), await parserState([text]));
 });
 
 test("CONTROL: the parity gate fails a blanket replace", async () => {
