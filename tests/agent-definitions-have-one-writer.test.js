@@ -1,15 +1,19 @@
 #!/usr/bin/env node
-// P0 C2: DefinitionStore is the only code that writes the definitions directory, DERIVED rather than
-// listed. A module can write into the directory only if it can name it, so the gate finds every way
-// to name it and requires that only the store holds one:
+// P0 C2: DefinitionStore is the only code that writes the definitions directory. A module can write
+// into the directory only if it can name it, and there are exactly two ways to name it:
 //
-//   1. THE PATH SOURCES are derived from the store module's behaviour, not written down: every export
-//      that, called or constructed, hands back the directory's path. Today that is `definitionsDir`;
-//      the store instance exposes none (it has no path getter), and the gate checks that too.
-//   2. No other module under lib/ or bin/ names the directory (its folder name or env override), or
-//      imports a path source -- by name, through a re-export, or through `import * as`. A helper that
-//      re-exports a path source is itself a path source, so the check is TRANSITIVE over imports.
-//   3. The store's pure companions import no `fs`.
+//   1. GET THE PATH FROM THE STORE. Ruled out at the source rather than by parsing imports: the gate
+//      DERIVES, by calling them, which of the store module's exports hand the path back, and which
+//      getters of a store instance do, and requires both to be none. With nothing to hand out, no
+//      relay can pass the path on, whatever import grammar it uses (named, `export *`, `import * as`,
+//      dynamic `import()`). Two relays that passed the previous, import-parsing gate are kept below
+//      as specimens that now cannot reach a path.
+//   2. BUILD THE PATH ITSELF, from the folder name or the override variable. Only the store may name
+//      either in lib/ or bin/.
+//
+// And the store's pure companions import no `fs`. What a source gate cannot see: a module that spells
+// the folder name some other way (split, encoded). That is a deliberate evasion, not an accidental
+// second writer, and no source gate of this kind claims to catch it.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,11 +22,13 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import * as store from "../lib/agent-definitions.mjs";
+import * as storeModule from "../lib/agent-definitions.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STORE = "lib/agent-definitions.mjs";
 const COMPANIONS = ["lib/agent-definition-schema.mjs", "lib/agent-definition-snapshot.mjs", "lib/agent-definition-recovery.mjs"];
+const NAMES_THE_DIRECTORY = /["'`]agent-definitions["'`/\\]|AIFY_AGENT_DEFINITIONS_DIR/;
+const IMPORTS_FS = /from\s+["'](node:)?fs(\/promises)?["']|require\(\s*["'](node:)?fs["']\s*\)/;
 
 function modules() {
   const out = [];
@@ -38,89 +44,80 @@ function modules() {
   return out;
 }
 
-/** Which of the store's exports hand back the directory: called with an env naming a probe dir. */
-function derivePathSources() {
+/**
+ * Which exports of a module hand back a store directory, and which getters of a store built on it do.
+ * Each export is called with an env naming a probe directory, and the store class is built on it.
+ */
+function pathLeaks(moduleNamespace) {
   const probe = path.join(os.tmpdir(), "aify-one-writer-probe-dir");
-  const sources = [];
-  for (const [name, value] of Object.entries(store)) {
-    if (typeof value !== "function") continue;
-    let result;
-    try { result = value({ AIFY_AGENT_DEFINITIONS_DIR: probe }); } catch { continue; }
-    if (result === probe) sources.push(name);
-  }
-  // The instance: no own or prototype member may hand the directory back.
-  const instance = new store.DefinitionStore({ dir: probe });
-  const proto = Object.getPrototypeOf(instance);
-  const leaks = Object.getOwnPropertyNames(proto).filter((key) => {
-    const getter = Object.getOwnPropertyDescriptor(proto, key)?.get;
-    return getter !== undefined && getter.call(instance) === probe;
-  });
-  return { sources, leaks };
-}
-
-const NAMES_THE_DIRECTORY = /["'`]agent-definitions["'`/\\]|AIFY_AGENT_DEFINITIONS_DIR/;
-const IMPORTS_FS = /from\s+["'](node:)?fs(\/promises)?["']|require\(\s*["'](node:)?fs["']\s*\)/;
-
-/** Module specifiers a source imports or re-exports from, resolved to repo-relative files. */
-function importsOf({ file, text }) {
-  const out = [];
-  for (const m of text.matchAll(/(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g)) {
-    if (!m[1].startsWith(".")) continue;
-    out.push({ target: path.posix.normalize(path.posix.join(path.posix.dirname(file), m[1])), clause: m[0] });
-  }
-  return out;
-}
-
-/** Every violation of rules 2 and 3 over a set of sources, given the path sources. */
-function violations(sources, pathSources) {
-  const found = [];
-  const byFile = new Map(sources.map((s) => [s.file, s]));
-  // A module "holds a path source" if it imports one from the store (by name or namespace), or
-  // imports anything a holder exports. Iterated to a fixed point: holding is transitive.
-  const holders = new Set([STORE]);
-  const takesASource = (clause) => /\*\s+as\s+/.test(clause) || pathSources.some((name) => new RegExp(`\\b${name}\\b`).test(clause));
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const source of sources) {
-      if (holders.has(source.file)) continue;
-      const holds = importsOf(source).some(({ target, clause }) => holders.has(target) && (target !== STORE || takesASource(clause)));
-      if (holds) { holders.add(source.file); changed = true; }
+  const env = { AIFY_AGENT_DEFINITIONS_DIR: probe };
+  const exports = Object.entries(moduleNamespace).filter(([, value]) => {
+    if (typeof value !== "function") return value === probe;
+    try { return value(env) === probe; } catch { return false; }
+  }).map(([name]) => name);
+  const getters = [];
+  const Store = moduleNamespace.DefinitionStore;
+  if (typeof Store === "function") {
+    const instance = new Store({ dir: probe });
+    const proto = Object.getPrototypeOf(instance);
+    for (const key of Object.getOwnPropertyNames(proto)) {
+      const getter = Object.getOwnPropertyDescriptor(proto, key)?.get;
+      if (getter && getter.call(instance) === probe) getters.push(key);
     }
   }
-  for (const holder of holders) if (holder !== STORE && byFile.has(holder)) found.push(`${holder} can name the definitions directory`);
+  return { exports, getters };
+}
+
+/** Rules 2 and 3 over a set of sources. */
+function sourceViolations(sources) {
+  const found = [];
   for (const { file, text } of sources) {
     if (file !== STORE && NAMES_THE_DIRECTORY.test(text)) found.push(`${file} names the definitions directory`);
     if (COMPANIONS.includes(file) && IMPORTS_FS.test(text)) found.push(`${file} is a pure companion and imports fs`);
   }
-  return [...new Set(found)];
+  return found;
 }
 
-test("ONE WRITER: the path sources are derived, only the store holds one, and the companions are pure", () => {
-  const { sources: pathSources, leaks } = derivePathSources();
-  assert.deepEqual(pathSources, ["definitionsDir"], "the store's exports that hand back its directory");
-  assert.deepEqual(leaks, [], "a store instance hands back no path");
+test("ONE WRITER: the store hands its path to nothing, only the store names it, and the companions are pure", () => {
+  assert.deepEqual(pathLeaks(storeModule), { exports: [], getters: [] });
   const sources = modules();
   assert.ok(sources.length > 50, "the walk found the modules");
-  const storeSource = sources.find((s) => s.file === STORE);
-  assert.ok(NAMES_THE_DIRECTORY.test(storeSource.text) && IMPORTS_FS.test(storeSource.text), "positive control: the store itself matches");
-  assert.ok(importsOf(sources.find((s) => s.file === "bin/aify-env-agents.mjs")).some((i) => i.target === STORE), "the CLI's import of the store is seen");
-  assert.deepEqual(violations(sources, pathSources), []);
+  const store = sources.find((s) => s.file === STORE);
+  assert.ok(NAMES_THE_DIRECTORY.test(store.text) && IMPORTS_FS.test(store.text), "positive control: the store itself names it and writes");
+  assert.deepEqual(sourceViolations(sources), []);
 });
 
-test("NEGATIVE CONTROLS: every way to reach the directory is flagged, a caller that only uses the store is not", () => {
-  const sources = [
-    { file: STORE, text: 'import fs from "node:fs";\nexport function definitionsDir() {}' },
-    { file: "lib/relay.mjs", text: 'export { definitionsDir } from "./agent-definitions.mjs";' },
-    { file: "lib/second-writer.mjs", text: 'import fs from "node:fs";\nimport { definitionsDir } from "./relay.mjs";\nfs.writeFileSync(path.join(definitionsDir(env), "second.json"), "{}");' },
-    { file: "lib/namespace.mjs", text: 'import * as defs from "./agent-definitions.mjs";' },
+test("NEGATIVE CONTROLS: a store that hands its path out is caught by derivation, and a module that names it by source", () => {
+  const probe = path.join(os.tmpdir(), "aify-one-writer-probe-dir");
+  class Leaky { constructor({ dir }) { this.d = dir; } get dir() { return this.d; } }
+  const leakyModule = { definitionsDir: (env) => env.AIFY_AGENT_DEFINITIONS_DIR, DefinitionStore: Leaky, processAlive: () => false };
+  assert.deepEqual(pathLeaks(leakyModule), { exports: ["definitionsDir"], getters: ["dir"] });
+  assert.equal(new Leaky({ dir: probe }).dir, probe, "the planted getter really returns the path");
+  const planted = [
     { file: "lib/literal.mjs", text: 'const dir = path.join(home, ".aify", "agent-definitions");' },
     { file: "lib/env-reader.mjs", text: "const dir = process.env.AIFY_AGENT_DEFINITIONS_DIR;" },
     { file: "lib/agent-definition-schema.mjs", text: 'import { readFileSync } from "fs";' },
     { file: "bin/honest-caller.mjs", text: 'import fs from "node:fs";\nimport { DefinitionStore } from "../lib/agent-definitions.mjs";' },
   ];
-  const found = violations(sources, ["definitionsDir"]);
-  for (const file of ["lib/relay.mjs", "lib/second-writer.mjs", "lib/namespace.mjs", "lib/literal.mjs", "lib/env-reader.mjs", "lib/agent-definition-schema.mjs"]) {
-    assert.ok(found.some((v) => v.startsWith(file)), `${file} was not flagged: ${found.join("; ")}`);
+  assert.deepEqual(sourceViolations(planted).map((v) => v.split(" ")[0]), ["lib/literal.mjs", "lib/env-reader.mjs", "lib/agent-definition-schema.mjs"]);
+});
+
+test("THE RELAYS THAT PASSED THE OLD GATE now relay nothing: `export *` and a dynamic import of the store yield no path", async () => {
+  // The review of 26878fb planted these two relays; both passed the import-parsing gate. Written here
+  // as real modules and imported, each relays what the store exports, and none of that is the path.
+  const storeUrl = new URL("../lib/agent-definitions.mjs", import.meta.url).href;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-relays-"));
+  const relay = async (name, text) => {
+    fs.writeFileSync(path.join(dir, name), text);
+    return import(new URL(`file:///${path.join(dir, name).replace(/\\/g, "/")}`).href);
+  };
+  const wildcardRelay = await relay("wildcard.mjs", `export * from ${JSON.stringify(storeUrl)};\n`);
+  const dynamicRelay = await relay("dynamic.mjs",
+    `const { definitionsDir } = await import(${JSON.stringify(storeUrl)});\nexport { definitionsDir };\nexport const DefinitionStore = (await import(${JSON.stringify(storeUrl)})).DefinitionStore;\n`);
+  assert.equal(typeof wildcardRelay.DefinitionStore, "function", "the wildcard relay does relay the store's exports");
+  for (const [name, relayed] of [["export * from", wildcardRelay], ["await import()", dynamicRelay]]) {
+    assert.deepEqual(pathLeaks(relayed), { exports: [], getters: [] }, name);
   }
-  assert.equal(found.some((v) => v.startsWith("bin/honest-caller.mjs")), false, "using the store is not reaching the directory");
+  assert.equal(dynamicRelay.definitionsDir, undefined, "the dynamic relay's definitionsDir is undefined: there is none to take");
+  assert.equal("definitionsDir" in wildcardRelay, false, "the wildcard relay has no definitionsDir: there is none to take");
 });

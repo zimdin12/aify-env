@@ -141,6 +141,47 @@ test("R6 A RECORD WHOSE BODY WAS NOT YET ARCHIVED: the next open archives it, an
   assert.equal(fs.existsSync(path.join(dir, intent.tempName)), false);
 });
 
+test("R7 (26878fb) A LISTING THAT FAILS FOR ADOPTION OR FOR THE READ leaves the snapshot incomplete and records nothing", async () => {
+  // One open lists the store directory twice: once to adopt, once to read. A valid hand edit is
+  // pending, so adoption has work to do. Each case fails a chosen listing, by its number.
+  const failListings = (dir, which) => {
+    let listing = 0;
+    return (target, options) => {
+      if (path.resolve(target) === path.resolve(dir)) {
+        listing += 1;
+        if (which(listing)) throw Object.assign(new Error("denied"), { code: "EACCES" });
+      }
+      return fs.readdirSync(target, options);
+    };
+  };
+  const cases = [
+    ["the adoption's listing only", (n) => n === 1],
+    ["the read's listing only", (n) => n === 2],
+    ["every listing", () => true],
+    ["none (control)", () => false],
+  ];
+  for (const [name, which] of cases) {
+    const dir = tempDir();
+    await storeIn(dir).set("a", agent(), { installed: ALL });
+    await storeIn(dir).snapshot({ installed: ALL });
+    const body = readJson(path.join(dir, "a.json"));
+    body.agent.name = "Edited by hand";
+    fs.writeFileSync(path.join(dir, "a.json"), JSON.stringify(body));
+    const digestBefore = ledgerOf(dir).snapshotDigest;
+    const snap = await storeIn(dir, { readdirSync: failListings(dir, which) }).snapshot({ installed: ALL });
+    const ledger = ledgerOf(dir);
+    if (name.startsWith("none")) {
+      assert.equal(snap.complete, true, name);
+      assert.equal(ledger.ids.a.revision, 2, `${name}: the hand edit is adopted`);
+      assert.notEqual(ledger.snapshotDigest, digestBefore, `${name}: and the new state recorded`);
+    } else {
+      assert.equal(snap.complete, false, name);
+      assert.equal(snap.incomplete.enumerationFailed, "EACCES", name);
+      assert.equal(ledger.snapshotDigest, digestBefore, `${name}: no digest is recorded from an unproven state`);
+    }
+  }
+});
+
 test("R7 A DIRECTORY THAT CANNOT BE LISTED makes the snapshot incomplete; not an error, not an empty set", async () => {
   const dir = tempDir();
   await storeIn(dir).set("a", agent(), { installed: ALL });

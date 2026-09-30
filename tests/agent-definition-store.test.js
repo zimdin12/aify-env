@@ -11,7 +11,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { definitionBytesProblems, MAX_COUNTER } from "../lib/agent-definition-schema.mjs";
-import { definitionsDir, DefinitionRefused, DefinitionStore, DefinitionStoreError, processAlive } from "../lib/agent-definitions.mjs";
+import { DefinitionRefused, DefinitionStore, DefinitionStoreError, processAlive } from "../lib/agent-definitions.mjs";
 
 const ALL = new Set(["claude", "codex", "hermes"]);
 const agent = (over = {}) => ({
@@ -245,9 +245,25 @@ test("AN EXHAUSTED COUNTER is refused before anything is written", async () => {
   await assert.rejects(store.list(), /not usable/, "a counter past the safe range is refused, not rounded");
 });
 
-test("WHERE THE STORE LIVES, and who counts as running", () => {
-  assert.equal(definitionsDir({ AIFY_AGENT_DEFINITIONS_DIR: "/x/defs" }), "/x/defs");
-  assert.equal(definitionsDir({}), path.join(os.homedir(), ".aify", "agent-definitions"));
+test("WHERE THE STORE LIVES: the override, else ~/.aify/agent-definitions (seen from where a default store writes)", () => {
+  // The path is not exported, so it is observed: a child makes a default store and defines one agent.
+  const storeUrl = new URL("../lib/agent-definitions.mjs", import.meta.url).href;
+  const script = `const { DefinitionStore } = await import(${JSON.stringify(storeUrl)});
+    await new DefinitionStore().set("a", ${JSON.stringify(agent())}, { installed: new Set(["claude"]) });`;
+  const home = tempDir();
+  const sealed = { ...process.env, HOME: home, USERPROFILE: home };
+  delete sealed.AIFY_AGENT_DEFINITIONS_DIR;
+  const run = (env) => spawnSync(process.execPath, ["--input-type=module", "-e", script], { env, encoding: "utf8" });
+  const override = path.join(tempDir(), "defs");
+  assert.equal(run({ ...sealed, AIFY_AGENT_DEFINITIONS_DIR: override }).status, 0);
+  assert.ok(fs.existsSync(path.join(override, "a.json")), "the override is where it wrote");
+  assert.equal(fs.existsSync(path.join(home, ".aify", "agent-definitions", "a.json")), false, "and not the home default");
+  const byDefault = run(sealed);
+  assert.equal(byDefault.status, 0, byDefault.stderr);
+  assert.ok(fs.existsSync(path.join(home, ".aify", "agent-definitions", "a.json")), "with no override, the home default");
+});
+
+test("WHO COUNTS AS RUNNING", () => {
   assert.equal(processAlive(process.pid), true);
   assert.equal(processAlive(deadPid()), false);
   for (const bad of [0, -1, 1.5, "12", null]) assert.equal(processAlive(bad), false, String(bad));
