@@ -15,7 +15,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { ConsoleLineFeeds } from "../lib/attach-screen.mjs";
+import { ConsoleLineFeeds, vt500TableEntry } from "../lib/console-line-feeds.mjs";
 import { ScreenEmulator } from "../lib/screen-emulator.mjs";
 
 const ESC = String.fromCharCode(27);
@@ -99,6 +99,22 @@ const PARITY = {
   "a C1 CSI with an LF inside": `${C1_CSI}1;\n5HX`,
   "a C1 OSC ended by C1 ST, then LF": `${ESC}[1;5H${C1_OSC}0;T\nI${C1_ST}\nX`,
   "a CSI longer than the hold, with an LF inside": `${ESC}[${"0".repeat(5000)}1;\n5HX`,
+  // Review of bfacc7a: after an escape intermediate, `[` and the string introducers are FINALS.
+  "ESC ( then [ is a final, not a CSI": `${ESC}[1;5H${ESC}([5\nHX`,
+  "ESC ( then ] is a final, not an OSC": `${ESC}[1;5H${ESC}(]A\nB`,
+  "ESC ( then P is a final, not a DCS": `${ESC}[1;5H${ESC}(PA\nB`,
+  "ESC ( then X is a final, not an SOS": `${ESC}[1;5H${ESC}(XA\nB`,
+  "ESC ( then ^ is a final, not a PM": `${ESC}[1;5H${ESC}(^A\nB`,
+  "ESC ( then _ is a final, not an APC": `${ESC}[1;5H${ESC}(_A\nB`,
+  "ESC with two intermediates": `${ESC}[1;5H${ESC}( !\nB5X`,
+  "a CSI broken by U+0080, then printable and LF": `${ESC}[1;5H${ESC}[1\u00805\nHX`,
+  "a CSI broken by U+00E9, then printable and LF": `${ESC}[1;5H${ESC}[1é5\nHX`,
+  "a CSI with an intermediate then a parameter (ignored)": `${ESC}[1;5H${ESC}[ 1\n5HX`,
+  "a private CSI with an LF inside": `${ESC}[?25\nlX`,
+  // The ESC that ends a string starts an escape (xterm's parse loop, not its table), so an LF right
+  // after it is executed inside that escape.
+  "an LF right after the ESC that ends an OSC": `${ESC}[1;5H${ESC}]0;T${ESC}\n(BZ`,
+  "an LF right after the ESC that ends a DCS": `${ESC}[1;5H${ESC}PqD${ESC}\n(BZ`,
 };
 //: Past the hold an LF inside that one sequence passes as it came: parser parity, not console parity.
 const CONSOLE_EXEMPT = new Set(["a CSI longer than the hold, with an LF inside"]);
@@ -152,6 +168,35 @@ test("CONTROL: the parity gate fails a blanket replace", async () => {
   const text = PARITY["LF inside a CSI before its final byte"];
   const blanket = text.replace(/\n/g, `${ESC}D`);
   assert.notDeepEqual(await parserState([blanket]), await parserState([text]));
+});
+
+test("THE PORTED TABLE IS XTERM'S TABLE, entry for entry", async () => {
+  // xterm's own table, read from the emulator the parity tests use: index state << 8 | code, value
+  // action << 4 | next (TableAccess in EscapeSequenceParser.ts). Private, so a change in xterm fails
+  // this loudly rather than letting the port drift from what it copies.
+  const screen = await ScreenEmulator.create({ cols: 10, rows: 2 });
+  assert.ok(screen, "@xterm/headless is absent, so nothing here is measured");
+  const table = screen.term._core._inputHandler._parser._transitions.table;
+  screen.dispose();
+  let compared = 0;
+  for (let state = 0; state < 14; state += 1) {
+    for (let code = 0; code <= 0xa0; code += 1) {
+      const value = table[(state << 8) | code];
+      assert.deepEqual(vt500TableEntry(state, code), [value >> 4, value & 15], `state ${state}, code 0x${code.toString(16)}`);
+      compared += 1;
+    }
+  }
+  assert.equal(compared, 14 * 161);
+});
+
+test("THE HOLD CEILING applies only to a sequence still unfinished at the end of a chunk", () => {
+  const prefix = `${ESC}[${"0".repeat(5000)}1;`;
+  const whole = new ConsoleLineFeeds().translate(`${prefix}\n5HX`);
+  assert.ok(whole.startsWith(`${ESC}D${ESC}[`), "a long sequence finished in one chunk still has its LF as Index, ahead");
+  const lineFeeds = new ConsoleLineFeeds();
+  const first = lineFeeds.translate(prefix);
+  assert.equal(first, prefix, "an unfinished sequence over the ceiling is written as it stands");
+  assert.equal(lineFeeds.translate("\n5HX"), "\n5HX", "and the rest of that sequence passes as it came");
 });
 
 test("Index replaces an LF at ground and nothing else there changes", () => {
