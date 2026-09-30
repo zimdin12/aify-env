@@ -1,19 +1,24 @@
 #!/usr/bin/env node
 // P0 C2: DefinitionStore is the only code that writes the definitions directory. A module can write
-// into the directory only if it can name it, and there are exactly two ways to name it:
+// into the directory only if it can name it. This test closes two ways to name it (and says below
+// which ways it leaves open):
 //
-//   1. GET THE PATH FROM THE STORE. Ruled out at the source rather than by parsing imports: the gate
+//   1. TAKE THE PATH FROM WHAT THE STORE EXPORTS. Ruled out without parsing imports: the gate
 //      DERIVES, by calling them, which of the store module's exports hand the path back, and which
 //      getters of a store instance do, and requires both to be none. With nothing to hand out, no
-//      relay can pass the path on, whatever import grammar it uses (named, `export *`, `import * as`,
+//      relay can forward such an export, whatever import grammar it uses (named, `export *`, `import * as`,
 //      dynamic `import()`). Two relays that passed the previous, import-parsing gate are kept below
 //      as specimens that now cannot reach a path.
 //   2. BUILD THE PATH ITSELF, from the folder name or the override variable. Only the store may name
 //      either in lib/ or bin/.
 //
-// And the store's pure companions import no `fs`. What a source gate cannot see: a module that spells
-// the folder name some other way (split, encoded). That is a deliberate evasion, not an accidental
-// second writer, and no source gate of this kind claims to catch it.
+// And the store's pure companions import no `fs`.
+//
+// WHAT THIS DOES NOT CHECK, stated so nobody reads more into a pass (review of 70f9ace): a caller that
+// recovers the path from a diagnostic the store returns -- a held-lock error carries `lockPath`, and
+// several messages name a file -- or that spells the folder some other way. Diagnostics keep their
+// paths because the operator needs them. That a new caller does not write through one is a review
+// obligation on that caller, not something this test proves.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -78,7 +83,7 @@ function sourceViolations(sources) {
   return found;
 }
 
-test("ONE WRITER: the store hands its path to nothing, only the store names it, and the companions are pure", () => {
+test("ONE WRITER, AS FAR AS A SOURCE TEST SEES: no export or getter hands back the path, only the store names it, the companions are pure", () => {
   assert.deepEqual(pathLeaks(storeModule), { exports: [], getters: [] });
   const sources = modules();
   assert.ok(sources.length > 50, "the walk found the modules");
