@@ -151,6 +151,30 @@ test("the outcome stays above the hint, and a start says so again when its worke
   assert.match(frames.join(""), /bravo is running/, "the worker arrived and the outcome line did not say so");
 });
 
+async function refusalScreen(reason, columns) {
+  const frames = [];
+  const { input, stop } = await view({
+    write: (chunk) => frames.push(String(chunk)),
+    columns,
+    onStartList: async () => ({ agents: [{ id: "bravo", name: "bravo" }] }),
+    onStartAgent: async () => ({ started: false, problem: reason }),
+  });
+  input.emit("data", "s");
+  await settle();
+  input.emit("data", "\r");
+  await settle();
+  stop();
+  return frames.join("");
+}
+
+test("a refusal too long for four lines keeps its opening and its cause, and says what it left out", async () => {
+  // REVIEW of 7837161: a head-only cut at four lines hid the cause of a longer refusal again.
+  const screen = await refusalScreen(`the restart was not accepted: 409 ${"because ".repeat(50)}ROOT_CAUSE_AT_END`, 78);
+  assert.match(screen, /start of bravo refused/, "the opening is gone");
+  assert.match(screen, /ROOT_CAUSE_AT_END/, "the cause at the tail was dropped");
+  assert.match(screen, /… \d+ lines left out …/, "the cut is silent");
+});
+
 test("a refusal longer than the terminal is wrapped, so its reason is read whole (2026-09-29)", async () => {
   // THE OPERATOR SAW ONLY "409": the line was clipped to the width, and a refusal's reason is its tail.
   const frames = [];
