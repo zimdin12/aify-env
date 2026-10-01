@@ -14,7 +14,8 @@ import path from "node:path";
 import test, { after } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { DETACHING, createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
+import { createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
+import { DETACHING } from "../lib/plugins/aify-comms/plugin-phase.mjs";
 import { followRegistry, followReport, planPluginChanges } from "../lib/plugin-bootstrap.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
 import { readServices, registryIsReadable } from "../lib/services.mjs";
