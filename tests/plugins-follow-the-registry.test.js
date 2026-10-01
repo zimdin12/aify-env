@@ -132,10 +132,20 @@ const witness = (name, fn) => test(name, { timeout: 10_000 }, fn);
 const offlineBeats = (api) => api.heartbeats.filter((h) => h.status === "offline");
 
 witness("A HELD WORKER ACROSS A REGISTRY REMOVAL: kept and still reported held, starts refused, no offline beat; detached once it ends", async () => {
-  const { plugin, api, runner, logs } = await startedPlugin();
+  let rootsReads = 0;
+  const { plugin, api, runner, logs } = await startedPlugin({ cwdRoots: async () => { rootsReads += 1; return [os.tmpdir()]; } });
   await holdOneWorker(api, runner);
+  // CONTROL: while running, the claim loop begins a setup every interval, so the count can move.
+  const running = rootsReads;
+  await until(() => rootsReads > running + 1, "claim passes beginning their setup while running");
   assert.deepEqual(await detachDuringPoll(plugin, api), { detached: false, held: 1 });
   assert.equal(plugin.state().phase, "held");
+  // ONLY THE CONTROL LOOP RUNS WHILE HELD. With its long-poll open, no pass is in its setup; a claim
+  // loop still turning would begin one every interval (review of c1a4596, R2).
+  await until(() => api.polls.some((p) => !p.answered), "the held plugin's long-poll");
+  const held = rootsReads;
+  for (let i = 0; i < 8; i += 1) await tick();
+  assert.equal(rootsReads, held, "no pass began its setup while held with the long-poll open");
   assert.equal(logs.filter((l) => l.includes("registry change pending")).length, 1);
   await until(() => api.heartbeats.at(-1)?.held.includes("term-1") && api.heartbeats.length > 2, "a beat after the detach");
   assert.deepEqual(offlineBeats(api), [], "a configuration change is not the host going away");

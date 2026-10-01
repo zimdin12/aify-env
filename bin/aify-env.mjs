@@ -78,7 +78,7 @@ import { readServices, registryIsReadable } from "../lib/services.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
-import { bootstrapReport, credentialValue, followRegistry, followReport, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
+import { bootstrapReport, followRegistry, followReport, pluginCredential, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
 import {
   advertiseTo,
   advertisementTargets,
@@ -334,17 +334,10 @@ const CREDENTIAL_ACL = new CredentialAclCache();
 const credentialReading = () => ({ env: process.env, root: credentialRoot(), acl: CREDENTIAL_ACL });
 
 /** The key for the service a plugin serves, resolved PER CALL through the same store-aware path the
- *  advertiser uses -- so a credential written while this daemon runs reaches a running plugin. */
-async function resolvePluginCredential() {
-  const target = advertisingTargets[0] || null;
-  if (!target) return "";
-  // `.value`, and the omission of it cost a live debugging session. `credentialForTarget` returns
-  // {state, value, source, detail, ref} -- a RESOLUTION, not a key. Returning the object put
-  // "[object Object]" in the X-API-Key header, so every plugin heartbeat was refused with 401 while
-  // the daemon's own advertiser -- which does take `.value`, forty lines below -- kept working. Two
-  // callers of one function, one of them wrong, and the symptom was indistinguishable from having no
-  // credential at all.
-  return credentialValue(await credentialForTarget(target, credentialReading()));
+ *  advertiser uses -- so a credential written while this daemon runs reaches a running plugin -- and
+ *  from THAT plugin's own registry entry (`pluginCredential`), never the registry's first target. */
+async function resolvePluginCredential(service) {
+  return pluginCredential(service, (target) => credentialForTarget(target, credentialReading()));
 }
 
 // An escape hatch for anyone who wants the daemon in a terminal without the view taking it over.
@@ -735,7 +728,7 @@ server.listen(port, HOST, async () => {
       // NOT the environment id: its shape is a service's convention, and the plugin derives it from
       // what this host advertises.
       environmentId: "",
-      credential: async () => resolvePluginCredential(),
+      credential: async (service) => resolvePluginCredential(service),
       log: (message) => logLine(message),
     });
     const shared = {
