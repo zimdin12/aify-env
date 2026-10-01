@@ -83,6 +83,7 @@ import { bootstrapReport, followRegistry, followReport, pluginCredential, startS
 import {
   advertiseTo,
   advertisementTargets,
+  advertisingChoice,
   advertisingEnabled,
   capabilityFingerprint,
   acceptanceKey,
@@ -475,6 +476,8 @@ const server = createServer(async (request, response) => {
         // a host configured exactly as intended.
         advertisingEnabled: ADVERTISE,
         advertisingTo: advertisingHealthNow().services,
+        advertiseOptedOut: advertising.optedOut,
+        advertiseIgnored: advertising.ignored,
         // NAMES AND A BOOLEAN, never a key. Without this, a daemon with no credential is invisible:
         // every advertisement is refused, `advertising` stays false, the bridge correctly keeps
         // describing the host, and the operator sees a daemon that runs and is never believed.
@@ -850,6 +853,7 @@ let lastFingerprint = "";
 //: answer cannot say "somebody is being told" while the beat posts to nobody -- which is the one
 //: wrong answer that strands a host, because the bridge stands down on it.
 let advertisingTargets = [];
+let advertising = advertisingChoice([]); //: who this host beats to, who opted out, what was ignored (advertise.mjs)
 //: Target url -> epoch ms of the last beat that came back 2xx. THE ONLY EVIDENCE that a service is
 //: actually being described by this daemon. Reporting "advertising" from the target LIST instead
 //: meant a 401 counted as success, and the aify-comms bridge stands down on that answer.
@@ -885,10 +889,12 @@ async function advertiseOnce() {
     // No registry means nobody has asked to be told. Not an error -- but it IS "not advertising",
     // and saying otherwise would make the bridge stand down for a host nobody is describing.
     advertisingTargets = [];
+    advertising = advertisingChoice([]);
     return;
   }
   if (registryIsReadable(registryText)) followServices?.(readServices(registryText));
-  const targets = advertisementTargets(readServices(registryText));
+  advertising = advertisingChoice(readServices(registryText)); // HERE, never in advertisementTargets: see advertise.mjs
+  const targets = advertisementTargets(advertising.advertised);
   advertisingTargets = targets;
   if (targets.length === 0) return;
 
