@@ -14,6 +14,7 @@ import { PluginHost, PluginProcesses } from "../lib/service-plugins.mjs";
 import { createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
 
 const ALL = new Set(["claude", "codex", "hermes"]);
+const LAUNCHER_TEXT = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
 const agent = { name: "Lead", role: "coder", harness: "claude", mode: "managed", workspace: "C:/Users/Administrator",
   model: "", effort: "", instructions: "", env: {}, herdrSpace: true };
 
@@ -27,6 +28,11 @@ async function until(condition, what) {
 
 test("GIVEN THE STORE, the plugin publishes it and refuses a start built from an older revision", async (t) => {
   const store = new DefinitionStore({ dir: fs.mkdtempSync(path.join(os.tmpdir(), "aify-plugin-defs-")), lockWaitMs: 300 });
+  // A LAUNCHER OF ITS OWN, carrying the marker: the refusal must be the definition's, reached after the
+  // launcher is found, and never depend on what this machine's PATH holds.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "aify-plugin-launcher-"));
+  const launcher = path.join(root, "claude-aify");
+  fs.writeFileSync(launcher, LAUNCHER_TEXT);
   await store.set("lead", agent, { installed: ALL });
   await store.set("lead", { ...agent, model: "m2" }, { installed: ALL });
   const { storeId } = await store.list();
@@ -44,7 +50,7 @@ test("GIVEN THE STORE, the plugin publishes it and refuses a start built from an
     },
     async launch() {
       return { launch: { terminalId: "term-1", agentId: "lead", runtime: "claude-code",
-        argv: ["claude-aify", "--aify-agent", "lead"], cwd: "C:/Users/Administrator", env: {},
+        argv: [launcher, "--aify-agent", "lead"], cwd: root, env: {},
         definition: { storeId, incarnation: 1, revision: 1 } } };
     },
     async reportControl(id, patch) { controlReports.push({ id, ...patch }); },
@@ -60,8 +66,8 @@ test("GIVEN THE STORE, the plugin publishes it and refuses a start built from an
     log: () => {} });
   const plugin = createCommsPlugin({
     endpoint: "http://127.0.0.1:1", machineId: "win32:test-host", windows: true, api,
-    advertisement: async () => ({ hostname: "test-host", kind: "win32" }), cwdRoots: async () => ["C:/Users/Administrator"],
-    readFile: () => "#!/usr/bin/env bash", definitions: store, installedHarnesses: async () => ALL,
+    advertisement: async () => ({ hostname: "test-host", kind: "win32" }), cwdRoots: async () => [root],
+    readFile: () => LAUNCHER_TEXT, definitions: store, installedHarnesses: async () => ALL,
     // Timers that never fire: each loop runs its first pass and then waits for ever.
     setTimeoutImpl: () => 0, clearTimeoutImpl: () => {},
   });

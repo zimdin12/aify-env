@@ -15,6 +15,7 @@ import test, { after } from "node:test";
 import { runInNewContext } from "node:vm";
 
 // Through the plugin's own module, as before the split: the import an existing caller has.
+import { REQUEST_POLL_MS } from "../lib/plugins/aify-comms/definition-sync.mjs";
 import { DETACHING, createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
 import { followRegistry, followReport, planPluginChanges } from "../lib/plugin-bootstrap.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
@@ -90,15 +91,17 @@ function fakeRunner() {
 const live = [];
 after(() => Promise.all(live.map((plugin) => plugin.stop().catch(() => {}))));
 
-async function startedPlugin({ endpoint = "http://old.invalid", cwdRoots = null, definitions = null } = {}) {
+async function startedPlugin({ endpoint = "http://old.invalid", cwdRoots = null, definitions = null,
+  advertisement = async () => ({ hostname: "h", kind: "test" }),
+  setTimeoutImpl = (fn, ms) => setTimeout(fn, Math.min(ms, 5)), clearTimeoutImpl = clearTimeout } = {}) {
   const { root, launcher } = workspace();
   const launch = { terminalId: "term-1", agentId: "a", runtime: "claude-code", command: launcher, argv: [launcher], cwd: root, env: { AIFY_AGENT_ID: "a" } };
   const api = fakeApi(launch);
   const runner = fakeRunner();
   const plugin = createCommsPlugin({
-    endpoint, api, cwdRoots: cwdRoots || (async () => [root]), advertisement: async () => ({ hostname: "h", kind: "test" }),
+    endpoint, api, cwdRoots: cwdRoots || (async () => [root]), advertisement,
     windows: process.platform === "win32", readFile: () => ALLOWED, definitions,
-    setTimeoutImpl: (fn, ms) => setTimeout(fn, Math.min(ms, 5)), clearTimeoutImpl: clearTimeout,
+    setTimeoutImpl, clearTimeoutImpl,
   });
   const logs = [];
   live.push(plugin);
@@ -344,6 +347,7 @@ witness("THE DEFINITION SYNC runs while the plugin claims, stops while it is hel
   const definitions = {
     async list() { return { storeId: "s", definitions: [] }; },
     async snapshot() { return { complete: true, storeId: "s", revision: 1, snapshotDigest: "d", entries: [] }; },
+    async admitStart(launch, produce) { return { produced: await produce() }; },
   };
   const { plugin, api, runner } = await startedPlugin({ definitions });
   await holdOneWorker(api, runner);
@@ -357,4 +361,44 @@ witness("THE DEFINITION SYNC runs while the plugin claims, stops while it is hel
   assert.equal(plugin.resume(), true);
   await until(() => api.definitionClaims > resumedFrom + 1, "sync passes after the resume");
   runner.exit();
+});
+
+witness("A HELD PLUGIN'S SYNC BEGINS NO SETUP, so the final detach waits on nothing it started", async () => {
+  // Review of P4, N3. The sync pass reads the advertisement in its setup, and the phase tracks that
+  // setup, so a detach waits for it. Held, the sync loop must not begin one. TIMERS ARE FIRED BY HAND,
+  // and only the sync's interval once held: the heartbeat and the control loop read the advertisement
+  // too, so parking it under running timers would park them as well and say nothing about the sync.
+  const definitions = {
+    async list() { return { storeId: "s", definitions: [] }; },
+    async snapshot() { return { complete: true, storeId: "s", revision: 1, snapshotDigest: "d", entries: [] }; },
+    async admitStart(launch, produce) { return { produced: await produce() }; },
+  };
+  const timers = [];
+  const parked = [];
+  let park = false;
+  let reads = 0;
+  const advertisement = async () => {
+    reads += 1;
+    if (park) await new Promise((resolve) => parked.push(resolve));
+    return { hostname: "h", kind: "test" };
+  };
+  const { plugin, api, runner } = await startedPlugin({ definitions, advertisement,
+    setTimeoutImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeoutImpl: () => {} });
+  await until(() => api.definitionClaims === 1 && timers.some((t) => t.ms === REQUEST_POLL_MS), "the first sync pass");
+  await holdOneWorker(api, runner);
+  assert.deepEqual(await plugin.detach(), { detached: false, held: 1 });
+  park = true;
+  const held = reads;
+  try {
+    for (const timer of timers.filter((t) => t.ms === REQUEST_POLL_MS)) timer.fn();
+    for (let i = 0; i < 8; i += 1) await tick();
+    assert.equal(reads, held, "the sync's interval passed while held and began no setup");
+    runner.exit();
+    const settled = await Promise.race([plugin.detach(), new Promise((resolve) => setTimeout(() => resolve("waiting"), 1000))]);
+    assert.deepEqual(settled, { detached: true, held: 0 }, "the final detach completed with nothing parked in its way");
+    assert.equal(api.definitionClaims, 1, "and nothing was claimed for this host's definitions while held");
+  } finally {
+    park = false;
+    for (const release of parked.splice(0)) release();
+  }
 });
