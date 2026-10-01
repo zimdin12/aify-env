@@ -14,8 +14,8 @@ import path from "node:path";
 import test, { after } from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
-import { DETACHING } from "../lib/plugins/aify-comms/plugin-phase.mjs";
+// Through the plugin's own module, as before the split: the import an existing caller has.
+import { DETACHING, createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
 import { followRegistry, followReport, planPluginChanges } from "../lib/plugin-bootstrap.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
 import { readServices, registryIsReadable } from "../lib/services.mjs";
