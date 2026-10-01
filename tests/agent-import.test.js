@@ -98,7 +98,8 @@ test("THE ROSTER, read as records: this machine only, harness from runtime, aify
   assert.deepEqual(records[0], { id: "lead", unreported: ["env"], agent: { name: "Lead", role: "coder", harness: "claude",
     mode: "managed", workspace: "C:/w", model: "opus", effort: "high", instructions: "be brief", env: {}, herdrSpace: false } });
   assert.equal(records[1].agent.effort, "xhigh", "thinking when there is no effort, as the service's launch reads it");
-  assert.deepEqual(records[1].unreported, ["env", "herdrSpace"], "a service that does not say herdrSpace has it said, not assumed");
+  assert.deepEqual(records[1].unreported, ["name", "role", "workspace", "model", "instructions", "env", "herdrSpace"],
+    "every field the row does not carry is said, not assumed");
   assert.deepEqual(importRecords(roster, ""), [], "no machine id, nothing is this host's");
 });
 
@@ -107,4 +108,22 @@ test("EVERY HARNESS maps back from its runtime, and any other runtime is not imp
     assert.equal(importRecord("a", { runtime }).agent.harness, harness, runtime);
   }
   assert.deepEqual(importRecord("a", { runtime: "generic" }), { id: "a", notImportable: "its runtime generic has no harness" });
+});
+
+test("PROVENANCE: absent and null are unreported and written neutral; an explicit empty value is reported", () => {
+  const base = { runtime: "claude-code", name: "N", role: "r", sessionMode: "managed", cwd: "C:/w", instructions: "", herdrSpace: true };
+  const reportedEmpty = importRecord("a", { ...base, model: "", runtimeConfig: { effort: "" } });
+  assert.deepEqual([reportedEmpty.agent.model, reportedEmpty.agent.effort, reportedEmpty.agent.instructions, reportedEmpty.unreported],
+    ["", "", "", ["env"]], "explicitly empty is what the service said");
+  const absent = importRecord("a", { ...base, instructions: undefined });
+  assert.deepEqual([absent.agent.model, absent.agent.effort, absent.agent.instructions, absent.unreported],
+    ["", "", "", ["model", "effort", "instructions", "env"]]);
+  assert.deepEqual(importRecord("a", { ...base, model: null }).unreported, ["model", "effort", "env"], "null is no value recorded");
+  const effort = (runtimeConfig) => { const r = importRecord("a", { ...base, model: "m", runtimeConfig }); return [r.agent.effort, r.unreported.includes("effort")]; };
+  assert.deepEqual(effort({ effort: "high", thinking: "low" }), ["high", false]);
+  assert.deepEqual(effort({ effort: "", thinking: "low" }), ["low", false], "an empty effort falls to thinking, as the launch reads it");
+  assert.deepEqual(effort({ thinking: "" }), ["", false]);
+  assert.deepEqual(effort({}), ["", true]);
+  const lines = planLines(importPlan({ reports: [{ service: "aify-comms", agents: [{ id: "a", ...absent }] }], defined: [], check: () => [] })).join("\n");
+  assert.match(lines, /not reported by aify-comms: model \(written as ""\), effort \(written as ""\), instructions \(written as ""\), env \(written as \{\}\)/);
 });
