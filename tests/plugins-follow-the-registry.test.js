@@ -63,6 +63,10 @@ function fakeApi(launch) {
     async launch() { return { launch }; },
     async reportControl(id, patch) { api.reports.push({ id, ...patch }); },
     async terminalOutput() { return { ok: true }; },
+    // The definition sync's calls, counted so a witness can see whether that loop is turning.
+    definitionClaims: 0,
+    async claimDefinitionRequests() { api.definitionClaims += 1; return { requests: [] }; },
+    async pushDefinitions() { return { ok: true, refused: [] }; },
   };
   return api;
 }
@@ -86,14 +90,14 @@ function fakeRunner() {
 const live = [];
 after(() => Promise.all(live.map((plugin) => plugin.stop().catch(() => {}))));
 
-async function startedPlugin({ endpoint = "http://old.invalid", cwdRoots = null } = {}) {
+async function startedPlugin({ endpoint = "http://old.invalid", cwdRoots = null, definitions = null } = {}) {
   const { root, launcher } = workspace();
   const launch = { terminalId: "term-1", agentId: "a", runtime: "claude-code", command: launcher, argv: [launcher], cwd: root, env: { AIFY_AGENT_ID: "a" } };
   const api = fakeApi(launch);
   const runner = fakeRunner();
   const plugin = createCommsPlugin({
     endpoint, api, cwdRoots: cwdRoots || (async () => [root]), advertisement: async () => ({ hostname: "h", kind: "test" }),
-    windows: process.platform === "win32", readFile: () => ALLOWED,
+    windows: process.platform === "win32", readFile: () => ALLOWED, definitions,
     setTimeoutImpl: (fn, ms) => setTimeout(fn, Math.min(ms, 5)), clearTimeoutImpl: clearTimeout,
   });
   const logs = [];
@@ -333,4 +337,24 @@ witness("THE DAEMON FOLLOWS ONLY A REGISTRY THAT PARSES: its own statement, run"
     runInNewContext(statements[0], { registryText: text, followServices: (services) => calls.push(services), registryIsReadable, readServices });
     assert.deepEqual(calls, expected, JSON.stringify(text));
   }
+});
+
+witness("THE DEFINITION SYNC runs while the plugin claims, stops while it is held, and turns again on resume", async () => {
+  // A store that is always complete and empty: what is pushed is witnessed elsewhere; this counts passes.
+  const definitions = {
+    async list() { return { storeId: "s", definitions: [] }; },
+    async snapshot() { return { complete: true, storeId: "s", revision: 1, snapshotDigest: "d", entries: [] }; },
+  };
+  const { plugin, api, runner } = await startedPlugin({ definitions });
+  await holdOneWorker(api, runner);
+  const running = api.definitionClaims;
+  await until(() => api.definitionClaims > running + 1, "sync passes while running");
+  assert.deepEqual(await detachDuringPoll(plugin, api), { detached: false, held: 1 });
+  const held = api.definitionClaims;
+  for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(api.definitionClaims <= held + 1, "a held plugin speaks for this host's definitions no longer");
+  const resumedFrom = api.definitionClaims;
+  assert.equal(plugin.resume(), true);
+  await until(() => api.definitionClaims > resumedFrom + 1, "sync passes after the resume");
+  runner.exit();
 });

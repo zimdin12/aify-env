@@ -18,7 +18,7 @@ const end = daemon.indexOf("    for (const line of bootstrapReport(outcome))", b
 assert.ok(begin > 0 && end > begin, "production bootstrap boundaries must remain identifiable");
 const bootstrap = `(async () => { ${daemon.slice(begin, end)} return outcome; })()`;
 
-async function picker(t, facts, identity = hostIdentityFacts) {
+async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
   const expected = hostIdentityFacts(facts).machineId;
   const agent = (machineId) => ({ machineId, sessionMode: "managed", status: "available" });
   const registry = new ServicePlugins();
@@ -36,6 +36,9 @@ async function picker(t, facts, identity = hostIdentityFacts) {
   const outcome = await runInNewContext(bootstrap, {
     PluginHost, PluginProcesses, startServicePlugins, servicePlugins: registry,
     runner, VERSION: "test", REGISTRY_FILE: "memory-only-registry", CWD_ROOTS: [],
+    // NO DEFINITION STORE: the daemon makes this operator's own outside the evaluated block, and a
+    // picker test must never publish or read it.
+    definitionStore: null,
     readFileSync: () => JSON.stringify({ version: 1, services: { "aify-comms": { endpoint: "http://example.invalid" } } }),
     readServices, resolvePluginCredential: async () => "test-only", logLine: () => {},
     // NO HERDR TO OPEN A SPACE IN, which is what an ordinary daemon has. What the opener does when
@@ -48,6 +51,7 @@ async function picker(t, facts, identity = hostIdentityFacts) {
     pluginsForServices: (services, shared) => pluginsForServices(services, {
       ...shared, api, setTimeoutImpl: () => 1, clearTimeoutImpl: () => {},
     }),
+    ...context,
   });
   assert.deepEqual(outcome.failed, []);
   assert.deepEqual(outcome.started, ["aify-comms"]);
@@ -76,4 +80,24 @@ test("production bootstrap preserves fail-closed behavior if the identity produc
   assert.match(answer.body.problem, /cannot say which machine/);
   assert.deepEqual(answer.body.agents, []);
   assert.equal(reads, 0, "missing identity must not widen the roster query");
+});
+
+test("THE DAEMON'S DEFINITION STORE AND INSTALLED HARNESSES reach the plugin it starts (P0 C3, C7)", async (t) => {
+  // A store standing in for the operator's: it records who read it, and never touches a disk.
+  const seen = { lists: 0, installed: null };
+  const definitionStore = {
+    async list() { seen.lists += 1; return { storeId: "s1", definitions: [] }; },
+    async snapshot({ installed }) { seen.installed = [...installed].sort(); return { complete: false, incomplete: {} }; },
+  };
+  const facts = { platform: "win32", hostname: "fallback", env: { COMPUTERNAME: "Picker-Windows" }, isWsl: false, exists: () => false };
+  const { answer } = await picker(t, facts, hostIdentityFacts, {
+    definitionStore,
+    installedHarnesses: () => [{ client: "claude" }, { client: "codex" }],
+    aifyLauncherFilesOnPath: () => [],
+  });
+  assert.equal(answer.status, 200);
+  assert.equal(seen.lists, 1, "the starter read this host's definitions");
+  const deadline = Date.now() + 5000;
+  while (seen.installed === null && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(seen.installed, ["claude", "codex"], "the sync was handed what this host can launch");
 });

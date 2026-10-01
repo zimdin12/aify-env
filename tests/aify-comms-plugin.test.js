@@ -381,10 +381,12 @@ test("state is reported so silence can be explained", async () => {
   // that as working. It is the exact state six spawns were in — claimed, never run.
   // `phase` and `heldWorkers` joined with P0 C8: a plugin kept on an old endpoint for its workers
   // refuses every start, and without them that reads as a healthy host that is simply idle.
+  // `definitions` joined with P0 C3/C4: what the definition sync last did, null with no store.
   assert.deepEqual(Object.keys(before).sort(), [
-    "claimedTotal", "claimer", "controlsHandled", "heldWorkers", "lastClaim", "lastControl",
+    "claimedTotal", "claimer", "controlsHandled", "definitions", "heldWorkers", "lastClaim", "lastControl",
     "lastHeartbeat", "lastHeartbeatError", "phase",
   ]);
+  assert.equal(before.definitions, null, "no store was given, so there is no sync to report");
   assert.equal(before.claimer, null);
   assert.equal(before.controlsHandled, 0);
   await plugin.start(host);

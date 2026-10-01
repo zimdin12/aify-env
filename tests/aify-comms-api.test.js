@@ -267,3 +267,27 @@ test("a refused control raises a CommsApiError carrying the status, like every o
     return true;
   });
 });
+
+// THE DEFINITION CALLS (P0 C3, C4, C7): the method, the path and the body each one sends. The service
+// fences every host call on `bridgeId` and `machineId`, so both travel; the environment id holds colons
+// and is encoded into the path. The real round trip is witnessed in aify-comms
+// (service/tests/e2e/test_an_offline_request_reaches_the_hosts_file.py).
+test("the definition calls send what the service's routes take", async () => {
+  const fetchImpl = fakeFetch({ json: { ok: true } });
+  const client = api(fetchImpl);
+  const env = "win32:host-a:default";
+  const snapshot = { machineId: "win32:host-a", storeId: "s1", revision: 3, snapshotDigest: "d", entries: [] };
+  await client.pushDefinitions(env, snapshot);
+  await client.claimDefinitionRequests(env, "win32:host-a");
+  await client.reportDefinitionRequest(env, "req-1", "win32:host-a", { status: "done", outcome: "", resultIncarnation: 1, resultRevision: 2 });
+  await client.startAgent("lead");
+  const sent = fetchImpl.calls.map(({ url, options }) => [options.method, url.replace("http://127.0.0.1:8800/api/v1", ""), JSON.parse(options.body)]);
+  const base = "/environments/win32%3Ahost-a%3Adefault";
+  assert.deepEqual(sent, [
+    ["PUT", `${base}/agent-definitions`, { bridgeId: IDENTITY.bridgeId, ...snapshot }],
+    ["POST", `${base}/definition-requests/claim`, { bridgeId: IDENTITY.bridgeId, machineId: "win32:host-a" }],
+    ["POST", `${base}/definition-requests/req-1/result`,
+      { status: "done", outcome: "", resultIncarnation: 1, resultRevision: 2, bridgeId: IDENTITY.bridgeId, machineId: "win32:host-a" }],
+    ["POST", "/agents/lead/control", { action: "start", from_agent: "aify-env" }],
+  ]);
+});

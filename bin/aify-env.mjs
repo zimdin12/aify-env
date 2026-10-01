@@ -74,6 +74,7 @@ import { homedir, hostname } from "node:os";
 import { PackageBuild } from "../lib/build-identity.mjs";
 import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
+import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { readServices, registryIsReadable } from "../lib/services.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
@@ -718,6 +719,9 @@ server.listen(port, HOST, async () => {
   // Keep host identity in this payload so every plugin receives the canonical machine id.
   const paneOpener = paneOpenerFor({ env: process.env, dedicatedRoot: instanceContext?.root, base: `http://${HOST}:${bound.port}`,
     node: process.execPath, script: fileURLToPath(import.meta.url), log: logLine, watchExit: (id, on) => runner.subscribe(id, () => {}, on) });
+  // THIS HOST'S AGENT DEFINITIONS (P0 C3, C4, C7), made here, outside the statements the bootstrap tests
+  // evaluate, so those tests hand the plugin no store rather than this operator's own.
+  const definitionStore = new DefinitionStore();
   // A DEDICATED INSTANCE STARTS THEM TOO. Was `if (!instanceContext)`, which left it with no `agents`
   // capability, so the picker answered 503 beside a service that was registered and healthy.
   try {
@@ -742,6 +746,8 @@ server.listen(port, HOST, async () => {
       advertisement: async () => currentAdvertisementBody(),
       cwdRoots: async () => CWD_ROOTS,
       windows: process.platform === "win32",
+      definitions: definitionStore,
+      installedHarnesses: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
     };
     const outcome = await startServicePlugins({ registry: servicePlugins, host, services: readServices(readFileSync(REGISTRY_FILE, "utf8")), build: pluginsForServices, shared });
     for (const line of bootstrapReport(outcome)) process.stderr.write(`[aify-env] ${line}${chr10}`);
