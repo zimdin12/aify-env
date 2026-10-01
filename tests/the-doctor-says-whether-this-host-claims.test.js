@@ -121,3 +121,24 @@ test("a refusal WINS over an acceptance, because the failure is the actionable h
   assert.equal(check.state, STATE.FAILED);
   assert.match(check.detail, /aify-other/);
 });
+
+test("a plugin KEPT FOR ITS WORKERS after a registry change FAILS as pending, though it is the accepted claimer", () => {
+  // P0 C8. It claims and starts nothing until its last worker ends, so reading its accepted claimer as
+  // "claiming work" would be a green row over refused spawns. A running one beside it stays named.
+  const accepted = { accepted: true, bridgeId: "me" };
+  const check = claimingCheck({
+    answered: true,
+    plugins: [
+      { name: "aify-comms", state: { claimer: accepted, phase: "held", heldWorkers: 2 } },
+      { name: "aify-other", state: { claimer: accepted, phase: "running", heldWorkers: 0 } },
+    ],
+  });
+  assert.equal(check.state, STATE.FAILED);
+  assert.match(check.detail, /registry change pending: aify-comms \(2 worker\(s\) still held\)/);
+  assert.doesNotMatch(check.detail, /aify-other/);
+  assert.match(check.fix, /last worker ends/);
+  // Control: the same claimer running, and a state from a build with no phase at all, both pass.
+  for (const state of [{ claimer: accepted, phase: "running", heldWorkers: 2 }, { claimer: accepted }]) {
+    assert.equal(claimingCheck({ answered: true, plugins: [{ name: "aify-comms", state }] }).state, STATE.PASSED);
+  }
+});

@@ -379,9 +379,11 @@ test("state is reported so silence can be explained", async () => {
   // are separate from the claim's counters on purpose: a host whose claim loop is healthy and whose
   // control loop has died claims agents it can never start, and one pair of numbers would report
   // that as working. It is the exact state six spawns were in — claimed, never run.
+  // `phase` and `heldWorkers` joined with P0 C8: a plugin kept on an old endpoint for its workers
+  // refuses every start, and without them that reads as a healthy host that is simply idle.
   assert.deepEqual(Object.keys(before).sort(), [
-    "claimedTotal", "claimer", "controlsHandled", "lastClaim", "lastControl",
-    "lastHeartbeat", "lastHeartbeatError",
+    "claimedTotal", "claimer", "controlsHandled", "heldWorkers", "lastClaim", "lastControl",
+    "lastHeartbeat", "lastHeartbeatError", "phase",
   ]);
   assert.equal(before.claimer, null);
   assert.equal(before.controlsHandled, 0);

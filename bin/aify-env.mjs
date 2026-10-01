@@ -74,11 +74,11 @@ import { homedir, hostname } from "node:os";
 import { PackageBuild } from "../lib/build-identity.mjs";
 import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
-import { readServices } from "../lib/services.mjs";
+import { readServices, registryIsReadable } from "../lib/services.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
-import { bootstrapReport, credentialValue, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
+import { bootstrapReport, credentialValue, followRegistry, followReport, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
 import {
   advertiseTo,
   advertisementTargets,
@@ -578,6 +578,8 @@ let superseding = false;
 let viewOnly = false;
 /** Cleared by the refusal path when the advertise timer has already been armed. See `viewOnly`. */
 let stopAdvertising = null;
+//: Set once the service plugins have started: brings them level with a registry that was read.
+let followServices = null;
 server.on("error", async (failure) => {
   if (failure?.code === "EADDRINUSE") {
     if (instanceContext) {
@@ -736,25 +738,25 @@ server.listen(port, HOST, async () => {
       credential: async () => resolvePluginCredential(),
       log: (message) => logLine(message),
     });
-    const outcome = await startServicePlugins({
-      registry: servicePlugins,
-      host,
-      services: readServices(readFileSync(REGISTRY_FILE, "utf8")),
-      build: pluginsForServices,
-      shared: {
-        version: VERSION,
-        machineId: hostIdentityFacts({
-          platform: process.platform, hostname: hostname(), env: process.env,
-          exists: existsSync, isWsl: hostIsWsl(),
-        }).machineId,
-        // Resolved when asked rather than captured: a registry edit or a rotated key must reach a
-        // running plugin without a restart.
-        advertisement: async () => currentAdvertisementBody(),
-        cwdRoots: async () => CWD_ROOTS,
-        windows: process.platform === "win32",
-      },
-    });
+    const shared = {
+      version: VERSION,
+      machineId: hostIdentityFacts({
+        platform: process.platform, hostname: hostname(), env: process.env,
+        exists: existsSync, isWsl: hostIsWsl(),
+      }).machineId,
+      // Resolved when asked rather than captured: a registry edit or a rotated key must reach a
+      // running plugin without a restart.
+      advertisement: async () => currentAdvertisementBody(),
+      cwdRoots: async () => CWD_ROOTS,
+      windows: process.platform === "win32",
+    };
+    const outcome = await startServicePlugins({ registry: servicePlugins, host, services: readServices(readFileSync(REGISTRY_FILE, "utf8")), build: pluginsForServices, shared });
     for (const line of bootstrapReport(outcome)) process.stderr.write(`[aify-env] ${line}${chr10}`);
+    // AND FOLLOW THE REGISTRY from now on, on the advertiser's beat (P0 C8, lib/plugin-bootstrap.mjs).
+    let following = null;
+    followServices = (services) => { following ??= followRegistry({ registry: servicePlugins, host, services, build: pluginsForServices, shared })
+      .then((result) => { for (const line of followReport(result)) logLine(line); }, (error) => logLine(`registry follow failed: ${error?.message || error}`))
+      .finally(() => { following = null; }); };
   } catch (error) {
     process.stderr.write(`[aify-env] service plugins not started: ${error?.message || error}
 `);
@@ -883,6 +885,7 @@ async function advertiseOnce() {
     advertisingTargets = [];
     return;
   }
+  if (registryIsReadable(registryText)) followServices?.(readServices(registryText));
   const targets = advertisementTargets(readServices(registryText));
   advertisingTargets = targets;
   if (targets.length === 0) return;
