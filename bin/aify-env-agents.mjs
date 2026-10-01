@@ -2,8 +2,11 @@
 /**
  * `aify-env agents` -- this host's agent definitions, read and changed through DefinitionStore.
  *
- * OFFLINE BY DESIGN: every verb works with no service reachable. The store is the only writer of
- * ~/.aify/agent-definitions; this command is one of its callers and writes nothing itself.
+ * OFFLINE BY DESIGN: every verb but `import` works with no service reachable. The store is the only
+ * writer of ~/.aify/agent-definitions; this command is one of its callers and writes nothing itself.
+ *
+ * `import` IS THE ONE PULL (P0 C10): it asks the running aify-env, whose plugins hold each service's
+ * credential, what every service knows of this machine's agents. A dry run unless `--write`.
  */
 
 import process from "node:process";
@@ -11,6 +14,8 @@ import process from "node:process";
 import { installedHarnesses } from "../lib/advertise.mjs";
 import { DefinitionRefused, DefinitionStore, DefinitionStoreError } from "../lib/agent-definitions.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
+import { DECISION, definitionCheck, importPlan, parsePrefer, planLines } from "../lib/agent-import.mjs";
+import { importableAgents } from "../lib/client-actions.mjs";
 
 const EOL = String.fromCharCode(10);
 export const EXIT_OK = 0;
@@ -24,6 +29,8 @@ const USAGE = [
   "  aify-env agents set <id> key=value ...     keys: name role harness mode workspace model effort",
   "                                               instructions herdrSpace env.<NAME>; -env.<NAME> unsets",
   "  aify-env agents remove <id>",
+  "  aify-env agents import [--write] [--prefer <service>[:<id>]] ...",
+  "                                               define the agents the services know on this machine; a dry run unless --write",
   "  aify-env agents unlock                      remove the lock of a store writer that is no longer running",
   "  aify-env agents recover --as-committed | --as-not-committed",
   "                                               settle a recovery conflict the store could not prove",
@@ -46,6 +53,18 @@ export function parseAgentsArgs(argv) {
     return rest.length === 1 && choice ? { verb, choice, problem: "" } : fail("recover needs --as-committed or --as-not-committed");
   }
   if (verb === "show" || verb === "remove") return rest.length === 1 ? { verb, id: rest[0], problem: "" } : fail(`${verb} needs exactly one id`);
+  if (verb === "import") {
+    const prefer = [];
+    let write = false;
+    for (let at = 0; at < rest.length; at += 1) {
+      if (rest[at] === "--write") write = true;
+      else if (rest[at] === "--prefer" && !String(rest[at + 1] ?? "").startsWith("--") && parsePrefer(rest[at + 1])) {
+        prefer.push(parsePrefer(rest[(at += 1)]));
+      }
+      else return fail(rest[at] === "--prefer" ? "--prefer needs <service> or <service>:<id>" : `import does not take '${rest[at]}'`);
+    }
+    return { verb, write, prefer, problem: "" };
+  }
   if (verb !== "set") return fail(verb ? `unknown verb '${verb}'` : "no verb given");
   const [id, ...pairs] = rest;
   if (!id) return fail("set needs an id");
@@ -99,7 +118,8 @@ function conflictLines(conflict) {
 }
 
 /** Run one parsed intent against a store. Returns the lines to print and the exit code. */
-export async function runAgents(intent, { store, installed, unlock = () => DefinitionStore.unlock() }) {
+export async function runAgents(intent, { store, installed, unlock = () => DefinitionStore.unlock(), importable = null }) {
+  if (intent.verb === "import") return importAgents(intent, { store, installed, importable });
   if (intent.verb === "unlock") {
     const removed = unlock();
     return { code: EXIT_OK, lines: [removed ? `removed the lock left by process ${removed.pid ?? "unknown"}, which is not running` : "the store is not locked"] };
@@ -135,6 +155,39 @@ export async function runAgents(intent, { store, installed, unlock = () => Defin
   return { code: EXIT_OK, lines: [`${removed.id} removed to .trash/${removed.trashName}`] };
 }
 
+/**
+ * `aify-env agents import`: plan from what the services report, print it, and with `--write` define each
+ * row marked import through the store, conditional on the id still being undefined (`expect: null`).
+ */
+async function importAgents(intent, { store, installed, importable }) {
+  const report = await importable();
+  if (report.problem && !report.services.length) return { code: EXIT_FAILED, lines: [`no service could be asked: ${report.problem}`] };
+  const silent = report.services.filter((service) => service.problem);
+  const lines = silent.map((service) => `${service.service || "a service"} did not answer: ${service.problem}`);
+  const listed = await store.list();
+  if (listed.conflict) return { code: EXIT_FAILED, lines: [...lines, ...conflictLines(listed.conflict)] };
+  const rows = importPlan({
+    reports: report.services, defined: [...listed.definitions.map((entry) => entry.id), ...listed.unreadable],
+    prefer: intent.prefer, check: definitionCheck(installed),
+  });
+  lines.push(...(rows.length ? planLines(rows) : ["no service reports an agent on this machine"]));
+  if (!intent.write) return { code: EXIT_OK, lines: ["DRY RUN: nothing is written; --write writes the rows marked import.", ...lines] };
+  // A SERVICE THAT DID NOT ANSWER may describe these agents differently, and its conflict would not show.
+  if (silent.length) return { code: EXIT_FAILED, lines: [...lines, "nothing written: ask again when every service answers"] };
+  let refused = 0;
+  for (const row of rows.filter((candidate) => candidate.decision === DECISION.IMPORT)) {
+    try {
+      const result = await store.set(row.id, row.agent, { installed, expect: null });
+      lines.push(`written: ${result.id} incarnation ${result.incarnation} revision ${result.revision}`);
+    } catch (error) {
+      if (!(error instanceof DefinitionRefused)) throw error;
+      refused += 1;
+      lines.push(`not written: ${row.id} (${error.message}${error.problems?.length ? `: ${error.problems.join("; ")}` : ""})`);
+    }
+  }
+  return { code: refused ? EXIT_FAILED : EXIT_OK, lines };
+}
+
 async function main() {
   const intent = parseAgentsArgs(process.argv.slice(2));
   if (intent.problem) {
@@ -145,7 +198,8 @@ async function main() {
   const store = new DefinitionStore();
   const installed = new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client));
   try {
-    const { code, lines } = await runAgents(intent, { store, installed });
+    const endpoint = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
+    const { code, lines } = await runAgents(intent, { store, installed, importable: () => importableAgents({ endpoint }) });
     process.stdout.write(lines.join(EOL) + EOL);
     process.exitCode = code;
   } catch (error) {

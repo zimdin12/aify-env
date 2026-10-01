@@ -289,6 +289,9 @@ const runner = new Runner({ ownedFile: OWNED_FILE });
 // to fetch that work. The daemon never names a service -- `pluginsForServices` maps registry entries
 // to plugins -- so adding a second `aify-` service changes nothing here.
 const servicePlugins = new ServicePlugins();
+// THIS HOST'S AGENT DEFINITIONS (P0 C3, C4, C7, C10), shared by the plugins and `/agents/importable`. Made
+// outside the statements the bootstrap tests evaluate, so those hand the plugin a stand-in, never this one.
+const definitionStore = new DefinitionStore();
 
 /**
  * WHERE THIS HOST WILL RUN WORK: the directory it was started in, and below.
@@ -492,6 +495,9 @@ const server = createServer(async (request, response) => {
         // THE DAEMON NAMES NO SERVICE, which is the whole point of the plugin split: a second
         // `aify-` service offering the same capability needs no change on this line.
         agents: servicePlugins.capability("agents"),
+        // EVERY SERVICE'S, for import (P0 C10), and this host's definitions to compare them with.
+        agentServices: servicePlugins.capabilities("agents"),
+        definitions: definitionStore,
         traffic,
       },
     );
@@ -719,9 +725,6 @@ server.listen(port, HOST, async () => {
   // Keep host identity in this payload so every plugin receives the canonical machine id.
   const paneOpener = paneOpenerFor({ env: process.env, dedicatedRoot: instanceContext?.root, base: `http://${HOST}:${bound.port}`,
     node: process.execPath, script: fileURLToPath(import.meta.url), log: logLine, watchExit: (id, on) => runner.subscribe(id, () => {}, on) });
-  // THIS HOST'S AGENT DEFINITIONS (P0 C3, C4, C7), made here, outside the statements the bootstrap tests
-  // evaluate, so those tests hand the plugin no store rather than this operator's own.
-  const definitionStore = new DefinitionStore();
   // A DEDICATED INSTANCE STARTS THEM TOO. Was `if (!instanceContext)`, which left it with no `agents`
   // capability, so the picker answered 503 beside a service that was registered and healthy.
   try {

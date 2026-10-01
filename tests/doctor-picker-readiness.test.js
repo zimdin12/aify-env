@@ -10,7 +10,8 @@ import { handleRequest } from "../lib/protocol.mjs";
 const endpoint = "http://example.invalid";
 const healthy = { ok: true, status: 200, body: {
   processes: [], terminals: { available: true }, advertiseCredentials: {},
-  plugins: [{ name: "test", state: { claimer: { accepted: true } } }],
+  plugins: [{ name: "test", state: { claimer: { accepted: true },
+    definitions: { accepted: true, published: { storeId: "s", revision: 1 }, lastPushError: "", lastRequestError: "" } } }],
   build: "abc", codeOnDisk: "abc",
 } };
 async function report(answer, envAnswer = healthy) {
@@ -20,6 +21,10 @@ async function report(answer, envAnswer = healthy) {
     knock: async (url) => {
       urls.push(url);
       if (url === `${endpoint}/health`) return envAnswer;
+      // The doctor's other read-only question (P0 D12), answered healthily so only the picker varies.
+      if (url === `${endpoint}/agents/importable`) {
+        return { ok: true, status: 200, body: { services: [], defined: [], definedProblem: "", problem: "" } };
+      }
       assert.equal(url, `${endpoint}/agents/startable`, "readiness may only GET the read-only picker route");
       return typeof answer === "function" ? answer() : answer;
     },
@@ -102,7 +107,7 @@ test("doctor fails readiness when a healthy daemon's picker lacks machine identi
   assert.equal(check.state, "failed");
   assert.ok(check.detail.includes(problem));
   assert.equal(result.exitCode, 1);
-  assert.deepEqual(urls, [`${endpoint}/health`, `${endpoint}/agents/startable`]);
+  assert.deepEqual(urls, [`${endpoint}/health`, `${endpoint}/agents/startable`, `${endpoint}/agents/importable`]);
 });
 
 test("an empty but working picker passes readiness", async () => {

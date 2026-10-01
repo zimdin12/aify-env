@@ -152,3 +152,35 @@ test("THE SERVICE UNREACHABLE: the claim's failure is recorded and the push stil
   await sync.pass(ENV);
   assert.equal(pushes(api).length, 2, "the failed push is tried again, well inside the interval");
 });
+
+test("A SERVICE OLDER THAN DEFINITIONS: its 404s are logged once each, and `accepted` says so (C11)", async () => {
+  const store = await defined();
+  const notFound = () => new CommsApiError("not found", { status: 404, path: "/x" });
+  const api = recordingApi({ claimError: notFound(), pushError: notFound() });
+  const logged = [];
+  const sync = new DefinitionSync({ api, store, installed: () => ALL, machineId: MACHINE, now: () => 0, log: (line) => logged.push(line) });
+  assert.equal(sync.state.accepted, null, "nothing asked yet, nothing known");
+  for (let pass = 0; pass < 3; pass += 1) await sync.pass(ENV);
+  assert.equal(pushes(api).length, 3, "it still tries every pass");
+  assert.deepEqual(logged, ["aify-comms definition requests failed (404: not found)", "aify-comms definitions not published (404: not found)"]);
+  assert.equal(sync.state.accepted, false);
+});
+
+test("A FAILURE THAT CLEARS is logged again when it returns; one that is not a 404 leaves `accepted` alone", async () => {
+  const store = await defined();
+  const api = recordingApi({ pushError: new CommsApiError("down", { status: 0, path: "/x" }) });
+  const logged = [];
+  const clock = { now: 0 };
+  const sync = new DefinitionSync({ api, store, installed: () => ALL, machineId: MACHINE, now: () => clock.now, log: (line) => logged.push(line) });
+  await sync.pass(ENV);
+  await sync.pass(ENV);
+  assert.equal(logged.length, 1);
+  assert.equal(sync.state.accepted, true, "the claim was answered, so the service accepts definitions");
+  const pushError = api.pushDefinitions;
+  api.pushDefinitions = async () => ({ ok: true, refused: [] });
+  await sync.pass(ENV);
+  api.pushDefinitions = pushError;
+  clock.now = PUSH_INTERVAL_MS;
+  await sync.pass(ENV);
+  assert.equal(logged.length, 2, "logged again after it had cleared");
+});
