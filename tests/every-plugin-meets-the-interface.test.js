@@ -55,6 +55,10 @@ test("THE CHECK REFUSES what the interface rules out, and names the plugin", () 
   const ok = { name: "x", start: async () => {}, stop: async () => {} };
   assert.equal(pluginProblem(ok), "", "CONTROL: the minimum is accepted");
   assert.equal(pluginProblem({ ...ok, state: {} }), 'plugin "x" has a state that is not a function');
+  for (const state of [null, 0, ""]) {
+    assert.equal(pluginProblem({ ...ok, state }), 'plugin "x" has a state that is not a function', `a declared state of ${JSON.stringify(state)}`);
+  }
+  for (const name of ["", "   ", undefined, 7]) assert.equal(pluginProblem({ ...ok, name }), "no name", JSON.stringify(name));
   assert.equal(pluginProblem({ ...ok, capabilities: [] }), 'plugin "x" has capabilities that are not an object');
   assert.equal(pluginProblem({ ...ok, capabilities: null }), 'plugin "x" has capabilities that are not an object');
   assert.equal(pluginProblem({ ...ok, state: () => ({}), capabilities: {} }), "", "CONTROL: both, well formed");
