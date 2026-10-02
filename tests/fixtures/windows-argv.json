@@ -1,0 +1,106 @@
+{
+  "about": "Command lines and how Windows itself splits them: each line was passed verbatim (windowsVerbatimArguments) to a child node, which printed its argv after the script. Recorded 2026-10-02 on Windows 11 with node v22.20.0. tests/resident-lifetimes.test.js re-derives every row natively when it runs on Windows.",
+  "rows": [
+    {
+      "commandLine": "\"C:/Users/me/.local/bin/claude-aify\"-old",
+      "native": [
+        "C:/Users/me/.local/bin/claude-aify-old"
+      ]
+    },
+    {
+      "commandLine": "\"C:/Users/me/.local/bin/claude-aify\"",
+      "native": [
+        "C:/Users/me/.local/bin/claude-aify"
+      ]
+    },
+    {
+      "commandLine": "\"C:/Users/me\"/.local/bin/claude-aify",
+      "native": [
+        "C:/Users/me/.local/bin/claude-aify"
+      ]
+    },
+    {
+      "commandLine": "C:/Users/me/.local/bin/claude-aify --resume",
+      "native": [
+        "C:/Users/me/.local/bin/claude-aify",
+        "--resume"
+      ]
+    },
+    {
+      "commandLine": "/c/Users/me/.local/bin/claude-aify",
+      "native": [
+        "/c/Users/me/.local/bin/claude-aify"
+      ]
+    },
+    {
+      "commandLine": "\"C:\\Program Files\\x\\claude-aify\" --flag",
+      "native": [
+        "C:\\Program Files\\x\\claude-aify",
+        "--flag"
+      ]
+    },
+    {
+      "commandLine": "\"a b\"c d",
+      "native": [
+        "a bc",
+        "d"
+      ]
+    },
+    {
+      "commandLine": "a\\\\\"b c\" d",
+      "native": [
+        "a\\b c",
+        "d"
+      ]
+    },
+    {
+      "commandLine": "a\\\"b c",
+      "native": [
+        "a\"b",
+        "c"
+      ]
+    },
+    {
+      "commandLine": "\"a\"\"b\" c",
+      "native": [
+        "a\"b",
+        "c"
+      ]
+    },
+    {
+      "commandLine": "\"\" x",
+      "native": [
+        "",
+        "x"
+      ]
+    },
+    {
+      "commandLine": "a\\\\\\\\\"b\" c",
+      "native": [
+        "a\\\\b",
+        "c"
+      ]
+    },
+    {
+      "commandLine": "\"ends with backslash\\\\\" next",
+      "native": [
+        "ends with backslash\\",
+        "next"
+      ]
+    },
+    {
+      "commandLine": "  spaced   out  ",
+      "native": [
+        "spaced",
+        "out"
+      ]
+    },
+    {
+      "commandLine": "tab\tseparated",
+      "native": [
+        "tab",
+        "separated"
+      ]
+    }
+  ]
+}

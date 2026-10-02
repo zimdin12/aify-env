@@ -1,9 +1,12 @@
 // A resident's lifetime record, judged against the OS (lib/resident-lifetimes.mjs; 0.9 plan P0 C3, C4).
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { currentLifetimes, isoToEpochMicros, parseLifetimeRecord, verifyLifetime } from "../lib/resident-lifetimes.mjs";
+import { currentLifetimes, isoToEpochMicros, parseLifetimeRecord, verifyLifetime, windowsArguments } from "../lib/resident-lifetimes.mjs";
 
 const LIFE = "7f3c9e2a-0000-4000-8000-000000000001";
 const OTHER = "7f3c9e2a-0000-4000-8000-000000000002";
@@ -57,6 +60,28 @@ test("THE LAUNCHER is one whole argument in any spelling Windows reports, and an
   }
 });
 
+
+const ARGV = JSON.parse(fs.readFileSync(new URL("./fixtures/windows-argv.json", import.meta.url), "utf8"));
+
+test("WINDOWS SPLITS A COMMAND LINE as this does, on every recorded line", () => {
+  assert.ok(ARGV.rows.length >= 15);
+  for (const row of ARGV.rows) assert.deepEqual(windowsArguments(row.commandLine), row.native, row.commandLine);
+});
+
+test("THE RECORDED SPLIT IS STILL WINDOWS' OWN", { skip: process.platform !== "win32" && "the native split exists only on Windows" }, () => {
+  const echo = fileURLToPath(new URL("./fixtures/argv-echo.cjs", import.meta.url));
+  for (const row of ARGV.rows) {
+    const run = spawnSync(process.execPath, [echo, row.commandLine], { windowsVerbatimArguments: true, encoding: "utf8" });
+    assert.deepEqual(JSON.parse(run.stdout), row.native, row.commandLine);
+  }
+});
+
+test("A QUOTED PREFIX IS NOT THE LAUNCHER: the argument Windows hands the process is (L1)", () => {
+  const quoted = (tail) => verifyLifetime(record({ launcher: "C:/Users/me/.local/bin/claude-aify" }), probe({ commandLine: `bash.exe ${tail}` })).verified;
+  assert.equal(quoted('"C:/Users/me/.local/bin/claude-aify"-old'), "unknown", "the argument is claude-aify-old");
+  assert.equal(quoted('"C:/Users/me/.local/bin/claude-aify"'), "yes", "CONTROL: fully quoted");
+  assert.equal(quoted('"C:/Users/me"/.local/bin/claude-aify --resume'), "yes", "partly quoted, and still exactly the launcher");
+});
 test("A GONE PID is no; an unanswered probe, or one with no creation time, is unknown", () => {
   assert.equal(verifyLifetime(record(), probe({ createdAtUs: 0 })).verified, "unknown", "a creation at 0 is no answer");
   assert.equal(verifyLifetime(record(), { alive: false, createdAtUs: null, commandLine: null }).reason, "gone");
