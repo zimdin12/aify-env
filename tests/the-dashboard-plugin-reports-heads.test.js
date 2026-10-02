@@ -49,7 +49,8 @@ async function fakeDashboard(listed) {
       if (request.method === "POST" && request.url === "/reports/head") {
         const status = answers.head.shift() ?? 200;
         if (status === 409) return send(409, { error: "another plugin instance is already reporting this folder", code: "another_reporter" });
-        return send(status, { ok: true });
+        // As the dashboard answers once every commit is covered; the commit-range tests use a dashboard that tracks coverage.
+        return send(status, { ok: true, outcome: "moved", ackedHead: JSON.parse(text).head, cursorRevision: requests.length });
       }
       send(404, { error: "no such route" });
     });

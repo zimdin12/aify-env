@@ -23,7 +23,8 @@ test("a folder rebound to another repository is resolved again and its new head 
   const watcher = new HeadWatcher({
     api: {
       watchList: async () => ({ hostKey: "h", projects: [{ projectId: "p", name: "n", root: { fsNamespace: "windows", path: "C:/w/proj" } }] }),
-      reportHead: async (report) => { reports.push(report.head); },
+      // Answered as the dashboard answers a folder whose commits are all covered: the head just sent is the accepted one.
+      reportHead: async (report) => { reports.push(report.head); return { ackedHead: report.head, cursorRevision: reports.length }; },
     },
     git: {
       // Inside the grant, as every place git reads must be (grant-check.mjs); paths here resolve to themselves.
@@ -77,7 +78,8 @@ test("a linked worktree whose commondir moves to other shared refs is read afres
   const watcher = new HeadWatcher({
     api: {
       watchList: async () => ({ hostKey: "h", projects: [{ projectId: "p", name: "n", root: { fsNamespace: "windows", path: slashed } }] }),
-      reportHead: async (report) => { reports.push(report.head); },
+      // Answered as the dashboard answers a folder whose commits are all covered: the head just sent is the accepted one.
+      reportHead: async (report) => { reports.push(report.head); return { ackedHead: report.head, cursorRevision: reports.length }; },
     },
     git: {
       gitDirs: async () => ({ toplevel: worktree, gitDir: meta, commonDir: commonNow() }),
