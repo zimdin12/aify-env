@@ -1,0 +1,34 @@
+{
+  "about": "One table, run twice: by tests/agent-state.test.js through lib/agent-state.mjs, and by aify-comms service/tests/test_the_ported_turn_law_agrees.py through the Python it ports. Times are seconds before a fixed now (null = no timestamp); event times are microseconds. 'owner' is a lifetime here and a registered machine id in aify-comms.",
+  "now": 1790950000.0,
+  "strictSeconds": 1800,
+  "turnLaw": [
+    {"name": "unverified, inside the window", "startedAgo": 1795, "touchedAgo": 1, "renewable": false, "live": true},
+    {"name": "unverified, past the window", "startedAgo": 1805, "touchedAgo": 1, "renewable": false, "live": false},
+    {"name": "unverified, exactly at the window (inclusive)", "startedAgo": 1800, "touchedAgo": 1, "renewable": false, "live": true},
+    {"name": "unverified, one second past", "startedAgo": 1801, "touchedAgo": 1, "renewable": false, "live": false},
+    {"name": "a re-stamping poster cannot postpone an unverified turn", "startedAgo": 7200, "touchedAgo": 1, "renewable": false, "live": false},
+    {"name": "verified, renews against the last renewal", "startedAgo": 7200, "touchedAgo": 1, "renewable": true, "live": true},
+    {"name": "verified, 72 hours and still renewed", "startedAgo": 259200, "touchedAgo": 1, "renewable": true, "live": true},
+    {"name": "verified, the renewals stopped", "startedAgo": 43200, "touchedAgo": 1805, "renewable": true, "live": false},
+    {"name": "no timestamps, unverified", "startedAgo": null, "touchedAgo": null, "renewable": false, "live": false},
+    {"name": "no timestamps, verified", "startedAgo": null, "touchedAgo": null, "renewable": true, "live": false},
+    {"name": "a future start does not hold", "startedAgo": -600, "touchedAgo": -600, "renewable": false, "live": false},
+    {"name": "verified, a future touch falls back to a recent start", "startedAgo": 60, "touchedAgo": -600, "renewable": true, "live": true},
+    {"name": "verified, a future touch falls back to an old start", "startedAgo": 7200, "touchedAgo": -600, "renewable": true, "live": false},
+    {"name": "verified, a touch older than the start is ignored", "startedAgo": 10, "touchedAgo": 7200, "renewable": true, "live": true},
+    {"name": "unverified, a row from before the start anchor uses its touch", "startedAgo": null, "touchedAgo": 60, "renewable": false, "live": true}
+  ],
+  "hookOrder": [
+    {"name": "no time: outside the ordering", "last": null, "event": {"at": null, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": true},
+    {"name": "the first event", "last": null, "event": {"at": 100, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": true},
+    {"name": "later, same owner", "last": {"at": 100, "owner": "a"}, "event": {"at": 200, "owner": "a", "kind": "turn-end"}, "current": "a", "accept": true},
+    {"name": "earlier, same owner: a slow start after its own end", "last": {"at": 200, "owner": "a"}, "event": {"at": 100, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": false},
+    {"name": "a tie goes to the end", "last": {"at": 200, "owner": "a"}, "event": {"at": 200, "owner": "a", "kind": "turn-end"}, "current": "a", "accept": true},
+    {"name": "a tie refuses a start", "last": {"at": 200, "owner": "a"}, "event": {"at": 200, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": false},
+    {"name": "the first event of a new owner, whatever its clock", "last": {"at": 900, "owner": "a"}, "event": {"at": 100, "owner": "b", "kind": "turn-start"}, "current": "b", "accept": true},
+    {"name": "a delayed event from a previous owner", "last": {"at": 100, "owner": "b"}, "event": {"at": 900, "owner": "a", "kind": "turn-end"}, "current": "b", "accept": false},
+    {"name": "an event naming no owner is not refused by the owner check", "last": {"at": 100, "owner": "a"}, "event": {"at": 200, "owner": "", "kind": "turn-end"}, "current": "a", "accept": true},
+    {"name": "no owner registered yet", "last": null, "event": {"at": 100, "owner": "a", "kind": "turn-start"}, "current": "", "accept": true}
+  ]
+}
