@@ -59,7 +59,7 @@ test("a verb that writes is refused before any process starts", async () => {
     await assert.rejects(reader.run("C:/x", [verb]), /not a read-only verb/);
   }
   assert.equal(fake.calls.length, 0);
-  assert.deepEqual([...READ_ONLY_VERBS], ["rev-parse", "log", "cat-file"]);
+  assert.deepEqual([...READ_ONLY_VERBS], ["rev-parse", "log"]);
 });
 
 test("one git process at a time, and a failed one does not stop the next", async () => {
