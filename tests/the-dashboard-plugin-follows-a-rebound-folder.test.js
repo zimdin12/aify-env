@@ -7,7 +7,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -46,6 +46,50 @@ test("a folder rebound to another repository is resolved again and its new head 
 
   await watcher.tick();
   assert.equal(calls.gitDirs, 2, "and a quiet tick after that resolves nothing");
+  assert.deepEqual(watcher.state().problems, []);
+});
+
+test("a linked worktree whose commondir moves to other shared refs is read afresh, with its .git and HEAD unchanged", async () => {
+  // The bug: the binding read the folder's `.git` file, but a linked worktree's branch refs live in the common
+  // directory its git directory's `commondir` names. Re-point that, leave the old common directory untouched, and
+  // the folder's own `.git`, its HEAD text and the old refs all stay the same, so nothing moved and the old
+  // repository's head was reported forever. Real pointer and ref files; only git's answers are injected, and they
+  // follow the same files, as git does.
+  const { headFingerprint } = await import("../lib/plugins/aify-dashboard/fingerprint.mjs");
+  const { grantedRoots, watchRootsFrom } = await import("../lib/watch-roots.mjs");
+  const root = mkdtempSync(join(tmpdir(), "aify-dash-common-"));
+  const meta = join(root, "meta");
+  const worktree = join(root, "worktree");
+  for (const dir of [meta, worktree, join(root, "common-one", "refs", "heads"), join(root, "common-two", "refs", "heads")]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(worktree, ".git"), `gitdir: ${meta}\n`);
+  writeFileSync(join(meta, "HEAD"), "ref: refs/heads/main\n");
+  writeFileSync(join(meta, "commondir"), "../common-one\n");
+  writeFileSync(join(root, "common-one", "refs", "heads", "main"), `${HEADS.A}\n`);
+  writeFileSync(join(root, "common-two", "refs", "heads", "main"), `${HEADS.B}\n`);
+
+  const commonNow = () => join(meta, readFileSync(join(meta, "commondir"), "utf8").trim());
+  const reports = [];
+  const slashed = worktree.replace(/\\/g, "/");
+  const watcher = new HeadWatcher({
+    api: {
+      watchList: async () => ({ hostKey: "h", projects: [{ projectId: "p", name: "n", root: { fsNamespace: "windows", path: slashed } }] }),
+      reportHead: async (report) => { reports.push(report.head); },
+    },
+    git: {
+      gitDirs: async () => ({ gitDir: meta, commonDir: commonNow() }),
+      head: async () => readFileSync(join(commonNow(), "refs", "heads", "main"), "utf8").trim(),
+    },
+    machineId: "win32:h",
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    reporter: "r",
+    fingerprint: headFingerprint,
+  });
+  await watcher.tick();
+  assert.deepEqual(reports, [HEADS.A]);
+
+  writeFileSync(join(meta, "commondir"), "../common-two\n");
+  await watcher.tick();
+  assert.deepEqual(reports, [HEADS.A, HEADS.B], "the head in the new common directory is reported, with the list row kept");
   assert.deepEqual(watcher.state().problems, []);
 });
 
