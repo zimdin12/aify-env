@@ -85,12 +85,16 @@ test("CONTAINMENT IS BY WHOLE SEGMENTS, case-folded on win32 only", () => {
 test("READ FROM ~/.aify/config.json, and an unreadable file grants nothing", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "aify-watch-roots-"));
   try {
-    assert.deepEqual(readWatchRoots({ home, env: {} }).roots, [], "no file");
+    assert.deepEqual(readWatchRoots({ home, env: {} }), { roots: [], problem: "" }, "no file is no list, and no fault");
     fs.mkdirSync(path.join(home, ".aify"));
     fs.writeFileSync(path.join(home, ".aify", "config.json"), grant(["C:/docker"]));
     assert.deepEqual(readWatchRoots({ home, env: {}, platform: "win32" }).roots, ["c:/docker"]);
-    const throwing = () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); };
-    assert.deepEqual(readWatchRoots({ home, env: {}, readFile: throwing, platform: "win32" }).roots, []);
+    for (const code of ["EACCES", "EBUSY", "EISDIR"]) {
+      const throwing = () => { throw Object.assign(new Error(code), { code }); };
+      const read = readWatchRoots({ home, env: {}, readFile: throwing, platform: "win32" });
+      assert.deepEqual(read.roots, [], `${code}: nothing granted`);
+      assert.match(read.problem, new RegExp(`unreadable \\(${code}\\)`), `${code}: and it says so, never reading as no file`);
+    }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
