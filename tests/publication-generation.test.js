@@ -31,6 +31,8 @@ test("A DAMAGED FILE keeps its leading digits, never going lower than they say; 
   }
   fs.writeFileSync(file, "9000\u0000garbage");
   assert.equal(advanceGeneration(file, { nowMs: 7000 }), 9001, "the digits are kept, so a clock behind them cannot reuse 9000");
+  fs.writeFileSync(file, `${"0".repeat(16)}9000\u0000garbage`);
+  assert.equal(advanceGeneration(file, { nowMs: 7000 }), 9001, "the whole run of digits, leading zeros and all (G2)");
 });
 
 test("NOTHING IS PUBLISHED UNDER A GENERATION THAT WAS NOT SAVED: a failed write, or an unreadable file, throws", () => {

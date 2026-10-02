@@ -26,6 +26,21 @@ test("A DURABLE WRITE that fails leaves the target as it was and no temporary fi
   assert.equal(fs.readFileSync(target, "utf8"), "new", "a guard that throws stops the rename");
 });
 
+test("A TEMPORARY FILE THAT FAILS PART WRITTEN is removed, and the write's own failure is the one thrown (G3)", () => {
+  const dir = scratch();
+  const target = path.join(dir, "t.txt");
+  fs.writeFileSync(target, "old");
+  const fsyncFailed = Object.assign(new Error("fsync failed"), { code: "EIO" });
+  const partWritten = (temp, text) => { fs.writeFileSync(temp, text.slice(0, 2)); throw fsyncFailed; };
+  assert.throws(() => writeFileDurably(target, "new", { writeTemp: partWritten }), (error) => error === fsyncFailed);
+  assert.deepEqual([fs.readFileSync(target, "utf8"), fs.readdirSync(dir)], ["old", ["t.txt"]], "no temporary file is left, the target is as it was");
+  const temp = path.join(dir, "held.tmp");
+  fs.mkdirSync(temp);
+  fs.writeFileSync(path.join(temp, "inside"), "x");
+  assert.throws(() => writeFileDurably(target, "new", { temp, writeTemp: () => { throw fsyncFailed; } }), (error) => error === fsyncFailed,
+    "a cleanup that cannot remove its temporary path does not replace the write's failure");
+});
+
 test("THE TWO STEPS the definition store composes itself: a durable temporary file, then a guarded rename", () => {
   const dir = scratch();
   const temp = path.join(dir, "x.tmp");
