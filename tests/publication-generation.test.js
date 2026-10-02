@@ -25,7 +25,7 @@ test("EACH BOOT SAVES A HIGHER GENERATION than the last, whatever the clock does
 test("A DAMAGED FILE keeps its leading digits, never going lower than they say; with none it is lost", () => {
   const file = generationFile(scratch(), "default");
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  for (const garbage of ["", "abc", "-5", "99999999999999999"]) {
+  for (const garbage of ["", "abc", "-5"]) {
     fs.writeFileSync(file, garbage);
     assert.equal(advanceGeneration(file, { nowMs: 7000 }), 7000, `${JSON.stringify(garbage)}: lost, the clock recovers it`);
   }
@@ -43,4 +43,19 @@ test("NOTHING IS PUBLISHED UNDER A GENERATION THAT WAS NOT SAVED: a failed write
   assert.throws(() => advanceGeneration(file, { nowMs: 6000, readFile: () => { throw denied; } }), /denied/,
     "a file that exists but cannot be read is not a lost one");
   assert.equal(advanceGeneration(file, { nowMs: 6000 }), 6000, "CONTROL: the next readable boot advances");
+});
+
+test("AN EXHAUSTED GENERATION THROWS BEFORE ANYTHING IS SAVED, and never restarts below what was used (G1)", () => {
+  const file = generationFile(scratch(), "default");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${Number.MAX_SAFE_INTEGER - 1}\n`);
+  assert.equal(advanceGeneration(file, { nowMs: 5000 }), Number.MAX_SAFE_INTEGER, "CONTROL: the last safe generation is still given");
+  assert.throws(() => advanceGeneration(file, { nowMs: 5000 }), RangeError, "nothing is above it");
+  assert.equal(fs.readFileSync(file, "utf8"), `${Number.MAX_SAFE_INTEGER}\n`, "the saved generation is untouched");
+  for (const past of ["9007199254740993\n", "99999999999999999\n"]) {
+    fs.writeFileSync(file, past);
+    assert.throws(() => advanceGeneration(file, { nowMs: 5000 }), RangeError, `${past.trim()}: past the limit is exhausted, not lost`);
+    assert.equal(fs.readFileSync(file, "utf8"), past, `${past.trim()}: left as it was`);
+  }
+  assert.throws(() => advanceGeneration(generationFile(scratch(), "x"), { nowMs: 2 ** 60 }), RangeError, "a clock past the limit");
 });
