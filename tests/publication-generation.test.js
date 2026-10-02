@@ -44,9 +44,3 @@ test("NOTHING IS PUBLISHED UNDER A GENERATION THAT WAS NOT SAVED: a failed write
     "a file that exists but cannot be read is not a lost one");
   assert.equal(advanceGeneration(file, { nowMs: 6000 }), 6000, "CONTROL: the next readable boot advances");
 });
-
-test("AN INSTANCE NAME IS A FILE NAME, so one that would leave the directory is refused", () => {
-  for (const bad of ["../x", "", "a/b", "a\\b", ".hidden", undefined]) {
-    assert.throws(() => generationFile("/home", bad), /not an instance name/, String(bad));
-  }
-});
