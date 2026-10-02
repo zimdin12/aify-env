@@ -31,6 +31,7 @@ test("A PID THE OS LISTS is alive with its creation in microseconds; one it does
 test("A PROBE THAT FAILS SAYS NOTHING: every pid is unanswered, never gone", () => {
   const unanswered = { alive: null, createdAtUs: null, commandLine: null };
   for (const [name, run] of [["non-zero exit", () => ({ status: 1, stdout: "" })], ["timeout", () => ({ error: new Error("ETIMEDOUT"), status: null })],
+    ["an empty list beside an error", () => ({ status: 0, stdout: "[]", stderr: "Get-CimInstance : Access denied" })],
     ["not JSON", () => ({ status: 0, stdout: "Get-CimInstance : Access denied" })], ["not a list", () => answered({ pid: 11 })],
     ["throws", () => { throw new Error("spawn EPERM"); }]]) {
     const answers = probeProcesses([11, 22], { platform: "win32", run });
