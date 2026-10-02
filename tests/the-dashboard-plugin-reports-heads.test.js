@@ -152,6 +152,30 @@ test("a failed refresh keeps the last good list, and a refused report is a probl
   assert.doesNotMatch(watcher.state().problems.join("\n"), /409/, "and the problem clears once it is taken");
 });
 
+test("a refused report clears once the folder is back where the dashboard last accepted it", { skip: onlyWindows }, async (t) => {
+  // The bug: the shortcut for "nothing moved since the accepted head" returned before the problem from the refused
+  // report was cleared, so the doctor row stayed FAILED for a folder that was fine again. Switching back to the first
+  // branch restores the exact fingerprint the dashboard accepted, which is what reaches the shortcut.
+  const s = setUp(t);
+  const dashboard = await fakeDashboard([s.watched]);
+  const watcher = await s.watcher(dashboard);
+  const first = git(s.watched, "rev-parse", "--abbrev-ref", "HEAD");
+  await watcher.tick();
+
+  git(s.watched, "checkout", "-q", "-b", "side");
+  git(s.watched, "commit", "-q", "--allow-empty", "-m", "on side");
+  dashboard.answers.head.push(409);
+  s.clock.at += TICK_MS;
+  await watcher.tick();
+  assert.match(watcher.state().problems.join("\n"), /409/, "the refusal is reported");
+
+  git(s.watched, "checkout", "-q", first);
+  s.clock.at += TICK_MS;
+  await watcher.tick();
+  assert.doesNotMatch(watcher.state().problems.join("\n"), /409/, "and cleared once the head is the accepted one again");
+  assert.equal(heads(dashboard.requests).length, 2, "the accepted head is not sent again");
+});
+
 test("with no grant, nothing is read, and the doctor is told what to add", { skip: onlyWindows }, async (t) => {
   // The bug: defaulting to some folder when the operator granted none.
   const s = setUp(t, { grant: grantedRoots(watchRootsFrom(null, "win32"), [], "win32") });

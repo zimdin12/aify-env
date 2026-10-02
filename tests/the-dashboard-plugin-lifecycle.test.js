@@ -71,6 +71,47 @@ test("a grant in any other shape than {roots, problems} reads nothing, and says 
   }
 });
 
+test("stop does not wait out a git process or a request: both are cancelled", async () => {
+  // The bug: stop awaited the whole tick, and a tick can wait on git (30 s each) and on HTTP (10 s each) folder after
+  // folder. The host stops plugins in reverse start order inside a shared budget, so a slow stop here used up the
+  // other plugins' chance to stop. Each case below hangs until it is cancelled, and stop is given one second.
+  const { GitReader } = await import("../lib/plugins/aify-dashboard/git-reader.mjs");
+  const listed = { hostKey: "h", projects: [{ projectId: "p", name: "n", root: { fsNamespace: "windows", path: "C:/w/proj" } }] };
+  const hangUntilAborted = (signal, onAbort) => new Promise((resolve, reject) => {
+    signal?.addEventListener("abort", () => { onAbort?.(); reject(Object.assign(new Error("aborted"), { name: "AbortError" })); });
+  });
+  const cases = {
+    "a git process": {
+      execFile: (file, args, options, callback) => { hangUntilAborted(options.signal).catch((error) => callback(Object.assign(error, { code: "ABORT_ERR" }), "", "")); },
+      fetch: async () => new Response(JSON.stringify(listed), { status: 200 }),
+    },
+    "a request": {
+      execFile: (file, args, options, callback) => callback(null, "C:/git/x\nC:/git/x\n", ""),
+      fetch: async (url, options) => hangUntilAborted(options.signal),
+    },
+  };
+  for (const [name, { execFile, fetch }] of Object.entries(cases)) {
+    let started = false;
+    const plugin = createDashboardPlugin(
+      { ...entry, service: entry, machineId: "win32:h", watchRoots: async () => ({ roots: ["c:/w"], problems: [] }) },
+      { fetch: async (...args) => { started = true; return fetch(...args); },
+        git: new GitReader({ execFile: (...args) => { started = true; return execFile(...args); } }) },
+    );
+    await plugin.start(host);
+    for (let waited = 0; !started; waited += 1) {
+      assert.ok(waited < 500, `${name}: nothing started`);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const outcome = await Promise.race([plugin.stop().then(() => "stopped"), new Promise((resolve) => setTimeout(() => resolve("still waiting"), 1000))]);
+    assert.equal(outcome, "stopped", `${name}: stop returned within a second`);
+    assert.equal(plugin.state().phase, "stopped");
+    // The cancellation is the stop, not a fault in the folder or the list: a doctor row after a clean shutdown
+    // would send somebody looking for a problem that is not there.
+    assert.deepEqual(plugin.state().problems, [], `${name}: the cancelled work recorded no problem`);
+  }
+});
+
 test("a stop that arrives during a tick ends the loop, and detach always detaches", async () => {
   // The bug: the tick that was running when stop arrived schedules the next one anyway, so a detached
   // plugin keeps calling the dashboard. The clock jumps a refresh interval per read, so every tick
