@@ -21,6 +21,7 @@ test("NOTHING IS GRANTED by a missing, empty, unparseable or malformed list; onl
   for (const [text, label, fault] of [
     [null, "no file", false], ["", "empty file", false], [JSON.stringify({ version: 1 }), "no key", false],
     [grant([]), "an empty list", false], ["{not json", "not JSON", true], [grant("C:/docker"), "a string, not a list", true],
+    ["[]", "a list, not an object", true], ["null", "null", true], ["7", "a bare number", true], ['"x"', "a bare string", true],
   ]) {
     const read = watchRootsFrom(text, "win32");
     assert.deepEqual(read.roots, [], label);
@@ -58,6 +59,10 @@ test("UNREADABLE DEFINITIONS GRANT NO WORKSPACE, and with nothing at all the rea
   const store = { list: async () => ({ definitions: [reading("a", "C:/docker/a")] }) };
   assert.deepEqual((await readGrantedRoots({ definitions: store, readFile: () => "", platform: "win32" })).roots, ["c:/docker/a"],
     "CONTROL: a readable store grants its workspace");
+  const partly = { list: async () => ({ definitions: [reading("a", "C:/docker/a")], unreadable: ["locked-one"] }) };
+  assert.deepEqual(await readGrantedRoots({ definitions: partly, readFile: () => "", platform: "win32" }),
+    { roots: ["c:/docker/a"], problems: ["agent locked-one: its definition is unreadable, so its workspace is not granted"] },
+    "a definition the store could not read is named, and the readable one still grants");
 });
 
 test("ONE INVALID ENTRY REFUSES THE WHOLE LIST rather than granting the rest", () => {
