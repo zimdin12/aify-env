@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { descriptorFile, parseDescriptor, removeOwnDescriptor, writeDescriptor } from "../lib/instance-descriptor.mjs";
+import { descriptorFile, parseDescriptor, writeDescriptor } from "../lib/instance-descriptor.mjs";
 import { isLoopbackEndpoint } from "../lib/serving-endpoint.mjs";
 
 const home = () => fs.mkdtempSync(path.join(os.tmpdir(), "aify-descriptor-"));
@@ -22,6 +22,7 @@ test("AN INSTANCE WRITES WHERE IT LISTENS, and a hook reads it back", () => {
 test("A DESCRIPTOR AIMS ONLY AT THIS HOST, and every field is what an instance writes", () => {
   for (const [over, problem] of [[{ url: "http://10.0.0.5:8802" }, /loopback/], [{ url: "http://localhost:8802" }, /loopback/],
     [{ url: "https://127.0.0.1:8802" }, /loopback/], [{ url: "http://127.0.0.1:8802/path" }, /loopback/], [{ instance: "" }, /instance/],
+    [{ url: ["http://127.0.0.1:8802"] }, /loopback/], [{ url: { toString: "x" } }, /loopback/],
     [{ pid: 0 }, /pid/], [{ pid: "4242" }, /pid/], [{ startedAt: "yesterday" }, /startedAt/]]) {
     const parsed = parseDescriptor(JSON.stringify({ ...mine, ...over }));
     assert.equal(parsed.ok, false, JSON.stringify(over));
@@ -39,16 +40,9 @@ test("AN INSTANCE NEVER WRITES A DESCRIPTOR IT WOULD REFUSE TO READ", () => {
   assert.equal(fs.existsSync(file), false);
 });
 
-test("A CLEAN EXIT REMOVES ONLY ITS OWN: a successor's descriptor, or one it cannot read, stays", () => {
+test("A SUCCESSOR'S DESCRIPTOR REPLACES ITS PREDECESSOR'S, and nothing removes one", () => {
   const file = descriptorFile(home(), "default");
-  writeDescriptor(file, { ...mine, pid: 5000 });
-  assert.equal(removeOwnDescriptor(file, mine.pid), false, "a successor wrote it");
-  assert.equal(fs.existsSync(file), true);
-  fs.writeFileSync(file, "{");
-  assert.equal(removeOwnDescriptor(file, mine.pid), false, "unreadable: left alone");
-  assert.equal(fs.existsSync(file), true);
   writeDescriptor(file, mine);
-  assert.equal(removeOwnDescriptor(file, mine.pid), true, "CONTROL: its own is removed");
-  assert.equal(fs.existsSync(file), false);
-  assert.equal(removeOwnDescriptor(file, mine.pid), false, "already gone");
+  writeDescriptor(file, { ...mine, pid: 5000, url: "http://127.0.0.1:50000" });
+  assert.deepEqual(parseDescriptor(fs.readFileSync(file, "utf8")).descriptor, { ...mine, pid: 5000, url: "http://127.0.0.1:50000" });
 });
