@@ -44,6 +44,8 @@ async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
     // NO HERDR TO OPEN A SPACE IN, which is what an ordinary daemon has. What the opener does when
     // there IS one is pinned in `a-started-worker-gets-a-herdr-space.test.js`.
     paneOpener: null,
+    // AN ORDINARY DAEMON, not a herdr's dedicated instance, which is what `shared.dedicated` reads.
+    instanceContext: null,
     currentAdvertisementBody: () => ({ hostname: facts.hostname, kind: "test" }),
     hostIdentityFacts: identity, hostname: () => facts.hostname,
     hostIsWsl: () => facts.isWsl, existsSync: facts.exists,

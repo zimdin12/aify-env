@@ -748,6 +748,9 @@ server.listen(port, HOST, async () => {
       windows: process.platform === "win32",
       definitions: definitionStore,
       installedHarnesses: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
+      // A herdr's DEDICATED instance starts plugins too, so a plugin that must run once per host (aify-dashboard's
+      // git watcher) asks this and declines when it is true.
+      dedicated: instanceContext !== null,
     };
     const outcome = await startServicePlugins({ registry: servicePlugins, host, services: readServices(readFileSync(REGISTRY_FILE, "utf8")), build: pluginsForServices, shared });
     for (const line of bootstrapReport(outcome)) process.stderr.write(`[aify-env] ${line}${chr10}`);
