@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { readWatchRoots, watchRootsFrom, withinWatchRoots } from "../lib/watch-roots.mjs";
+import { grantedRoots, readGrantedRoots, readWatchRoots, watchRootsFrom, withinWatchRoots } from "../lib/watch-roots.mjs";
 
 const grant = (roots) => JSON.stringify({ version: 1, transport: { localSocket: true }, watchRoots: roots });
 
@@ -17,15 +17,47 @@ test("A GRANT IS READ, normalized to one spelling per folder", () => {
   assert.deepEqual(watchRootsFrom(grant(["/home/me/src/"]), "linux"), { roots: ["/home/me/src"], problem: "" });
 });
 
-test("NOTHING IS GRANTED by a missing, empty, unparseable or malformed list", () => {
-  for (const [text, label] of [
-    [null, "no file"], ["", "empty file"], ["{not json", "not JSON"],
-    [JSON.stringify({ version: 1 }), "no key"], [grant("C:/docker"), "a string, not a list"], [grant([]), "an empty list"],
+test("NOTHING IS GRANTED by a missing, empty, unparseable or malformed list; only a malformed one is a fault", () => {
+  for (const [text, label, fault] of [
+    [null, "no file", false], ["", "empty file", false], [JSON.stringify({ version: 1 }), "no key", false],
+    [grant([]), "an empty list", false], ["{not json", "not JSON", true], [grant("C:/docker"), "a string, not a list", true],
   ]) {
     const read = watchRootsFrom(text, "win32");
     assert.deepEqual(read.roots, [], label);
-    assert.ok(read.problem, `${label}: the reason is stated`);
+    assert.equal(Boolean(read.problem), fault, `${label}: ${read.problem}`);
   }
+});
+
+const reading = (id, workspace, problems = []) => ({ id, problems, agent: { id, workspace } });  // an invalid one keeps a stale body here, so only its problems may stop the grant
+const none = { roots: [], problem: "" };
+
+test("A DEFINED AGENT'S WORKSPACE IS GRANTED, beside the explicit list", () => {
+  const granted = grantedRoots({ roots: ["c:/extra"], problem: "" },
+    [reading("a", "C:/Docker/aify-project-graph"), reading("b", "c:/docker/aify-project-graph/")], "win32");
+  assert.deepEqual(granted, { roots: ["c:/extra", "c:/docker/aify-project-graph"], problems: [] });
+});
+
+test("AN INVALID DEFINITION GRANTS NOTHING, and a relative workspace is named, not granted", () => {
+  const granted = grantedRoots(none, [reading("bad", "C:/secret", ["agent.model: type"]), reading("rel", "work/x")], "win32");
+  assert.deepEqual(granted.roots, []);
+  assert.deepEqual(granted.problems, ['agent rel: workspace "work/x" is not an absolute path']);
+});
+
+test("A MALFORMED LIST VOIDS ONLY ITSELF: the workspaces still grant, and the fault is reported", () => {
+  const listed = watchRootsFrom(grant(["C:/docker", "relative"]), "win32");
+  const granted = grantedRoots(listed, [reading("a", "D:/work/a")], "win32");
+  assert.deepEqual(granted.roots, ["d:/work/a"]);
+  assert.match(granted.problems[0], /not an absolute path/);
+});
+
+test("UNREADABLE DEFINITIONS GRANT NO WORKSPACE, and with nothing at all the reason is stated", async () => {
+  const unreadable = await readGrantedRoots({ definitions: { list: async () => { throw new Error("locked"); } }, readFile: () => "", platform: "win32" });
+  assert.deepEqual(unreadable, { roots: [], problems: ["agent definitions are unreadable, so no workspace is granted"] });
+  const empty = await readGrantedRoots({ definitions: { list: async () => ({ definitions: [] }) }, readFile: () => "", platform: "win32" });
+  assert.deepEqual(empty, { roots: [], problems: ["nothing is granted: no agent is defined and watchRoots is empty"] });
+  const store = { list: async () => ({ definitions: [reading("a", "C:/docker/a")] }) };
+  assert.deepEqual((await readGrantedRoots({ definitions: store, readFile: () => "", platform: "win32" })).roots, ["c:/docker/a"],
+    "CONTROL: a readable store grants its workspace");
 });
 
 test("ONE INVALID ENTRY REFUSES THE WHOLE LIST rather than granting the rest", () => {
