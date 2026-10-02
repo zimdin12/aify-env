@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { DashboardApi } from "../lib/plugins/aify-dashboard/dashboard-api.mjs";
 import { GitReader } from "../lib/plugins/aify-dashboard/git-reader.mjs";
 import { HeadWatcher, LIST_EVERY_MS, TICK_MS } from "../lib/plugins/aify-dashboard/head-watcher.mjs";
-import { watchRootsFrom } from "../lib/watch-roots.mjs";
+import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
 
 const onlyWindows = process.platform !== "win32" && "the dashboard resolves Windows folders only, so this slice watches only them";
 const MACHINE = "win32:test-host";
@@ -79,7 +79,8 @@ function setUp(t, { grant } = {}) {
         api: new DashboardApi({ endpoint: dashboard.endpoint, credential: async () => credential.value }),
         git: new GitReader({ execFile: counting }),
         machineId: MACHINE,
-        watchRoots: async () => grant ?? watchRootsFrom(JSON.stringify({ watchRoots: [granted] }), "win32"),
+        // The grant as aify-env builds it: the explicit list beside the (here, no) agent workspaces.
+        watchRoots: async () => grant ?? grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [granted] }), "win32"), [], "win32"),
         reporter: "aify-env:win32:test-host:one",
         now: () => clock.at,
       });
@@ -153,13 +154,13 @@ test("a failed refresh keeps the last good list, and a refused report is a probl
 
 test("with no grant, nothing is read, and the doctor is told what to add", { skip: onlyWindows }, async (t) => {
   // The bug: defaulting to some folder when the operator granted none.
-  const s = setUp(t, { grant: watchRootsFrom(null, "win32") });
+  const s = setUp(t, { grant: grantedRoots(watchRootsFrom(null, "win32"), [], "win32") });
   const dashboard = await fakeDashboard([s.watched]);
   const watcher = await s.watcher(dashboard);
   await watcher.tick();
   assert.equal(s.spawns.length, 0);
   assert.equal(heads(dashboard.requests).length, 0);
   const problems = watcher.state().problems.join("\n");
-  assert.match(problems, /no watchRoots granted in ~\/\.aify\/config\.json/);
+  assert.match(problems, /nothing is granted: no agent is defined and watchRoots is empty/);
   assert.match(problems, /proj is not read: no folder is granted/);
 });

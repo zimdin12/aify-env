@@ -58,6 +58,19 @@ test("an aify-env that offers no watchRoots grants nothing, and the state says s
   assert.equal(plugin.state().phase, "stopped");
 });
 
+test("a grant in any other shape than {roots, problems} reads nothing, and says so", async () => {
+  // The bug: the grant's shape moved once (a single `problem` became a `problems` list), and taking the
+  // roots while reading the old field dropped every reason in silence.
+  for (const grant of [{ roots: ["c:/"], problem: "" }, { roots: "c:/", problems: [] }, null]) {
+    const recorded = recordingFetch();
+    const plugin = createDashboardPlugin({ ...entry, service: entry, machineId: "win32:h", watchRoots: async () => grant }, { fetch: recorded.fetch });
+    await plugin.start(host);
+    await settle();
+    await plugin.stop();
+    assert.match(plugin.state().problems.join("\n"), /not \{roots, problems\} lists, so no folder is read/, JSON.stringify(grant));
+  }
+});
+
 test("a stop that arrives during a tick ends the loop, and detach always detaches", async () => {
   // The bug: the tick that was running when stop arrived schedules the next one anyway, so a detached
   // plugin keeps calling the dashboard. The clock jumps a refresh interval per read, so every tick
@@ -70,7 +83,7 @@ test("a stop that arrives during a tick ends the loop, and detach always detache
   };
   let clock = 0;
   const plugin = createDashboardPlugin(
-    { ...entry, service: entry, machineId: "win32:h", watchRoots: async () => ({ roots: [], problem: "none" }) },
+    { ...entry, service: entry, machineId: "win32:h", watchRoots: async () => ({ roots: [], problems: ["none"] }) },
     { fetch, tickMs: 5, now: () => (clock += LIST_EVERY_MS) },
   );
   await plugin.start(host);
