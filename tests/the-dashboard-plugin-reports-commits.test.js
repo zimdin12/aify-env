@@ -10,13 +10,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile as nodeExecFile, execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DashboardApi } from "../lib/plugins/aify-dashboard/dashboard-api.mjs";
-import { GitReader } from "../lib/plugins/aify-dashboard/git-reader.mjs";
+import { GitReader, parseLog } from "../lib/plugins/aify-dashboard/git-reader.mjs";
 import { HeadWatcher, TICK_MS } from "../lib/plugins/aify-dashboard/head-watcher.mjs";
 import { batchesOf, BATCH_SIZE } from "../lib/plugins/aify-dashboard/range-reporter.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
@@ -177,9 +177,10 @@ test("a refused range is retried from the cursor the dashboard gave, without rea
   assert.equal(logRuns(s.spawns), 1, "the range's history was read once");
 });
 
-test("a range the dashboard superseded leaves coverage short, which is shown and tried again", { skip: onlyWindows }, async (t) => {
-  // The bug: the range completes as superseded (the cursor moved while it was sent), coverage stays behind the
-  // head, and the folder reads as fine, so nothing is tried again until the head next moves.
+test("a range the dashboard superseded leaves coverage short, which is shown and tried again from the commits already read", { skip: onlyWindows }, async (t) => {
+  // The bugs: the range completes as superseded (the cursor moved while it was sent), coverage stays behind the
+  // head, and the folder reads as fine, so nothing is tried again until the head next moves. Or it is tried again,
+  // and the same history between the same two ids is looked up and read a second time.
   const s = await setUp(t);
   await s.watcher.tick();
   git(s.repo, "commit", "-q", "--allow-empty", "-m", "second");
@@ -190,6 +191,93 @@ test("a range the dashboard superseded leaves coverage short, which is shown and
   await s.tick();
   assert.equal(s.dashboard.state.ackedHead, git(s.repo, "rev-parse", "HEAD"), "the next tick covered it");
   assert.deepEqual(s.watcher.state().problems, []);
+  assert.equal(logRuns(s.spawns), 1, "the range's history was read once");
+  assert.equal(s.spawns.filter((args) => args.some((arg) => arg.endsWith("^{commit}"))).length, 1, "the accepted head was looked up once");
+  assert.equal(s.spawns.filter((args) => args[0] === "log" && args[1] === "-1").length, 1, "its place in the history was decided once");
+});
+
+test("file names and subjects arrive exactly as git holds them", { skip: onlyWindows }, async (t) => {
+  // The bugs: git quotes a name outside ASCII ("na\303\257ve.txt") unless told not to, a trimmed line loses a
+  // name's leading space, and a subject holding the character the fields were split on is cut there.
+  const s = await setUp(t);
+  await s.watcher.tick();
+  const names = ["na\u00efve.txt", " leading space.txt", "with space.txt"];
+  for (const name of names) writeFileSync(join(s.repo, name), `${name}\n`);
+  git(s.repo, "add", "-A");
+  const subject = "split \x1f here, \x1e there, \"quoted\" and caf\u00e9";
+  git(s.repo, "commit", "-q", "-m", subject);
+  await s.tick();
+  assert.deepEqual(s.watcher.state().problems, []);
+  assert.equal(s.dashboard.state.stored.length, 1);
+  assert.deepEqual([...s.dashboard.state.stored[0].files].sort(), [...names].sort());
+  assert.equal(s.dashboard.state.stored[0].subject, subject);
+});
+
+test("a log that does not parse is refused whole, never read as shorter subjects or extra files", () => {
+  // The bug: a record that does not fit the framing is read anyway, and the dashboard stores a subject cut short, or
+  // the next commit's id as a file name. Each row breaks one thing the parser checks.
+  const sha = "a".repeat(40);
+  const good = `\0${sha}\x001790000000\0subject\0\nfile.txt\0`;
+  assert.deepEqual(parseLog(good), [{ sha, committedAt: 1_790_000_000_000, subject: "subject", files: ["file.txt"] }]);
+  assert.deepEqual(parseLog(""), []);
+  const broken = {
+    "no closing NUL": good.slice(0, -1),
+    "something before the first NUL": `junk${good}`,
+    "an id that is not one": good.replace(sha, "not-an-id"),
+    "a time that is not one": good.replace("1790000000", "soon"),
+    "a record cut after its time": `\0${sha}\x001790000000\0`,
+    "a file list git did not open": `\0${sha}\x001790000000\0subject\0file.txt\0`,
+    "an empty file name": `\0${sha}\x001790000000\0subject\0\n\0`,
+  };
+  for (const [what, text] of Object.entries(broken)) assert.throws(() => parseLog(text), /git log printed/, what);
+});
+
+test("an accepted head is missing only when git says so: a folder that is not a repository is a failure", { skip: onlyWindows }, async () => {
+  // The bug: a non-zero exit read as "this commit is missing". A folder that stopped being a repository then sends a
+  // resync, and the dashboard records the history between as a gap the folder never lost.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-missing-")));
+  const repo = join(root, "proj");
+  mkdirSync(repo);
+  git(repo, "init", "-q");
+  git(repo, "commit", "-q", "--allow-empty", "-m", "first");
+  const present = git(repo, "rev-parse", "HEAD");
+  const reader = new GitReader({ env: { ...process.env, GIT_CEILING_DIRECTORIES: root } });
+  assert.equal(await reader.hasCommit(repo, present), true);
+  assert.equal(await reader.hasCommit(repo, "f".repeat(40)), false);
+  renameSync(join(repo, ".git"), join(repo, ".git-parked"));
+  await assert.rejects(reader.hasCommit(repo, present), /not a git repository/);
+});
+
+test("only exit 1 with nothing on stderr reads as missing", async () => {
+  // Each limb of the rule, alone: git exits 1 and says nothing for a commit it cannot find (measured, git 2.54).
+  const answering = (code, stderr) => new GitReader({ execFile: (file, args, options, callback) => callback(Object.assign(new Error("exited"), { code }), "", stderr) });
+  const id = "f".repeat(40);
+  assert.equal(await answering(1, "").hasCommit("C:/x", id), false);
+  await assert.rejects(answering(128, "").hasCommit("C:/x", id), /failed/, "another exit, silent");
+  await assert.rejects(answering(1, "error: unable to read objects\n").hasCommit("C:/x", id), /unable to read/, "exit 1 that says why");
+});
+
+test("a failure to look up the accepted head sends no resync and is shown", { skip: onlyWindows }, async (t) => {
+  // The bug, end to end: the lookup fails for a reason that is not absence, the plugin reads it as a missing
+  // commit, and the dashboard is told to record a gap.
+  const s = await setUp(t);
+  await s.watcher.tick();
+  git(s.repo, "commit", "-q", "--allow-empty", "-m", "second");
+  const failing = new GitReader({ execFile: (file, args, options, callback) => (args.some((arg) => arg.endsWith("^{commit}"))
+    ? callback(Object.assign(new Error("exited"), { code: 128 }), "", "fatal: unable to read objects\n")
+    : nodeExecFile(file, args, options, callback)) });
+  const watcher = new HeadWatcher({
+    api: new DashboardApi({ endpoint: s.dashboard.endpoint, credential: async () => "k" }),
+    git: failing,
+    machineId: MACHINE,
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [join(s.repo, "..")] }), "win32"), [], "win32"),
+    reporter: REPORTER,
+    now: () => 1_000_000,
+  });
+  await watcher.tick();
+  assert.match(watcher.state().problems.join("\n"), /unable to read objects/);
+  assert.deepEqual(s.dashboard.state.gaps, [], "no gap was recorded");
+  assert.equal(s.dashboard.sent.filter((r) => r.url.endsWith("/resync")).length, 0);
 });
 
 test("going backwards is a resync named reset; unrelated history is one named unknown; coverage follows the head", { skip: onlyWindows }, async (t) => {
