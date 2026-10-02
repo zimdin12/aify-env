@@ -1,11 +1,11 @@
-// The one derivation of an agent's state (lib/agent-state.mjs; 0.9 P0 C3). The two ports run the shared table in
-// tests/fixtures/agent-state-law.json, which aify-comms also runs through the Python they replace.
+// The one derivation of an agent's state (lib/agent-state.mjs; 0.9 P0 C3). The turn law runs the shared table in
+// tests/fixtures/agent-state-law.json, which aify-comms also runs through the Python it replaces.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
 
-import { acceptTurnEvent, deriveAgentState, SCREEN_FRESH_MS, STRICT_TURN_MS, turnIsStillLive } from "../lib/agent-state.mjs";
+import { deriveAgentState, SCREEN_FRESH_MS, STRICT_TURN_MS, turnIsStillLive } from "../lib/agent-state.mjs";
 
 const LAW = JSON.parse(fs.readFileSync(new URL("./fixtures/agent-state-law.json", import.meta.url), "utf8"));
 const at = (ago) => (ago === null ? 0 : (LAW.now - ago) * 1000);
@@ -20,21 +20,6 @@ test("THE TURN LAW agrees with the shared table, case by case", () => {
   }
 });
 
-test("HOOK ORDERING agrees with the shared table, case by case", () => {
-  for (const row of LAW.hookOrder) {
-    const last = row.last ? { at: row.last.at, lifetime: row.last.owner } : null;
-    const event = { firedAtUs: row.event.at ?? undefined, lifetime: row.event.owner, kind: row.event.kind };
-    assert.equal(acceptTurnEvent(last, event, row.current).accept, row.accept, row.name);
-  }
-});
-
-test("AN ACCEPTED EVENT BECOMES THE LAST ONE, and a refused one leaves it", () => {
-  const first = acceptTurnEvent(null, { firedAtUs: 100, lifetime: "a", kind: "turn-start" }, "a");
-  assert.deepEqual(first.last, { at: 100, lifetime: "a" });
-  const refused = acceptTurnEvent(first.last, { firedAtUs: 50, lifetime: "a", kind: "turn-end" }, "a");
-  assert.deepEqual(refused, { accept: false, last: first.last, reason: "out-of-order" });
-});
-
 const base = { stoppedByOperator: false, definition: "valid", mode: "managed", process: "running", verified: "yes",
   startingInWindow: false, conflict: false, busy: false, awaitingInput: false, screen: null, backgroundShells: 0 };
 const derive = (over) => deriveAgentState({ ...base, ...over });
@@ -47,6 +32,9 @@ test("THE WORD follows C3's table, first match wins", () => {
     [{ definition: "invalid", process: "none" }, "misconfigured", "config"],
     [{ definition: "unavailable", process: "none" }, "misconfigured", "config"],
     [{ definition: "invalid" }, "idle", "at-prompt"],
+    [{ definition: "invalid", verified: "unknown" }, "unknown", "identity-unknown"],
+    [{ definition: "unavailable", process: "unknown" }, "unknown", "identity-unknown"],
+    [{ definition: "invalid", verified: "no" }, "misconfigured", "config"],
     [{ process: "unknown" }, "unknown", "identity-unknown"],
     [{ verified: "unknown", busy: true }, "unknown", "identity-unknown"],
     [{ screen: fresh("working") }, "working", "screen"],

@@ -1,5 +1,5 @@
 {
-  "about": "One table, run twice: by tests/agent-state.test.js through lib/agent-state.mjs, and by aify-comms service/tests/test_the_ported_turn_law_agrees.py through the Python it ports. Times are seconds before a fixed now (null = no timestamp); event times are microseconds. 'owner' is a lifetime here and a registered machine id in aify-comms.",
+  "about": "One table, run twice: by tests/agent-state.test.js and tests/turn-events.test.js, and by aify-comms service/tests/test_the_ported_turn_law_agrees.py through the Python they port. Times are seconds before a fixed now (null = no timestamp); event times are microseconds. 'owner' is a lifetime here and a registered machine id in aify-comms. In hookOrder, 'accept' is today's Python answer and 'aifyEnv' is aify-env's (admission, then ordering within one lifetime); a row where they differ names why in 'divergence'.",
   "now": 1790950000.0,
   "strictSeconds": 1800,
   "turnLaw": [
@@ -20,15 +20,16 @@
     {"name": "unverified, a row from before the start anchor uses its touch", "startedAgo": null, "touchedAgo": 60, "renewable": false, "live": true}
   ],
   "hookOrder": [
-    {"name": "no time: outside the ordering", "last": null, "event": {"at": null, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": true},
-    {"name": "the first event", "last": null, "event": {"at": 100, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": true},
-    {"name": "later, same owner", "last": {"at": 100, "owner": "a"}, "event": {"at": 200, "owner": "a", "kind": "turn-end"}, "current": "a", "accept": true},
-    {"name": "earlier, same owner: a slow start after its own end", "last": {"at": 200, "owner": "a"}, "event": {"at": 100, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": false},
-    {"name": "a tie goes to the end", "last": {"at": 200, "owner": "a"}, "event": {"at": 200, "owner": "a", "kind": "turn-end"}, "current": "a", "accept": true},
-    {"name": "a tie refuses a start", "last": {"at": 200, "owner": "a"}, "event": {"at": 200, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": false},
-    {"name": "the first event of a new owner, whatever its clock", "last": {"at": 900, "owner": "a"}, "event": {"at": 100, "owner": "b", "kind": "turn-start"}, "current": "b", "accept": true},
-    {"name": "a delayed event from a previous owner", "last": {"at": 100, "owner": "b"}, "event": {"at": 900, "owner": "a", "kind": "turn-end"}, "current": "b", "accept": false},
-    {"name": "an event naming no owner is not refused by the owner check", "last": {"at": 100, "owner": "a"}, "event": {"at": 200, "owner": "", "kind": "turn-end"}, "current": "a", "accept": true},
-    {"name": "no owner registered yet", "last": null, "event": {"at": 100, "owner": "a", "kind": "turn-start"}, "current": "", "accept": true}
+    {"name": "no time: outside the ordering", "last": null, "event": {"at": null, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": true, "aifyEnv": {"applied": false, "reason": "no-timestamp"}, "divergence": "every 0.9 sender stamps firedAtUs; an end that cannot be ordered could close a newer turn"},
+    {"name": "the first event", "last": null, "event": {"at": 100, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": true, "aifyEnv": {"applied": true, "reason": "current:first"}},
+    {"name": "later, same owner", "last": {"at": 100, "owner": "a"}, "event": {"at": 200, "owner": "a", "kind": "turn-end"}, "current": "a", "accept": true, "aifyEnv": {"applied": true, "reason": "current:later"}},
+    {"name": "earlier, same owner: a slow start after its own end", "last": {"at": 200, "owner": "a"}, "event": {"at": 100, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": false, "aifyEnv": {"applied": false, "reason": "out-of-order"}},
+    {"name": "a tie goes to the end", "last": {"at": 200, "owner": "a"}, "event": {"at": 200, "owner": "a", "kind": "turn-end"}, "current": "a", "accept": true, "aifyEnv": {"applied": true, "reason": "current:end-wins-tie"}},
+    {"name": "a tie refuses a start", "last": {"at": 200, "owner": "a"}, "event": {"at": 200, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": false, "aifyEnv": {"applied": false, "reason": "out-of-order"}},
+    {"name": "the first event of a new owner, whatever its clock", "last": {"at": 900, "owner": "a"}, "event": {"at": 100, "owner": "b", "kind": "turn-start"}, "current": "b", "accept": true, "aifyEnv": {"applied": true, "reason": "current:first"}},
+    {"name": "a delayed event from a previous owner", "last": {"at": 100, "owner": "b"}, "event": {"at": 900, "owner": "a", "kind": "turn-end"}, "current": "b", "accept": false, "aifyEnv": {"applied": false, "reason": "not-current"}},
+    {"name": "an event naming no owner is not refused by the owner check", "last": {"at": 100, "owner": "a"}, "event": {"at": 200, "owner": "", "kind": "turn-end"}, "current": "a", "accept": true, "aifyEnv": {"applied": false, "reason": "unbound"}, "divergence": "C4 adopts a resident only from its lifetime record, so an event naming none has no turn here (review of 591d172f, R1)"},
+    {"name": "no owner registered yet", "last": null, "event": {"at": 100, "owner": "a", "kind": "turn-start"}, "current": "", "accept": true, "aifyEnv": {"applied": false, "reason": "not-current"}, "divergence": "C4: no verified lifetime, no turn"},
+    {"name": "an unbound end earlier than the bound turn's last event (R1)", "last": {"at": 200, "owner": "new"}, "event": {"at": 100, "owner": "", "kind": "turn-end"}, "current": "new", "accept": true, "aifyEnv": {"applied": false, "reason": "unbound"}, "divergence": "today's owner-change branch takes it as the first event of a new owner and closes the bound turn"}
   ]
 }
