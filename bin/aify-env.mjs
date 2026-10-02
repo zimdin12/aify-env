@@ -52,6 +52,7 @@ import { fileURLToPath } from "node:url";
 import { handleRequest } from "../lib/protocol.mjs";
 import { startInputSocket } from "../lib/input-socket-start.mjs";
 import { readHostConfig } from "../lib/host-config.mjs";
+import { readWatchRoots } from "../lib/watch-roots.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
 import { daemonShutdownHooks } from "../lib/shutdown-hooks.mjs";
@@ -751,6 +752,7 @@ server.listen(port, HOST, async () => {
       // A herdr's DEDICATED instance starts plugins too, so a plugin that must run once per host (aify-dashboard's
       // git watcher) asks this and declines when it is true.
       dedicated: instanceContext !== null,
+      watchRoots: async () => readWatchRoots(),  // the folders a plugin may read: a grant, fails closed (lib/watch-roots.mjs)
     };
     const outcome = await startServicePlugins({ registry: servicePlugins, host, services: readServices(readFileSync(REGISTRY_FILE, "utf8")), build: pluginsForServices, shared });
     for (const line of bootstrapReport(outcome)) process.stderr.write(`[aify-env] ${line}${chr10}`);
