@@ -123,6 +123,12 @@ when you install it. Nothing here registers anything; if the file is missing, th
 yet, and the doctor reports it as such rather than as a fault. Point `AIFY_SERVICE_REGISTRY` elsewhere
 to use a different one.
 
+A running aify-env follows the registry: a new entry starts its plugin, and a removed or re-pointed one
+detaches it. One edit it does not follow: changing only WHERE a service's key comes from (`credentialRef`
+or `keyEnv`) while the endpoint stays the same keeps the running plugin on the key source it started
+with, until aify-env restarts. Rotating the key's value inside the same file or variable is picked up
+without a restart.
+
 ### What it leaves behind, and what it does not
 
 Every process it starts is recorded in `~/.aify/env-processes.json` (`AIFY_ENV_PROCESS_RECORD` to move
