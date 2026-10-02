@@ -4,7 +4,7 @@ The environment tier: **one process on a host that owns the processes and termin
 one service can start agents on that machine without two spawners fighting over the same PTYs.
 
 Nothing here knows what a message is, what a dispatch is, or whether an agent is thinking. It knows
-which processes it started and whether they are alive. **Alive is not working** — status belongs to
+which agents this host defines, which processes it started, and whether they are alive. **Alive is not working** — status belongs to
 whatever service owns agent semantics, and deriving it in two places is how two answers start
 disagreeing.
 
@@ -132,6 +132,37 @@ tree, because a launcher is a script and the agent is its child.
 
 One case it cannot fix and does not hide: if a launcher dies before the agent it started, the agent is
 orphaned with no parent, and no pid-tree walk can find it from the record.
+
+## The agents this host defines (0.8)
+
+Which agents exist on this host, and how each one launches, is a **definition**: one JSON file per
+agent in `~/.aify/agent-definitions/` (`AIFY_AGENT_DEFINITIONS_DIR` to move it). A definition is the
+desired state you set: name, role, harness, mode, workspace, model, effort, instructions, herdr space
+and extra environment. It holds nothing live; sessions, messages and status stay in the services.
+
+```bash
+aify-env agents list
+aify-env agents show <id>
+aify-env agents set <id> role=reviewer model=gpt-5.5 effort=high
+aify-env agents import            # what it would define from the agents your services know; --write does it
+```
+
+- **One writer.** Only the store behind `aify-env agents` writes those files, under a lock, with every
+  write recoverable after a crash. `agents unlock` clears a lock whose writer is gone; `agents recover`
+  settles an interrupted write the store could not prove either way.
+- **The launcher reads it.** An agent's launcher takes its role, model and effort from its definition
+  as defaults; a flag or the environment still wins. A missing file is the old behaviour; an invalid
+  one, or one defining another harness, refuses the launch (exit 78). A managed start reads no file:
+  aify-env hands the launch what it already checked.
+- **Services get a copy, not ownership.** Each service plugin pushes this host's definitions to its
+  service (every minute, and at once after a change it applied), so aify-comms shows them. An edit made
+  in a service to a defined agent becomes a change request; this host claims those every 10 seconds
+  and applies them through the store. A service older than definitions answers 404, which is logged
+  once and reported by the doctor as "does not accept definitions".
+- **Nothing moves until you say so.** An agent with no definition works as before. `agents import`
+  without `--write` only prints its plan.
+
+Status is still not here: alive is not working, and turn status belongs to the service.
 
 ## Starting a second one takes over
 
@@ -317,8 +348,8 @@ Over the wire (`docs/PROTOCOL.md`): start, stop, list, health, **output** as ser
 bounded replay for consumers that attach late, **input**, and **resize** — which refuses when there is
 no terminal rather than silently doing nothing.
 
-Not built, and not by accident: nothing here answers questions about AGENTS. It knows which processes
-it started and whether they are alive. Alive is not working.
+Not built, and not by accident: nothing here says what an agent is DOING. It knows which agents are
+defined, which processes it started, and whether they are alive. Alive is not working.
 
 The plan it is built against lives in the aify-comms repo at
 `docs/superpowers/plans/2026-08-20-aify-env.md`, with the architecture and its evidence in
