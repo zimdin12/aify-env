@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
 
-import { deriveAgentState, SCREEN_FRESH_MS, STRICT_TURN_MS, turnIsStillLive } from "../lib/agent-state.mjs";
+import { deriveAgentState, STRICT_TURN_MS, turnIsStillLive } from "../lib/agent-state.mjs";
 
 const LAW = JSON.parse(fs.readFileSync(new URL("./fixtures/agent-state-law.json", import.meta.url), "utf8"));
 const at = (ago) => (ago === null ? 0 : (LAW.now - ago) * 1000);
@@ -55,14 +55,22 @@ test("THE WORD follows C3's table, first match wins", () => {
     [{ process: "none", verified: "no", mode: "resident" }, "offline", "absent"],
     [{ process: "none", verified: "no", definition: "none" }, "offline", "absent"],
     [{ process: "running", verified: "no" }, "available", "startable"],
+    [{ process: "exited", verified: "no", startingInWindow: true }, "available", "startable"],
+    [{ busy: true, awaitingInput: true, screen: fresh("idle") }, "blocked", "turn-open"],
+    [{ conflict: true, process: "none", verified: "no" }, "unknown", "conflict"],
   ];
   for (const [over, state, cause] of cases) {
     assert.deepEqual(derive(over), { state, cause }, JSON.stringify(over));
   }
 });
 
-test("AN IDLE OR SHELL SCREEN NEVER ENDS AN OPEN TURN, while a positive sighting outranks it", () => {
-  assert.equal(derive({ busy: true, screen: fresh("idle") }).state, "working");
-  assert.equal(derive({ busy: false, screen: fresh("working") }).state, "working", "a sighting with no turn open");
-  assert.equal(SCREEN_FRESH_MS, 75_000, "aify-comms' HOST_ACTIVITY_FRESH_SECONDS");
+test("AN UNRECOGNISED FACT decides nothing: it is unknown, never a startable or offline agent", () => {
+  for (const over of [{ verified: undefined }, { verified: "maybe" }, { process: "Running" }, { process: undefined },
+    { definition: undefined }, { mode: "remote" }, { busy: undefined }, { stoppedByOperator: 1 }, { backgroundShells: -1 },
+    { backgroundShells: 1.5 }, { screen: undefined }, { screen: { state: "idle" } }]) {
+    assert.deepEqual(derive(over), { state: "unknown", cause: "unrecognised" }, JSON.stringify(over));
+  }
+  assert.deepEqual(derive({ verified: "yes", backgroundShells: 1 }), { state: "shell", cause: "at-prompt" },
+    "CONTROL: one background shell is a recognised fact, and a shell");
+  assert.deepEqual(deriveAgentState(null), { state: "unknown", cause: "unrecognised" });
 });

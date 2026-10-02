@@ -17,7 +17,9 @@
     {"name": "verified, a future touch falls back to a recent start", "startedAgo": 60, "touchedAgo": -600, "renewable": true, "live": true},
     {"name": "verified, a future touch falls back to an old start", "startedAgo": 7200, "touchedAgo": -600, "renewable": true, "live": false},
     {"name": "verified, a touch older than the start is ignored", "startedAgo": 10, "touchedAgo": 7200, "renewable": true, "live": true},
-    {"name": "unverified, a row from before the start anchor uses its touch", "startedAgo": null, "touchedAgo": 60, "renewable": false, "live": true}
+    {"name": "unverified, a row from before the start anchor uses its touch", "startedAgo": null, "touchedAgo": 60, "renewable": false, "live": true},
+    {"name": "started exactly now (age 0 holds)", "startedAgo": 0, "touchedAgo": null, "renewable": false, "live": true},
+    {"name": "verified, renewed exactly now, start past the window", "startedAgo": 1805, "touchedAgo": 0, "renewable": true, "live": true}
   ],
   "hookOrder": [
     {"name": "no time: outside the ordering", "last": null, "event": {"at": null, "owner": "a", "kind": "turn-start"}, "current": "a", "accept": true, "aifyEnv": {"applied": false, "reason": "no-timestamp"}, "divergence": "every 0.9 sender stamps firedAtUs; an end that cannot be ordered could close a newer turn"},
