@@ -102,6 +102,7 @@ import {
   advertisementStaleMs,
   environmentAdvertisement,
   hostIdentityFacts,
+  pluginHeartbeatBody,
   installedHarnesses,
   runtimeAvailability,
   shouldRedetect,
@@ -314,23 +315,16 @@ function currentAdvertisementBody() {
   // probe twice is how the machine id the service arbitrates supersession on came to inherit an
   // environment variable absent in many child processes, letting two tiers name one machine two
   // different things with nothing raised.
-  const { kind } = hostIdentityFacts({
+  const { kind, machineId } = hostIdentityFacts({
     platform: process.platform,
     hostname: hostname(),
     env: process.env,
     exists: existsSync,
     isWsl: hostIsWsl(),
   });
-  // The plugin is a second heartbeat writer. Its metadata replaces the stored object,
-  // so omitting this pair erases the full advertiser's currency observation.
-  const codeOnDisk = PACKAGE_BUILD.onDisk();
-  return {
-    hostname: hostname(), kind,
-    metadata: {
-      instance: BUILD,
-      ...(codeOnDisk === null ? {} : { codeOnDisk }),
-    },
-  };
+  // The plugin is a second heartbeat writer, and with `"advertise": false` the only one: the body,
+  // machine id and currency pair included, is `pluginHeartbeatBody`'s (lib/advertise.mjs).
+  return pluginHeartbeatBody({ hostname: hostname(), kind, machineId, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk() });
 }
 
 /** How this daemon reads a stored key: fresh bytes every time, one icacls per change of the file
