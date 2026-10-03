@@ -26,7 +26,8 @@ test("a folder rebound to another repository is resolved again and its new head 
       reportHead: async (report) => { reports.push(report.head); },
     },
     git: {
-      gitDirs: async () => { calls.gitDirs += 1; return { gitDir: `C:/git/${now.bound}`, commonDir: `C:/git/${now.bound}` }; },
+      // Inside the grant, as every place git reads must be (grant-check.mjs); paths here resolve to themselves.
+      gitDirs: async () => { calls.gitDirs += 1; return { toplevel: "C:/w/proj", gitDir: `C:/w/proj/.git-${now.bound}`, commonDir: `C:/w/proj/.git-${now.bound}` }; },
       head: async () => HEADS[now.bound],
     },
     machineId: "win32:h",
@@ -35,6 +36,7 @@ test("a folder rebound to another repository is resolved again and its new head 
     // The OLD repository's files never change: its fingerprint is constant, which is what hides the rebind.
     fingerprint: ({ gitDir }) => `HEAD=ref: refs/heads/main|of ${gitDir}`,
     binding: () => `bound to ${now.bound}`,
+    realpath: (path) => path,
   });
   await watcher.tick();
   assert.deepEqual(reports, [HEADS.A]);
@@ -76,7 +78,7 @@ test("a linked worktree whose commondir moves to other shared refs is read afres
       reportHead: async (report) => { reports.push(report.head); },
     },
     git: {
-      gitDirs: async () => ({ gitDir: meta, commonDir: commonNow() }),
+      gitDirs: async () => ({ toplevel: worktree, gitDir: meta, commonDir: commonNow() }),
       head: async () => readFileSync(join(commonNow(), "refs", "heads", "main"), "utf8").trim(),
     },
     machineId: "win32:h",
