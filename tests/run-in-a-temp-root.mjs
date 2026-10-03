@@ -62,7 +62,12 @@ const files = fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map(
 // THE TIMEOUT IS LOAD-BEARING and is kept here verbatim. Without it a hang in this suite once left
 // a test process and two daemons alive for two and a half hours; a runner that dropped the flag
 // would reintroduce that while looking like a pure refactor.
-const child = spawn(process.execPath, ['--test', '--test-timeout=60000', ...files], { env, stdio: 'inherit' });
+//
+// 180 s, NOT 60 (2026-10-03). It bounds a HANG, which it still does, and is not a speed budget. On this shared
+// host a git-heavy file that passes in 31 s alone crossed 60 s under other sessions' load and was cancelled,
+// while the same commit's next run passed with its slowest file at 40.6 s: the cancellation measured the
+// machine, not the code. Splitting files only moved that edge.
+const child = spawn(process.execPath, ['--test', '--test-timeout=180000', ...files], { env, stdio: 'inherit' });
 
 child.on('exit', (code, signal) => {
   try {
