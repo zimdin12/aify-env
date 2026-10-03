@@ -1315,6 +1315,910 @@
    ]
   },
   {
+   "name": "secrets naming two of a project's",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ]
+     }
+    }
+   },
+   "problems": []
+  },
+  {
+   "name": "secrets at the limit: 32 names of 64 characters",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "K00xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K01xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K02xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K03xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K04xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K05xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K06xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K07xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K08xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K09xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K10xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K11xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K12xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K13xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K14xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K15xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K16xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K17xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K18xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K19xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K20xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K21xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K22xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K23xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K24xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K25xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K26xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K27xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K28xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K29xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K30xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "K31xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ]
+     }
+    }
+   },
+   "problems": []
+  },
+  {
+   "name": "secrets for the fleet-wide project",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "environment",
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ]
+     }
+    }
+   },
+   "problems": []
+  },
+  {
+   "name": "secrets is a list",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": []
+    }
+   },
+   "problems": [
+    "agent.secrets: type"
+   ]
+  },
+  {
+   "name": "secrets is null",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": null
+    }
+   },
+   "problems": [
+    "agent.secrets: type"
+   ]
+  },
+  {
+   "name": "an unknown key in secrets",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ],
+      "values": {}
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.values: unknown-field"
+   ]
+  },
+  {
+   "name": "an unnameable key in secrets",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ],
+      "a b": 1
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets: unknown-field"
+   ]
+  },
+  {
+   "name": "secrets without a project",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.project: missing"
+   ]
+  },
+  {
+   "name": "secrets without names",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X"
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names: missing"
+   ]
+  },
+  {
+   "name": "a number project",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": 7,
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.project: type"
+   ]
+  },
+  {
+   "name": "a lone surrogate in the project",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "p\ud800",
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.project: malformed-unicode"
+   ]
+  },
+  {
+   "name": "a project with a space",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "my project",
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.project: pattern"
+   ]
+  },
+  {
+   "name": "a project with LF",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X\n",
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.project: pattern"
+   ]
+  },
+  {
+   "name": "an empty project",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "",
+      "names": [
+       "OPENAI_API_KEY",
+       "STRIPE_KEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.project: empty"
+   ]
+  },
+  {
+   "name": "no names",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": []
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names: empty"
+   ]
+  },
+  {
+   "name": "the empty form is not 'none': absent is",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "",
+      "names": []
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names: empty",
+    "agent.secrets.project: empty"
+   ]
+  },
+  {
+   "name": "names is a string",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": "OPENAI_API_KEY"
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names: type"
+   ]
+  },
+  {
+   "name": "33 names",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "K0",
+       "K1",
+       "K2",
+       "K3",
+       "K4",
+       "K5",
+       "K6",
+       "K7",
+       "K8",
+       "K9",
+       "K10",
+       "K11",
+       "K12",
+       "K13",
+       "K14",
+       "K15",
+       "K16",
+       "K17",
+       "K18",
+       "K19",
+       "K20",
+       "K21",
+       "K22",
+       "K23",
+       "K24",
+       "K25",
+       "K26",
+       "K27",
+       "K28",
+       "K29",
+       "K30",
+       "K31",
+       "K32"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names: too-many"
+   ]
+  },
+  {
+   "name": "a number name",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "OK",
+       5
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names: bad-name"
+   ]
+  },
+  {
+   "name": "a name starting with a digit",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "1KEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names: bad-name"
+   ]
+  },
+  {
+   "name": "a name starting with an underscore, which env allows and the dashboard does not",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "_KEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names: bad-name"
+   ]
+  },
+  {
+   "name": "a 65-character name",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names: bad-name"
+   ]
+  },
+  {
+   "name": "an AIFY_ name",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "AIFY_KEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names.AIFY_KEY: reserved"
+   ]
+  },
+  {
+   "name": "a harness_ name in lower case",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "harness_extra"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names.harness_extra: reserved"
+   ]
+  },
+  {
+   "name": "a name repeated in another case",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "API_KEY",
+       "api_key"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names.api_key: duplicate"
+   ]
+  },
+  {
+   "name": "a name that is also an env key, in another case",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {
+      "OPENAI_API_KEY": "x"
+     },
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "openai_api_key"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.names.openai_api_key: collides-with-env"
+   ]
+  },
+  {
+   "name": "an env key that is no env name collides with nothing",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {
+      "\u0131KEY": "x"
+     },
+     "herdrSpace": true,
+     "secrets": {
+      "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+      "names": [
+       "IKEY"
+      ]
+     }
+    }
+   },
+   "problems": [
+    "agent.env: bad-name"
+   ]
+  },
+  {
+   "name": "several secrets problems, listed out of order",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {},
+     "herdrSpace": true,
+     "secrets": {
+      "project": "",
+      "names": [
+       "aify_x",
+       "1BAD",
+       "ok",
+       "OK"
+      ],
+      "extra": 1
+     }
+    }
+   },
+   "problems": [
+    "agent.secrets.extra: unknown-field",
+    "agent.secrets.names.OK: duplicate",
+    "agent.secrets.names.aify_x: reserved",
+    "agent.secrets.names: bad-name",
+    "agent.secrets.project: empty"
+   ]
+  },
+  {
    "name": "an unknown agent field",
    "population": "candidate",
    "fileId": "coder-1",
@@ -2122,6 +3026,56 @@
    },
    "canonical": "{\"effort\":\"\",\"env\":{\"A\":\"a\",\"__proto__\":\"p\",\"constructor\":\"c\",\"toString\":\"t\"},\"harness\":\"claude\",\"herdrSpace\":true,\"id\":\"coder-1\",\"instructions\":\"\",\"mode\":\"managed\",\"model\":\"\",\"name\":\"Coder One\",\"role\":\"coder\",\"workspace\":\"C:/Docker/project\"}",
    "sha256": "61ede10735567b12108d5cf2f5b6bdc210760610b6302702c1c050d9174ed2fc"
+  },
+  {
+   "name": "secrets, names in their written order",
+   "agent": {
+    "id": "coder-1",
+    "name": "Coder One",
+    "role": "coder",
+    "harness": "claude",
+    "mode": "managed",
+    "workspace": "C:/Docker/project",
+    "model": "",
+    "effort": "",
+    "instructions": "",
+    "env": {},
+    "herdrSpace": true,
+    "secrets": {
+     "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+     "names": [
+      "OPENAI_API_KEY",
+      "STRIPE_KEY"
+     ]
+    }
+   },
+   "canonical": "{\"effort\":\"\",\"env\":{},\"harness\":\"claude\",\"herdrSpace\":true,\"id\":\"coder-1\",\"instructions\":\"\",\"mode\":\"managed\",\"model\":\"\",\"name\":\"Coder One\",\"role\":\"coder\",\"secrets\":{\"names\":[\"OPENAI_API_KEY\",\"STRIPE_KEY\"],\"project\":\"01J9ZQ4V8K3M5N7P2R6S0T1W4X\"},\"workspace\":\"C:/Docker/project\"}",
+   "sha256": "1f49103a1539c554ef2c76988ef3a354ff3900063283f6c96bac29c9e2d9f260"
+  },
+  {
+   "name": "secrets, the same names reversed",
+   "agent": {
+    "id": "coder-1",
+    "name": "Coder One",
+    "role": "coder",
+    "harness": "claude",
+    "mode": "managed",
+    "workspace": "C:/Docker/project",
+    "model": "",
+    "effort": "",
+    "instructions": "",
+    "env": {},
+    "herdrSpace": true,
+    "secrets": {
+     "project": "01J9ZQ4V8K3M5N7P2R6S0T1W4X",
+     "names": [
+      "STRIPE_KEY",
+      "OPENAI_API_KEY"
+     ]
+    }
+   },
+   "canonical": "{\"effort\":\"\",\"env\":{},\"harness\":\"claude\",\"herdrSpace\":true,\"id\":\"coder-1\",\"instructions\":\"\",\"mode\":\"managed\",\"model\":\"\",\"name\":\"Coder One\",\"role\":\"coder\",\"secrets\":{\"names\":[\"STRIPE_KEY\",\"OPENAI_API_KEY\"],\"project\":\"01J9ZQ4V8K3M5N7P2R6S0T1W4X\"},\"workspace\":\"C:/Docker/project\"}",
+   "sha256": "e0191f24777c01dbf31bde4fca96869a90b17dc9dff0713cfbf105fbd14e3155"
   }
  ],
  "snapshotVectors": [
