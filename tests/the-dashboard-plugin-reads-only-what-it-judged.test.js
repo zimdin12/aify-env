@@ -91,6 +91,54 @@ test("a worktree's .git file re-pointed outside after the checks is not followed
   assert.match(w.problems(), /this folder is not read: its git directory is .*outside.\.git, outside every granted root/);
 });
 
+/** A linked worktree of `main` inside the grant, on the shared branch, whose commondir is `commondir(main)`. */
+function worktreeNaming(l, commondir) {
+  const worktree = join(l.grant, "worktree");
+  git(l.inside, "worktree", "add", "-q", "--detach", worktree);
+  const meta = join(l.inside, ".git", "worktrees", "worktree");
+  writeFileSync(join(meta, "HEAD"), "ref: refs/heads/main\n");
+  writeFileSync(join(meta, "commondir"), `${commondir}\n`);
+  return worktree;
+}
+
+test("a worktree whose commondir reaches the shared directory through a junction is not read", { skip: onlyWindows }, async () => {
+  // The bug (found reviewing b92c9bd): GIT_DIR pins the worktree's git directory, and git still follows its commondir's
+  // TEXT at every read. Naming the shared directory through a junction, re-pointed after the checks, had the outside
+  // head reported on that look, though the junction is on neither the listed path nor inside the git directories.
+  const l = layout();
+  const hop = join(l.grant, "hop");
+  symlinkSync(join(l.inside, ".git"), hop, "junction");
+  const worktree = worktreeNaming(l, slashed(hop));
+  const w = watcherOver(worktree, l.grant, () => { rmdirSync(hop); symlinkSync(join(l.outside, ".git"), hop, "junction"); });
+  await w.watcher.tick();
+  assert.deepEqual(w.reported, [], "refused before anything is read");
+  assert.match(w.problems(), /its commondir names .*hop, which is not the shared git directory itself/);
+});
+
+test("a worktree whose commondir names the shared directory as it is, written whole, is read", { skip: onlyWindows }, async () => {
+  // The refusal is of a link on the way, not of an absolute commondir: git writes it relative, and both are fine.
+  const l = layout();
+  const worktree = worktreeNaming(l, slashed(join(l.inside, ".git")));
+  const w = watcherOver(worktree, l.grant, () => {});
+  await w.watcher.tick();
+  assert.deepEqual(w.reported, [l.insideHead]);
+  assert.equal(w.problems(), "");
+});
+
+test("an alternates line reaching a store through a junction is not read", { skip: onlyWindows }, async () => {
+  // The same for a borrowed store: its real path was judged, and git reads the line's text, through the junction.
+  const l = layout();
+  const store = join(l.grant, "store");
+  repo(store, "a store inside the grant");
+  const hop = join(l.grant, "hop");
+  symlinkSync(join(store, ".git"), hop, "junction");
+  writeFileSync(join(l.inside, ".git", "objects", "info", "alternates"), `${slashed(join(hop, "objects"))}\n`);
+  const w = watcherOver(l.inside, l.grant, () => {});
+  await w.watcher.tick();
+  assert.deepEqual(w.reported, []);
+  assert.match(w.problems(), /its object store borrows objects from .*hop.objects, which is reached through a link/);
+});
+
 test("a head asked for by a folder's path, not its judged places, runs no git", async () => {
   // The way back to the bug is one call that passes the listed path again. It is refused, not quietly run there.
   let started = 0;

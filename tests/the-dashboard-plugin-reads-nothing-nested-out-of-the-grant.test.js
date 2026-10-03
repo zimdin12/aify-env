@@ -332,7 +332,8 @@ test("alternates inside the grant are read as before", { skip: onlyWindows }, as
   const l = layout();
   const middle = join(l.grant, "middle");
   repo(middle, "a store inside");
-  writeFileSync(join(l.dotGit, "objects", "info", "alternates"), `${slashed(join(middle, ".git", "objects"))}\n`);
+  // Spelled in another case, as `git clone --reference c:/...` writes it: the same folder on Windows, and no link.
+  writeFileSync(join(l.dotGit, "objects", "info", "alternates"), `${slashed(join(middle, ".git", "objects")).toLowerCase()}\n`);
   const seen = await look(l);
   assert.deepEqual(seen.reported, [git(l.folder, "rev-parse", "HEAD")]);
   assert.equal(seen.problems, "");

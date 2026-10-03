@@ -49,7 +49,9 @@ test("anything the fingerprint is about to read that cannot be judged refuses th
   assert.equal(quietContainmentOf({ gitDir: "C:/g/.git", commonDir: "C:/g/.git" }, { lstat: refused, readFile: missing }),
     "its git directory could not be read whole (EACCES: permission denied)");
   const file = { isSymbolicLink: () => false, isDirectory: () => false, nlink: 1 };
-  assert.equal(quietContainmentOf({ gitDir: "C:/g/.git", commonDir: "C:/g/.git" }, { lstat: () => file, readFile: () => `${"0".repeat(40)}\n` }),
+  // Only HEAD is there: a repository that is not a linked worktree has no commondir.
+  const onlyHead = (path) => (/[\\/]HEAD$/.test(path) ? `${"0".repeat(40)}\n` : missing());
+  assert.equal(quietContainmentOf({ gitDir: "C:/g/.git", commonDir: "C:/g/.git" }, { lstat: () => file, readFile: onlyHead }),
     "", "a detached HEAD names no ref, and is no reason");
 });
 

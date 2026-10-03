@@ -117,27 +117,6 @@ test("a junction re-pointed outside after a folder was read is caught on the nex
   assert.match(w.problems(), /this folder is not read: its git directory is .*outside.repo.\.git, outside every granted root/);
 });
 
-test("a junction on the way to the shared refs, re-pointed outside, is caught on the next look", { skip: onlyWindows }, async () => {
-  // As above, through `commondir`: the worktree's own git directory stays inside, and only the shared one moves.
-  const l = layout();
-  const main = join(l.grant, "main");
-  repo(main, "main inside");
-  const linked = join(l.grant, "linked");
-  git(main, "worktree", "add", "-q", linked);
-  git(l.outside, "branch", "-q", "linked");
-  const hop = join(l.grant, "hop");
-  symlinkSync(join(main, ".git"), hop, "junction");
-  writeFileSync(join(main, ".git", "worktrees", "linked", "commondir"), `${slashed(hop)}\n`);
-  const w = watcherOver(linked, [l.grant]);
-  await w.watcher.tick();
-  assert.equal(w.reported.length, 1, "read while the shared refs are inside");
-  rmdirSync(hop);
-  symlinkSync(join(l.outside, ".git"), hop, "junction");
-  await w.watcher.tick();
-  assert.equal(w.reported.length, 1, "nothing reported once they are outside");
-  assert.match(w.problems(), /this folder is not read: its shared git directory is .*outside.repo.\.git, outside every granted root/);
-});
-
 test("a granted root that is itself a junction still serves the folders under it", { skip: onlyWindows }, async () => {
   // The bug the check could bring: real places compared with roots as written, so a root reached through a junction
   // refuses every folder in it.
