@@ -4,11 +4,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { copyFileSync, linkSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { GitReader, READ_ONLY_VERBS } from "../lib/plugins/aify-dashboard/git-reader.mjs";
+import { GitReader, READ_ONLY_VERBS, gitOnPath } from "../lib/plugins/aify-dashboard/git-reader.mjs";
 
 /** An execFile that records each call and answers when the test says so. */
 function recordingExecFile() {
@@ -36,11 +36,11 @@ test("git runs as a fixed argv with no shell, no optional locks and no prompt", 
   // The bug: a status that takes the index lock under an agent mid-commit, or a credential prompt that
   // waits on a terminal nobody is looking at.
   const fake = recordingExecFile();
-  const reader = new GitReader({ execFile: fake.execFile, env: { PATH: "x", GIT_OPTIONAL_LOCKS: "1" } });
+  const reader = new GitReader({ execFile: fake.execFile, env: { PATH: "x", GIT_OPTIONAL_LOCKS: "1" }, findGit: () => "C:/tools/git.exe" });
   const running = reader.run("C:/somewhere", ["rev-parse", "HEAD"]);
   await new Promise((resolve) => setImmediate(resolve));
   const [call] = fake.calls;
-  assert.equal(call.file, "git");
+  assert.equal(call.file, "C:/tools/git.exe", "git by the absolute path it was found at, never a bare name");
   assert.deepEqual(call.args, ["rev-parse", "HEAD"]);
   assert.equal(call.options.cwd, "C:/somewhere");
   assert.equal(call.options.env.GIT_OPTIONAL_LOCKS, "0", "the fixed value wins over an inherited one");
@@ -115,4 +115,38 @@ test("a repository with no commit yet is a failure, not a head", async () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-empty-")));
   git(dir, "init", "-q");
   await assert.rejects(new GitReader().head(dir), /failed|no commit/);
+});
+
+test("a git.exe planted in the watched folder is never the git that runs", { skip: process.platform !== "win32" && "Windows looks in the working directory first; elsewhere a bare name never did" }, async () => {
+  // The bug (external review of 0.8.1, HIGH 3): execFile("git", { cwd }) on Windows found <folder>/git.exe before
+  // PATH, so a file an agent wrote into a granted folder ran inside the daemon. The planted file is node itself:
+  // run as git, it fails on "rev-parse" as a script name instead of printing the head.
+  //
+  // NoDefaultCurrentDirectoryInExePath turns that search off for the process that sets it, and some shells
+  // do, so a test run from one passed against the defect. The daemon cannot count on it: unset here.
+  const optOut = process.env.NoDefaultCurrentDirectoryInExePath;
+  delete process.env.NoDefaultCurrentDirectoryInExePath;
+  try {
+    const dir = repoWithCommit();
+    const head = git(dir, "rev-parse", "HEAD");  // read before planting: this helper runs a bare `git` too
+    try { linkSync(process.execPath, join(dir, "git.exe")); } catch { copyFileSync(process.execPath, join(dir, "git.exe")); }
+    assert.equal(await new GitReader().head(dir), head);
+  } finally {
+    if (optOut !== undefined) process.env.NoDefaultCurrentDirectoryInExePath = optOut;
+  }
+});
+
+test("git is looked up only in PATH's absolute entries, and a git found nowhere runs nothing", async () => {
+  const sep = ";";
+  const asked = [];
+  const absolute = process.platform === "win32" ? "C:" + String.fromCharCode(92) + "tools" : "/tools";
+  const found = gitOnPath({ PATH: [".", "relative", absolute].join(sep) }, {
+    sep, find: (name, { pathValue }) => { asked.push(pathValue); return "git"; } });
+  assert.deepEqual(asked, [absolute], "the working directory and relative entries are never searched");
+  assert.equal(found, null, "a bare name back from the search is not a git to run");
+
+  const fake = recordingExecFile();
+  const reader = new GitReader({ execFile: fake.execFile, findGit: () => null });
+  await assert.rejects(reader.head("C:/x"), /not on this host's PATH as an absolute path/);
+  assert.equal(fake.calls.length, 0, "no process is started without an absolute git");
 });
