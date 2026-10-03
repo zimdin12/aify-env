@@ -18,6 +18,16 @@ const KEY = "dashboard-key-sentinel-7f3a";
 const CHECKOUT = "C:/checkout";
 const EXISTING = new Set([CHECKOUT, join(CHECKOUT, SCRIPT), "C:/empty"]);
 
+/**
+ * Wait until `done()` holds or `ms` have passed, whichever is first. BY TIME, not by a count of short sleeps: a
+ * plugin's first look runs real git, and under the full suite on a shared host a hundred 10 ms sleeps ended before the
+ * first client had run ("ran 0 times", measured). Waiting longer costs nothing when it is healthy: it returns at once.
+ */
+async function waitFor(done, ms = 30_000) {
+  const until = Date.now() + ms;
+  while (!done() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10));
+}
+
 /** A runner whose dashboard, folders, grant, config and client are all plain state a test can change between passes. */
 function setUp(overrides = {}) {
   const s = {
@@ -285,9 +295,7 @@ test("through the plugin: a folder whose repository is outside the grant is neve
   // Until both rows are up, or a run gives the defect away: the watcher's look and the provider's pass race.
   const rows = () => plugin.state().problems.join("\n");
   const settled = () => runs.length > 0 || (/no watched, granted folder/.test(rows()) && /this folder is not read/.test(rows()));
-  for (let i = 0; i < 300 && !settled(); i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await waitFor(settled);
   await plugin.stop();
   assert.deepEqual(runs, [], "the client was never started in it");
   assert.match(plugin.state().problems.join("\n"), /this folder is not read: its working tree is .*outside, outside every granted root/);
@@ -422,7 +430,7 @@ test("through the plugin: it serves the watched folder once a minute, and stop e
   }, { fetch, runChild, runEveryMs: 25, tickMs: 60_000 });
   t.after(() => plugin.stop());
   await plugin.start({ credential: async () => KEY });
-  for (let i = 0; i < 100 && runs.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  await waitFor(() => runs.length >= 2);
   await plugin.stop();
   assert.ok(runs.length >= 2, `ran ${runs.length} times`);
   assert.equal(runs[0].cwd, realpathSync.native(proj), "the real folder the look judged");
