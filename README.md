@@ -105,6 +105,9 @@ when the worker exits. The view there offers `s` to start an agent and no consol
 attach, because every worker already has a space. **Leaving that Herdr session ends the environment
 and every worker in it**; that lifetime is the launcher's, and it is described with the rest of the
 mode in [aify-wrapper's HERDR.md](https://github.com/zimdin12/aify-wrapper/blob/main/HERDR.md).
+That daemon serves a port the OS picked, and `aify-env agents import`, `aify-env attach` and
+`aify-env run` find it from its ready receipt when nothing answers on 8802 (`AIFY_ENV_ENDPOINT`
+still wins when set).
 
 **`aify-env herdr [agent]`, one worker into a Herdr you already run.** It opens an existing worker
 in a new Herdr workspace; with no argument it offers a numbered picker. This is a Windows PowerShell

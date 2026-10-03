@@ -31,9 +31,11 @@ import { passthrough } from "../lib/attach-screen.mjs";
 import { InputSender, postJson } from "../lib/input-sender.mjs";
 import { connectInputSocket } from "../lib/input-socket.mjs";
 import { readHostConfig } from "../lib/host-config.mjs";
+import { findEnvEndpoint } from "../lib/serving-endpoint.mjs";
 
 const LF = String.fromCharCode(10);
-const ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
+// Named, else the default port, else the live `herdr-aify env` daemon on the port the OS picked.
+const ENDPOINT = await findEnvEndpoint();
 
 const say = (text) => process.stderr.write(`${text}${LF}`);
 

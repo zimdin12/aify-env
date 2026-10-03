@@ -110,6 +110,14 @@ test("EVERY HARNESS maps back from its runtime, and any other runtime is not imp
   assert.deepEqual(importRecord("a", { runtime: "generic" }), { id: "a", notImportable: "its runtime generic has no harness" });
 });
 
+test("WITHDRAWN on the service is carried on the record, so the doctor does not say it runs as before", () => {
+  assert.equal(importRecord("a", { runtime: "claude-code", definitionState: "withdrawn" }).withdrawn, true);
+  assert.equal(importRecord("a", { runtime: "generic", definitionState: "withdrawn" }).withdrawn, true);
+  for (const definitionState of ["", "defined", undefined]) {
+    assert.equal("withdrawn" in importRecord("a", { runtime: "claude-code", definitionState }), false, `control: ${definitionState}`);
+  }
+});
+
 test("PROVENANCE: absent and null are unreported and written neutral; an explicit empty value is reported", () => {
   const base = { runtime: "claude-code", name: "N", role: "r", sessionMode: "managed", cwd: "C:/w", instructions: "", herdrSpace: true };
   const reportedEmpty = importRecord("a", { ...base, model: "", runtimeConfig: { effort: "" } });

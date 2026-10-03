@@ -139,6 +139,25 @@ test("AN ID FREED SINCE is taken at once: a fresh revision is published, and onl
   assert.equal(pushes(other).length, 1, "control: another machine's id is not retried");
 });
 
+test("A REFUSED ID is kept with its reason and logged once, and a push that refuses nothing clears it", async () => {
+  const store = await defined();
+  const reason = "incarnation 4 is no newer than incarnation 4, which the operator removed";
+  const refusal = { ok: true, refused: [{ id: "lead", reason }] };
+  const api = recordingApi({ pushAnswers: [refusal, refusal, { ok: true, refused: [] }] });
+  const clock = { now: 0 };
+  const lines = [];
+  const sync = new DefinitionSync({ api, store, installed: () => ALL, machineId: MACHINE, now: () => clock.now,
+    log: (line) => lines.push(line) });
+  await sync.pass(ENV);
+  assert.deepEqual(sync.state.refused, [{ id: "lead", reason }]);
+  clock.now += PUSH_INTERVAL_MS;
+  await sync.pass(ENV);
+  assert.deepEqual(lines, [`aify-comms refused definitions: lead (${reason})`], "logged once, not every minute");
+  clock.now += PUSH_INTERVAL_MS;
+  await sync.pass(ENV);
+  assert.deepEqual(sync.state.refused, [], "control: a later push that refuses nothing clears it");
+});
+
 test("THE SERVICE UNREACHABLE: the claim's failure is recorded and the push still tried; a failed push is retried next pass", async () => {
   const store = await defined();
   const down = new CommsApiError("connect ECONNREFUSED", { status: 0 });

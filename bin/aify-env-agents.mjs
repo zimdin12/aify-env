@@ -9,8 +9,6 @@
  * credential, what every service knows of this machine's agents. A dry run unless `--write`.
  */
 
-import { homedir } from "node:os";
-import path from "node:path";
 import process from "node:process";
 
 import { installedHarnesses } from "../lib/advertise.mjs";
@@ -18,8 +16,7 @@ import { DefinitionRefused, DefinitionStore, DefinitionStoreError } from "../lib
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { DECISION, definitionCheck, importPlan, parsePrefer, planLines } from "../lib/agent-import.mjs";
 import { importableAgents } from "../lib/client-actions.mjs";
-import { DEFAULT_PORT } from "../lib/port-argument.mjs";
-import { chooseEnvEndpoint, readyReceipts } from "../lib/serving-endpoint.mjs";
+import { findEnvEndpoint } from "../lib/serving-endpoint.mjs";
 
 const EOL = String.fromCharCode(10);
 export const EXIT_OK = 0;
@@ -192,25 +189,6 @@ async function importAgents(intent, { store, installed, importable }) {
   return { code: refused ? EXIT_FAILED : EXIT_OK, lines };
 }
 
-/**
- * Where `import` asks: AIFY_ENV_ENDPOINT, else the default port when an environment answers there, else the one
- * live `herdr-aify env` daemon under `home`'s herdr profile, which serves a port the OS picked.
- */
-export async function importEndpoint({ env = process.env, home = homedir(), fetchImpl = fetch } = {}) {
-  const fetchHealth = async (endpoint) => {
-    try {
-      const response = await fetchImpl(`${endpoint}/health`, { signal: AbortSignal.timeout(3000) });
-      return response.ok ? await response.json() : null;
-    } catch {
-      return null;
-    }
-  };
-  return chooseEnvEndpoint({
-    named: env.AIFY_ENV_ENDPOINT || "", defaultEndpoint: `http://127.0.0.1:${DEFAULT_PORT}`,
-    ...readyReceipts(path.join(home, ".aify", "herdr")), fetchHealth,
-  });
-}
-
 async function main() {
   const intent = parseAgentsArgs(process.argv.slice(2));
   if (intent.problem) {
@@ -222,7 +200,7 @@ async function main() {
   const installed = new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client));
   try {
     const { code, lines } = await runAgents(intent, { store, installed,
-      importable: async () => importableAgents({ endpoint: await importEndpoint() }) });
+      importable: async () => importableAgents({ endpoint: await findEnvEndpoint() }) });
     process.stdout.write(lines.join(EOL) + EOL);
     process.exitCode = code;
   } catch (error) {

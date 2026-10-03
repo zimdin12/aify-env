@@ -25,6 +25,14 @@ test("DEFINITIONS: published passes; a 404 says the service predates them; a fai
     [STATE.FAILED, "aify-comms: nothing published yet"]);
 });
 
+test("DEFINITIONS REFUSED: an id the service refused fails the row, naming it and the service's reason", () => {
+  const refused = [{ id: "lead", reason: "defined on win32:host-b" }];
+  assert.deepEqual(row(definitionsCheck({ answered: true, plugins: [plugin(sync({ refused }))] })),
+    [STATE.FAILED, "aify-comms refused lead (defined on win32:host-b)"]);
+  assert.equal(definitionsCheck({ answered: true, plugins: [plugin(sync({ refused: [] }))] }).state, STATE.PASSED,
+    "control: nothing refused still passes");
+});
+
 test("DEFINITIONS UNANSWERED: no aify-env, one too old to report plugins, or no plugin that publishes", () => {
   assert.equal(definitionsCheck({ answered: false }).state, STATE.UNANSWERED);
   assert.equal(definitionsCheck({ answered: true, plugins: null }).state, STATE.UNANSWERED);
@@ -41,6 +49,13 @@ test("UNDEFINED AGENTS are named, compared without case, and pass: they run as b
   assert.match(check.detail, /^2 agent\(s\) the services know on this host have no definition here: a, b \(they run as before; `aify-env agents import` defines them\)$/);
   assert.deepEqual(row(undefinedAgentsCheck(importable({ services: [service("aify-comms", ["kept"])], defined: ["kept"] }))),
     [STATE.PASSED, "every agent the services know on this host is defined here"]);
+});
+
+test("WITHDRAWN AGENTS are named apart: they are not started, so they do not 'run as before'", () => {
+  const services = [{ service: "aify-comms", problem: "", agents: [{ id: "gone", withdrawn: true }, { id: "never" }] }];
+  assert.deepEqual(row(undefinedAgentsCheck(importable({ services, defined: [] }))), [STATE.PASSED,
+    "1 agent(s) the services know on this host have no definition here: never (they run as before; "
+    + "`aify-env agents import` defines them); 1 withdrawn here, so not started: gone (`aify-env agents import` defines them again)"]);
 });
 
 test("UNDEFINED AGENTS UNKNOWN: no daemon, an older one, no store answer, or no service that answered", () => {

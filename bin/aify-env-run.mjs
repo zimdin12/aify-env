@@ -23,8 +23,9 @@
 
 import { fileURLToPath } from "node:url";
 
+import { findEnvEndpoint } from "../lib/serving-endpoint.mjs";
+
 const LF = String.fromCharCode(10);
-const ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
 const say = (text) => process.stderr.write(`${text}${LF}`);
 
 /** `--k v` pairs before a bare `--`; everything after it is the program's own. */
@@ -124,6 +125,9 @@ export function startRequestFrom({ service, launcher, label = "", cwd = "", args
 
 // Reached only when run as a command; importing this for its parsers must not start anything.
 if (process.argv[1] && process.argv[1].endsWith("aify-env-run.mjs")) {
+  // Named, else the default port, else the live `herdr-aify env` daemon on the port the OS picked.
+  // Found here, not at import, so importing this for its parsers asks nothing.
+  const ENDPOINT = await findEnvEndpoint();
   const parsed = parseRunArgs(process.argv.slice(2));
   const built = startRequestFrom({
     ...parsed,
@@ -170,5 +174,6 @@ if (process.argv[1] && process.argv[1].endsWith("aify-env-run.mjs")) {
     fileURLToPath(new URL("./aify-env-attach.mjs", import.meta.url)),
     started.id,
   ];
+  process.env.AIFY_ENV_ENDPOINT = ENDPOINT; // the attach asks the environment that started it
   await import("./aify-env-attach.mjs");
 }
