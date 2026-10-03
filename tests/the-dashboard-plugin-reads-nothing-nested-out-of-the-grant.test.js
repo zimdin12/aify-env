@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -332,8 +332,25 @@ test("alternates inside the grant are read as before", { skip: onlyWindows }, as
   const l = layout();
   const middle = join(l.grant, "middle");
   repo(middle, "a store inside");
-  // Spelled in another case, as `git clone --reference c:/...` writes it: the same folder on Windows, and no link.
-  writeFileSync(join(l.dotGit, "objects", "info", "alternates"), `${slashed(join(middle, ".git", "objects")).toLowerCase()}\n`);
+  writeFileSync(join(l.dotGit, "objects", "info", "alternates"), `${slashed(join(middle, ".git", "objects"))}\n`);
+  const seen = await look(l);
+  assert.deepEqual(seen.reported, [git(l.folder, "rev-parse", "HEAD")]);
+  assert.equal(seen.problems, "");
+});
+
+test("a store borrowed by git clone --reference, its folder renamed in case since, is still read", { skip: onlyWindows }, async () => {
+  // An alternates line must name its store as spelled, and a case-only difference is allowed: git keeps the line as
+  // it wrote it at clone time (in the path's real case then, measured on git 2.54), and a folder renamed in case
+  // later is the same folder on Windows, reached through no link. A rule that refused this would refuse those clones.
+  const l = layout();
+  const store = join(l.grant, "store");
+  repo(store, "the referenced store");
+  rmSync(l.folder, { recursive: true, force: true });
+  git(l.grant, "clone", "-q", "--reference", store, `file://${slashed(store)}`, l.folder);
+  renameSync(store, `${store}-renaming`);
+  renameSync(`${store}-renaming`, join(l.grant, "Store"));
+  const line = readFileSync(join(l.dotGit, "objects", "info", "alternates"), "utf8").trim();
+  assert.ok(line.includes("/store/") && realpathSync.native(line).includes("\\Store\\"), `the line and the real path differ in case: ${line}`);
   const seen = await look(l);
   assert.deepEqual(seen.reported, [git(l.folder, "rev-parse", "HEAD")]);
   assert.equal(seen.problems, "");
