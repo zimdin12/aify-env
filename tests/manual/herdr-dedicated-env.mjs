@@ -120,8 +120,9 @@ async function ready(f) {
   events.push({ ready: receipt }); return { item, receipt };
 }
 // A STOP IS ALLOWED LONGER THAN A READ. DELETE /processes kills the tree (lib/kill-tree.mjs, up to 10 s for taskkill)
-// and then confirms the pid is gone (lib/verified-stop.mjs, 1 s), so a 5 s client gave up inside the server's own
-// budget: under suite load this test failed 2 runs in 5 with the server still inside its limits (2026-10-03).
+// and then confirms the pid is gone (lib/verified-stop.mjs, 1 s), and this client gave every request 5 s, less than
+// those two allowances together. Under suite load this test failed 2 full runs in 5 with a client TimeoutError on
+// that DELETE, and passed 6 of 6 alone (2026-10-03); the server's own timing in those runs was not measured.
 const STOP_REQUEST_MS = 30000;
 async function request(base, route, method = 'GET', body) {
   const r = await fetch(base + route, { method, signal: AbortSignal.timeout(method === 'DELETE' ? STOP_REQUEST_MS : 5000),
