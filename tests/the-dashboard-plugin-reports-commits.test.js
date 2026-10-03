@@ -243,19 +243,20 @@ test("an accepted head is missing only when git says so: a folder that is not a 
   git(repo, "commit", "-q", "--allow-empty", "-m", "first");
   const present = git(repo, "rev-parse", "HEAD");
   const reader = new GitReader({ env: { ...process.env, GIT_CEILING_DIRECTORIES: root } });
-  assert.equal(await reader.hasCommit(repo, present), true);
-  assert.equal(await reader.hasCommit(repo, "f".repeat(40)), false);
+  const places = { toplevel: repo, gitDir: join(repo, ".git") };
+  assert.equal(await reader.hasCommit(places, present), true);
+  assert.equal(await reader.hasCommit(places, "f".repeat(40)), false);
   renameSync(join(repo, ".git"), join(repo, ".git-parked"));
-  await assert.rejects(reader.hasCommit(repo, present), /not a git repository/);
+  await assert.rejects(reader.hasCommit(places, present), /not a git repository/);
 });
 
 test("only exit 1 with nothing on stderr reads as missing", async () => {
   // Each limb of the rule, alone: git exits 1 and says nothing for a commit it cannot find (measured, git 2.54).
   const answering = (code, stderr) => new GitReader({ execFile: (file, args, options, callback) => callback(Object.assign(new Error("exited"), { code }), "", stderr) });
   const id = "f".repeat(40);
-  assert.equal(await answering(1, "").hasCommit("C:/x", id), false);
-  await assert.rejects(answering(128, "").hasCommit("C:/x", id), /failed/, "another exit, silent");
-  await assert.rejects(answering(1, "error: unable to read objects\n").hasCommit("C:/x", id), /unable to read/, "exit 1 that says why");
+  assert.equal(await answering(1, "").hasCommit({ toplevel: "C:/x", gitDir: "C:/x/.git" }, id), false);
+  await assert.rejects(answering(128, "").hasCommit({ toplevel: "C:/x", gitDir: "C:/x/.git" }, id), /failed/, "another exit, silent");
+  await assert.rejects(answering(1, "error: unable to read objects\n").hasCommit({ toplevel: "C:/x", gitDir: "C:/x/.git" }, id), /unable to read/, "exit 1 that says why");
 });
 
 test("a failure to look up the accepted head sends no resync and is shown", { skip: onlyWindows }, async (t) => {
