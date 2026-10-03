@@ -7,12 +7,16 @@
 //   longer the whole key, was not replaced, and its other half was shown in a doctor row.
 // - P2-S1: the kill was started and forgotten, and the run settled when the client closed, so a stop "completed"
 //   while the tree kill it had started was still running.
+// The bugs (review of 17f6f48), in how that wait was owned:
+// - S1-R1: only the close attached a handler to the kill, so a kill that failed before the client closed went unhandled.
+// - S1-R2: the bound started at the close, so a client the kill could not end, which never closes, never settled.
+// - S1-R3: the tree kill resolved from taskkill's callback whatever it carried, so a failed taskkill read as done.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 
-import { KEPT_ERROR_CHARS, RAW_ERROR_CHARS, runChild } from "../lib/plugins/aify-dashboard/provider-child.mjs";
+import { KEPT_ERROR_CHARS, RAW_ERROR_CHARS, killTree, runChild } from "../lib/plugins/aify-dashboard/provider-child.mjs";
 
 const KEY = "0123456789abcdef".repeat(4);
 const MARK = "<the dashboard key>";
@@ -70,18 +74,37 @@ test("past the raw cap, the line the cap cut into is dropped whole, so no part o
   assert.equal(result.error, "", "the only line was the one the cap cut into");
 });
 
-/** A stop whose kill completes only when `finish` is called, and the order things happened in. */
-function stoppedWith(kill, killWaitMs) {
+/**
+ * A stopped run with the kill `kill` makes, and the order things happened in. The client closes at once, after
+ * `closeAfterMs`, or, with `closeAfterMs: null`, never: a child the kill could not end.
+ */
+function stoppedWith(kill, killWaitMs, { closeAfterMs = 0 } = {}) {
   const child = fakeChild();
   const stop = new AbortController();
   const events = [];
+  const state = { settled: false };
   const running = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, signal: stop.signal, start: () => child, kill: () => { events.push("kill-called"); return kill(events); }, killWaitMs })
-    .then((result) => { events.push("run-settled"); return result; });
+    .then((result) => { state.settled = true; events.push("run-settled"); return result; });
   child.emit("spawn");
   stop.abort();
-  child.emit("close", null, "SIGKILL");
-  events.push("child-closed");
-  return { running, events };
+  const close = () => { child.emit("close", null, "SIGKILL"); events.push("child-closed"); };
+  if (closeAfterMs === 0) close();
+  else if (closeAfterMs !== null) setTimeout(close, closeAfterMs);
+  return { running, events, state, close };
+}
+
+/** Every promise rejection nobody was handling when it happened, while `body` runs. */
+async function unhandledDuring(body) {
+  const seen = [];
+  const note = (reason) => seen.push(String(reason?.message ?? reason));
+  process.on("unhandledRejection", note);
+  try {
+    await body();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
+    process.off("unhandledRejection", note);
+  }
+  return seen;
 }
 
 test("a stopped run settles only after the tree kill it started has finished", async () => {
@@ -107,6 +130,61 @@ test("a kill that fails is said, not swallowed, whether it fails later or at onc
   // At once: thrown where it is started, inside the timer or the stop, where an exception would escape the run.
   const atOnce = stoppedWith(() => { throw new Error("no taskkill here"); }, 5_000);
   assert.match((await atOnce.running).error, /the client's process tree was not confirmed ended: no taskkill here/);
+});
+
+test("a kill that fails before the client closes is said, and its failure never goes unhandled", async () => {
+  // The bug (review of 17f6f48, S1-R1): the failed kill was stored, and only the close handler attached anything to
+  // it, so a kill that failed before the client closed was an unhandled rejection: one that crashes the daemon.
+  for (const [how, kill] of [["rejected", () => Promise.reject(new Error("taskkill exited 128"))], ["thrown", () => { throw new Error("no taskkill here"); }]]) {
+    let result;
+    const seen = await unhandledDuring(async () => { result = await stoppedWith(kill, 5_000, { closeAfterMs: 30 }).running; });
+    assert.deepEqual(seen, [], `${how}: nothing unhandled`);
+    assert.match(result.error, /the client's process tree was not confirmed ended: (taskkill exited 128|no taskkill here)/, how);
+  }
+});
+
+test("a stopped client that never closes still settles within the bound, saying what is not confirmed", { timeout: 10_000 }, async () => {
+  // The bug (review of 17f6f48, S1-R2): the bound started only when the client closed, so a client the kill could
+  // not end left the plugin's stop waiting for ever.
+  const unanswered = stoppedWith(() => new Promise(() => {}), 100, { closeAfterMs: null });
+  const first = await Promise.race([unanswered.running, new Promise((resolve) => setTimeout(() => resolve("pending"), 1_000))]);
+  assert.notEqual(first, "pending", "settled with no close");
+  assert.equal(first.stopped, true);
+  assert.match(first.error, /the client's process tree was not confirmed ended within 0\.1 s/);
+  // And a kill that answered with the client still not closed: the kill's word is not the client's end.
+  const answered = stoppedWith(async () => {}, 100, { closeAfterMs: null });
+  const second = await Promise.race([answered.running, new Promise((resolve) => setTimeout(() => resolve("pending"), 1_000))]);
+  assert.notEqual(second, "pending", "settled with no close");
+  assert.match(second.error, /the client did not close within 0\.1 s of being killed/);
+  assert.doesNotMatch(second.error, /not confirmed ended/, "the kill did answer");
+});
+
+test("a client that closes soon after its kill answered is waited for, not reported missing", async () => {
+  // The control for the bound above: the kill answering first is the ordinary order on Windows, where the client's
+  // close follows taskkill's exit.
+  const s = stoppedWith(async () => {}, 5_000, { closeAfterMs: 30 });
+  const result = await s.running;
+  assert.equal(result.error, "");
+  assert.deepEqual(s.events, ["kill-called", "child-closed", "run-settled"]);
+});
+
+test("a taskkill that fails rejects, with its reason, and one that succeeds resolves", async () => {
+  // The bug (review of 17f6f48, S1-R3): the tree kill resolved from taskkill's callback whatever it carried, so a
+  // refused or failed taskkill reached the run as a tree confirmed ended.
+  const failing = (file, args, options, done) => done(Object.assign(new Error("taskkill exited 128"), { code: 128 }), "", "ERROR: refused");
+  await assert.rejects(killTree(4242, { platform: "win32", taskkill: "C:\\Windows\\System32\\taskkill.exe", run: failing }), /taskkill exited 128/);
+  await killTree(4242, { platform: "win32", taskkill: "C:\\Windows\\System32\\taskkill.exe", run: (file, args, options, done) => done(null, "", "") });
+});
+
+test("a signal that could not be sent rejects; a process already gone does not", async () => {
+  // The same defect where there is no taskkill: every failure to signal was read as "already gone".
+  const refusing = () => { throw Object.assign(new Error("kill EPERM"), { code: "EPERM" }); };
+  await assert.rejects(killTree(4242, { platform: "linux", signalProcess: refusing }), /EPERM/);
+  const gone = () => { throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" }); };
+  await killTree(4242, { platform: "linux", signalProcess: gone });
+  const sent = [];
+  await killTree(4242, { platform: "linux", signalProcess: (target) => { if (target < 0) gone(); sent.push(target); } });
+  assert.deepEqual(sent, [4242], "no group: the process itself");
 });
 
 test("a run past its time and then stopped kills its tree once", async () => {
