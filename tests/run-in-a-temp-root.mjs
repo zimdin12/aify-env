@@ -55,7 +55,14 @@ const root = fs.mkdtempSync(path.join(parent, PREFIX));
 // Windows. Setting one and not the others leaves the leak in place on the other platform, silently.
 // THE HOST SECRET TOO (lib/host-secret.mjs): a plugin or a daemon that sends a proof makes it on first use,
 // and a full run made the operator's real ~/.aify/host-secret on 2026-10-03 before this line existed.
-const env = { ...process.env, TMPDIR: root, TEMP: root, TMP: root, AIFY_HOST_SECRET_FILE: path.join(root, 'host-secret') };
+// NOR THE HERDR OR AGENT OF THE TERMINAL IT WAS STARTED FROM (2026-10-03): run from an agent's Herdr pane, tests
+// inherited that pane's live socket and that agent's id and lease. aify-wrapper's runner drops the same (its
+// lib/inherited-session.mjs holds the full session list; these are the names that make a process an agent).
+const inherited = { ...process.env };
+for (const name of Object.keys(inherited)) {
+  if (/^(AIFY_)?HERDR_/i.test(name) || ['AIFY_AGENT_ID', 'AIFY_AGENT_LEASE', 'CLAUDE_CODE_CHILD_SESSION'].includes(name.toUpperCase())) delete inherited[name];
+}
+const env = { ...inherited, TMPDIR: root, TEMP: root, TMP: root, AIFY_HOST_SECRET_FILE: path.join(root, 'host-secret') };
 
 const files = fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map((f) => path.join('tests', f));
 
