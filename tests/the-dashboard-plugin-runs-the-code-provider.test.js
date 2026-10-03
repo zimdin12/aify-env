@@ -22,7 +22,7 @@ const EXISTING = new Set([CHECKOUT, join(CHECKOUT, SCRIPT), "C:/empty"]);
 function setUp(overrides = {}) {
   const s = {
     pending: [{ projectId: "p1", queued: 2 }],
-    folders: [{ projectId: "p1", path: "C:/w/p1", platform: "win32" }],
+    folders: [{ projectId: "p1", path: "C:/w/p1", real: "C:/w/p1", platform: "win32" }],
     roots: ["c:/w"],
     config: { providerCheckout: CHECKOUT },
     key: KEY,
@@ -89,8 +89,8 @@ test("a checkout that is not granted exactly starts nothing, and says why", asyn
 test("a client runs only in a folder listed for its project and granted now", async () => {
   // The bugs: a client started in a folder the operator did not grant, or one listed for another project.
   for (const [folders, roots] of [
-    [[{ projectId: "p2", path: "C:/w/p2", platform: "win32" }], ["c:/w"]],
-    [[{ projectId: "p1", path: "C:/elsewhere/p1", platform: "win32" }], ["c:/w"]],
+    [[{ projectId: "p2", path: "C:/w/p2", real: "C:/w/p2", platform: "win32" }], ["c:/w"]],
+    [[{ projectId: "p1", path: "C:/elsewhere/p1", real: "C:/elsewhere/p1", platform: "win32" }], ["c:/w"]],
   ]) {
     const s = setUp({ folders, roots });
     await s.runner.pass();
@@ -106,12 +106,24 @@ test("a client runs only in a folder listed for its project and granted now", as
   assert.deepEqual(s.runner.state().problems, []);
 });
 
+test("a client runs in the folder its look judged, and a folder no look judged is not served", async () => {
+  // The bug: the client started in the listed path, which is resolved again when the client opens it, so a junction
+  // re-pointed after the look that judged it had the client read outside the grant until the next look.
+  const s = setUp({ folders: [{ projectId: "p1", path: "C:/w/p1", real: "C:/w/real-p1", platform: "win32" }] });
+  await s.runner.pass();
+  assert.deepEqual(s.runs.map((run) => run.cwd), ["C:/w/real-p1"]);
+  const unjudged = setUp({ folders: [{ projectId: "p1", path: "C:/w/p1", platform: "win32" }] });
+  await unjudged.runner.pass();
+  assert.equal(unjudged.runs.length, 0);
+  assert.match(unjudged.problems(), /no watched, granted folder here/);
+});
+
 test("the grant is read again before each client starts", async () => {
   // The bug: the grant read once per pass. A pass runs clients one after another for minutes, and a grant the
   // operator narrowed during the first must hold for the second.
   const s = setUp({
     pending: [{ projectId: "p1", queued: 1 }, { projectId: "p2", queued: 1 }],
-    folders: [{ projectId: "p1", path: "C:/w/p1", platform: "win32" }, { projectId: "p2", path: "C:/w/p2", platform: "win32" }],
+    folders: [{ projectId: "p1", path: "C:/w/p1", real: "C:/w/p1", platform: "win32" }, { projectId: "p2", path: "C:/w/p2", real: "C:/w/p2", platform: "win32" }],
     exits: [{ during: (state) => { state.roots = []; } }],
   });
   await s.runner.pass();
@@ -122,7 +134,7 @@ test("the grant is read again before each client starts", async () => {
 test("a folder is judged by its own platform's rule", async () => {
   // The bug: every folder compared as a Windows path, so a Linux host's /srv/x/p is never inside /srv/x and nothing
   // there is ever served.
-  const s = setUp({ folders: [{ projectId: "p1", path: "/srv/x/p", platform: "linux" }], roots: ["/srv/x"] });
+  const s = setUp({ folders: [{ projectId: "p1", path: "/srv/x/p", real: "/srv/x/p", platform: "linux" }], roots: ["/srv/x"] });
   await s.runner.pass();
   assert.deepEqual(s.runs.map((run) => run.cwd), ["/srv/x/p"]);
 });
@@ -313,10 +325,36 @@ test("a folder served while inside the grant stops being offered once a look fin
   assert.deepEqual(watcher.watched(), [], "not offered before any look has judged it");
   await watcher.tick();
   assert.deepEqual(watcher.watched().map((f) => f.path), [listed], "offered while inside");
+  assert.deepEqual(watcher.watched().map((f) => f.real), [join(grant, "inner")], "with the real folder it was judged as");
   rmdirSync(hop);
   symlinkSync(join(root, "outside"), hop, "junction");
+  // Between looks the offer stands, but as the folder that was judged, not where the junction leads now.
+  assert.deepEqual(watcher.watched().map((f) => f.real), [join(grant, "inner")]);
   await watcher.tick();
   assert.deepEqual(watcher.watched(), [], "no longer offered once outside");
+});
+
+test("a listed folder that resolves outside the grant is not offered, though git's places for it are inside", async () => {
+  // The look judges the folder itself as well as the places git resolves for it: those are found once and kept, and
+  // the folder's own path is resolved again on each look. The resolutions are injected, so only this one leads out.
+  const { HeadWatcher } = await import("../lib/plugins/aify-dashboard/head-watcher.mjs");
+  const watcher = new HeadWatcher({
+    api: {
+      watchList: async (hostKey) => ({ hostKey, projects: [{ projectId: "p1", name: "n", root: { fsNamespace: "windows", path: "C:/w/proj/sub" } }] }),
+      reportHead: async ({ head }) => ({ ok: true, ackedHead: head, cursorRevision: 1 }),
+    },
+    git: { gitDirs: async () => ({ toplevel: "C:/w/proj", gitDir: "C:/w/proj/.git", commonDir: "C:/w/proj/.git" }), head: async () => "a".repeat(40) },
+    machineId: "win32:h",
+    watchRoots: async () => ({ roots: ["c:/w"], problems: [] }),
+    reporter: "r",
+    fingerprint: () => "HEAD=ref: refs/heads/main",
+    binding: () => "bound",
+    realpath: (path) => (path === "C:/w/proj/sub" ? "C:/elsewhere/sub" : path),
+    contents: { quiet: () => "", nested: () => "" },
+  });
+  await watcher.tick();
+  assert.deepEqual(watcher.watched(), []);
+  assert.match(watcher.state().problems.join("\n"), /this folder is not read: it is C:\/elsewhere\/sub, outside every granted root/);
 });
 
 test("a folder whose git directory holds a way out is never offered, though its places are all inside", { skip: process.platform !== "win32" && "junctions are Windows-only" }, async () => {
@@ -387,7 +425,7 @@ test("through the plugin: it serves the watched folder once a minute, and stop e
   for (let i = 0; i < 100 && runs.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   await plugin.stop();
   assert.ok(runs.length >= 2, `ran ${runs.length} times`);
-  assert.equal(runs[0].cwd, proj);
+  assert.equal(runs[0].cwd, realpathSync.native(proj), "the real folder the look judged");
   assert.equal(runs[0].script, join(checkout, SCRIPT));
   assert.equal(runs[0].env.APG_DASHBOARD_URL, endpoint);
   assert.equal(runs[0].env.APG_DASHBOARD_HOST, "h");
