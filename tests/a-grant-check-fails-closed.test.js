@@ -14,10 +14,13 @@ test("a place that cannot be resolved is refused, never taken as inside", () => 
     return path;
   };
   const places = realPlaces({ toplevel: "C:/g/p", gitDir: "C:/g/gone/.git", commonDir: "C:/g/p/.git" }, { realpath: throwing });
-  assert.deepEqual(places, [["working tree", "C:/g/p"], ["git directory", null], ["shared git directory", "C:/g/p/.git"]]);
+  assert.deepEqual(places, { toplevel: "C:/g/p", gitDir: null, commonDir: "C:/g/p/.git" });
   assert.equal(escapeOf(places, ["c:/g"], "win32"), "its git directory could not be resolved to a real path");
-  assert.equal(escapeOf([["working tree", "C:/g/p"], ["git directory", "C:/g/p/.git"]], ["c:/g"], "win32"), "", "all inside: no reason");
-  assert.equal(escapeOf([["working tree", "C:/g/p"]], [], "win32"), "its working tree is C:/g/p, outside every granted root", "no roots: nothing is inside");
+  const inside = { toplevel: "C:/g/p", gitDir: "C:/g/p/.git", commonDir: "C:/g/p/.git" };
+  assert.equal(escapeOf(inside, ["c:/g"], "win32"), "", "all inside: no reason");
+  assert.equal(escapeOf(inside, [], "win32"), "its working tree is C:/g/p, outside every granted root", "no roots: nothing is inside");
+  // A place left out is one nobody judged; it is refused like one that would not resolve.
+  assert.equal(escapeOf({ toplevel: "C:/g/p", gitDir: "C:/g/p/.git" }, ["c:/g"], "win32"), "its shared git directory could not be resolved to a real path");
 });
 
 test("real roots are spelled as roots are, and a root that does not resolve is kept as written", () => {

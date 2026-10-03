@@ -99,7 +99,7 @@ test("dubious ownership is named with its fix, and a timeout says it timed out",
 test("against a real repository: the head is the commit, and a linked worktree's refs are in the common dir", async () => {
   const dir = repoWithCommit();
   const reader = new GitReader();
-  assert.equal(await reader.head(dir), git(dir, "rev-parse", "HEAD"));
+  assert.equal(await reader.head(await reader.gitDirs(dir)), git(dir, "rev-parse", "HEAD"));
   const main = await reader.gitDirs(dir);
   assert.equal(realpathSync(main.gitDir), realpathSync(join(dir, ".git")));
   assert.equal(realpathSync(main.commonDir), realpathSync(join(dir, ".git")));
@@ -114,7 +114,8 @@ test("against a real repository: the head is the commit, and a linked worktree's
 test("a repository with no commit yet is a failure, not a head", async () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-empty-")));
   git(dir, "init", "-q");
-  await assert.rejects(new GitReader().head(dir), /failed|no commit/);
+  const reader = new GitReader();
+  await assert.rejects(reader.head(await reader.gitDirs(dir)), /failed|no commit/);
 });
 
 test("a git.exe planted in the watched folder is never the git that runs", { skip: process.platform !== "win32" && "Windows looks in the working directory first; elsewhere a bare name never did" }, async () => {
@@ -130,7 +131,8 @@ test("a git.exe planted in the watched folder is never the git that runs", { ski
     const dir = repoWithCommit();
     const head = git(dir, "rev-parse", "HEAD");  // read before planting: this helper runs a bare `git` too
     try { linkSync(process.execPath, join(dir, "git.exe")); } catch { copyFileSync(process.execPath, join(dir, "git.exe")); }
-    assert.equal(await new GitReader().head(dir), head);
+    const reader = new GitReader();
+    assert.equal(await reader.head(await reader.gitDirs(dir)), head);
   } finally {
     if (optOut !== undefined) process.env.NoDefaultCurrentDirectoryInExePath = optOut;
   }
@@ -147,6 +149,6 @@ test("git is looked up only in PATH's absolute entries, and a git found nowhere 
 
   const fake = recordingExecFile();
   const reader = new GitReader({ execFile: fake.execFile, findGit: () => null });
-  await assert.rejects(reader.head("C:/x"), /not on this host's PATH as an absolute path/);
+  await assert.rejects(reader.head({ toplevel: "C:/x", gitDir: "C:/x/.git" }), /not on this host's PATH as an absolute path/);
   assert.equal(fake.calls.length, 0, "no process is started without an absolute git");
 });

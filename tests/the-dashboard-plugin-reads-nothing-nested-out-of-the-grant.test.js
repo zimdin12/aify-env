@@ -1,5 +1,5 @@
 // A git directory inside the grant must not lead the aify-dashboard plugin out of it through what it holds: its refs,
-// its objects, a file with a second name, or an alternates file. In every case here the working tree, the git
+// its objects, a file with a second name (a ref or an object), or an alternates file. In every case here the working tree, the git
 // directory and the shared one are all inside the grant; only something nested in them points out. Real git, real
 // junctions and real hard links.
 
@@ -217,17 +217,56 @@ test("HEAD's ref given a second name on a quiet look, with its size and time kep
   assert.match(w.problems(), /its git directory holds .*refs.heads.main, a file with a second name somewhere else/);
 });
 
-test("a local clone, whose objects are second names of another repository's, is read as before", { skip: onlyWindows }, async () => {
-  // The policy, held to: `git clone --local` links objects rather than copying them, and an object is read only by its
-  // id. Refusing every object file with a second name would refuse every such clone.
+test("a local clone, whose objects are second names of another repository's, is refused in one row naming the fix", { skip: onlyWindows }, async () => {
+  // The bug (review of bf4ce1c, G-HARDLINK): `git clone` of a local path hard-links its objects, and git does not
+  // re-hash a loose object it reads. The other repository's owner rewrote the shared file, and `git log` in the clone
+  // read the new subject under the old id. The source is outside the grant here, as it was there.
   const l = layout();
-  const source = join(l.grant, "source");
-  repo(source, "the source of a local clone");
   rmSync(l.folder, { recursive: true, force: true });
-  git(l.grant, "clone", "-q", "--local", source, l.folder);
-  const reported = await look(l);
-  assert.deepEqual(reported.reported, [git(l.folder, "rev-parse", "HEAD")]);
-  assert.equal(reported.problems, "");
+  git(l.grant, "clone", "-q", l.outside, l.folder);
+  const seen = await look(l);
+  assert.deepEqual(seen.reported, []);
+  // Every object of the clone has a second name; the operator is shown one row for the folder, not one per object.
+  assert.equal(seen.problems.split("\n").length, 1, seen.problems);
+  assert.match(seen.problems, /its git directory holds .*folder.\.git.objects.*, an object file with a second name somewhere else, as a clone of a local path makes; re-clone it with --no-hardlinks/);
+});
+
+test("a store borrowed from inside the grant, holding an object with a second name, is not read", { skip: onlyWindows }, async () => {
+  const l = layout();
+  const middle = join(l.grant, "middle");
+  rmSync(l.folder, { recursive: true, force: true });
+  git(l.grant, "clone", "-q", l.outside, middle);
+  repo(l.folder, "borrows from middle");
+  writeFileSync(join(l.dotGit, "objects", "info", "alternates"), `${slashed(join(middle, ".git", "objects"))}\n`);
+  const seen = await look(l);
+  assert.deepEqual(seen.reported, []);
+  assert.match(seen.problems, /its object store borrows objects from .*middle.\.git.objects, which holds .*middle.\.git.objects.*, a file with a second name somewhere else/);
+});
+
+test("what agents make is still read: a clone from a URL, a clone with --no-hardlinks, a linked worktree, a repository after gc", { skip: onlyWindows }, async () => {
+  // The refusal of second-named objects must not catch the ways a repository is normally made here.
+  const made = {
+    "a clone from a URL": (l) => git(l.grant, "clone", "-q", `file://${slashed(l.outside)}`, l.folder),
+    "a clone with --no-hardlinks": (l) => git(l.grant, "clone", "-q", "--no-hardlinks", l.outside, l.folder),
+    "a linked worktree": (l) => {
+      const main = join(l.grant, "main");
+      repo(main, "a main checkout inside the grant");
+      git(main, "worktree", "add", "-q", "-b", "side", l.folder);
+    },
+    "a repository after gc": (l) => {
+      repo(l.folder, "to be packed");
+      git(l.folder, "commit", "-q", "--allow-empty", "-m", "a second commit");
+      git(l.folder, "gc", "-q");
+    },
+  };
+  for (const [what, make] of Object.entries(made)) {
+    const l = layout();
+    rmSync(l.folder, { recursive: true, force: true });
+    make(l);
+    const seen = await look(l);
+    assert.deepEqual(seen.reported, [git(l.folder, "rev-parse", "HEAD")], what);
+    assert.equal(seen.problems, "", what);
+  }
 });
 
 test("a junction inside objects is not read", { skip: onlyWindows }, async () => {
