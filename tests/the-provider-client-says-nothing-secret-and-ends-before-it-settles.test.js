@@ -11,10 +11,13 @@
 // - S1-R1: only the close attached a handler to the kill, so a kill that failed before the client closed went unhandled.
 // - S1-R2: the bound started at the close, so a client the kill could not end, which never closes, never settled.
 // - S1-R3: the tree kill resolved from taskkill's callback whatever it carried, so a failed taskkill read as done.
+// And (review of a84ed99):
+// - S1-F1: a group that could not be signalled was forgotten once the process itself was, so it read as a tree ended.
+// - S1-F2: only the close released the run's timer and stop listener, so a run settled at its deadline kept both.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
+import { EventEmitter, getEventListeners } from "node:events";
 
 import { KEPT_ERROR_CHARS, RAW_ERROR_CHARS, killTree, runChild } from "../lib/plugins/aify-dashboard/provider-child.mjs";
 
@@ -151,6 +154,7 @@ test("a stopped client that never closes still settles within the bound, saying 
   assert.notEqual(first, "pending", "settled with no close");
   assert.equal(first.stopped, true);
   assert.match(first.error, /the client's process tree was not confirmed ended within 0\.1 s/);
+  assert.match(first.unconfirmed, /^the client's process tree was not confirmed ended within 0\.1 s/, "and on its own, for the doctor row");
   // And a kill that answered with the client still not closed: the kill's word is not the client's end.
   const answered = stoppedWith(async () => {}, 100, { closeAfterMs: null });
   const second = await Promise.race([answered.running, new Promise((resolve) => setTimeout(() => resolve("pending"), 1_000))]);
@@ -165,6 +169,7 @@ test("a client that closes soon after its kill answered is waited for, not repor
   const s = stoppedWith(async () => {}, 5_000, { closeAfterMs: 30 });
   const result = await s.running;
   assert.equal(result.error, "");
+  assert.equal(result.unconfirmed, "", "a kill that answered leaves nothing unconfirmed");
   assert.deepEqual(s.events, ["kill-called", "child-closed", "run-settled"]);
 });
 
@@ -185,6 +190,65 @@ test("a signal that could not be sent rejects; a process already gone does not",
   const sent = [];
   await killTree(4242, { platform: "linux", signalProcess: (target) => { if (target < 0) gone(); sent.push(target); } });
   assert.deepEqual(sent, [4242], "no group: the process itself");
+  // The bug (review of a84ed99, S1-F1): the group's failure was caught and forgotten, so a group that could not be
+  // signalled read as a tree ended once the process itself was. The process is still signalled, as best it can be.
+  for (const root of [() => {}, gone]) {
+    const tried = [];
+    const groupRefused = (target) => { tried.push(target); if (target < 0) refusing(); root(); };
+    await assert.rejects(killTree(4242, { platform: "linux", signalProcess: groupRefused }), /EPERM/);
+    assert.deepEqual(tried, [-4242, 4242], "the process itself is still signalled");
+  }
+  // And no group, with the process itself refusing: its own failure.
+  await assert.rejects(killTree(4242, { platform: "linux", signalProcess: (target) => (target < 0 ? gone() : refusing()) }), /EPERM/);
+});
+
+/** Run `body` with setTimeout and clearTimeout replaced by a list of jobs it fires by hand. */
+async function withHandTimers(body) {
+  const real = { set: globalThis.setTimeout, clear: globalThis.clearTimeout };
+  const jobs = [];
+  globalThis.setTimeout = (fn, ms) => { const job = { fn, ms, active: true, unref() {} }; jobs.push(job); return job; };
+  globalThis.clearTimeout = (job) => { if (job) job.active = false; };
+  const fire = (ms) => { const job = jobs.find((j) => j.ms === ms && j.active); assert.ok(job, `a timer of ${ms} ms`); job.active = false; job.fn(); };
+  try {
+    return await body({ live: () => jobs.filter((j) => j.active).map((j) => j.ms), fire });
+  } finally {
+    globalThis.setTimeout = real.set;
+    globalThis.clearTimeout = real.clear;
+  }
+}
+
+test("a run settled at its deadline leaves no timer and no stop listener behind, and later events change nothing", async () => {
+  // The bug (review of a84ed99, S1-F2): only the close released the run's timer and its stop listener, so a run settled
+  // at the deadline, with the client never closed, still held both after the plugin's stop had returned.
+  const startedWith = (signal) => {
+    const child = fakeChild();
+    const kills = [];
+    const running = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, signal, timeoutMs: 10_000, killWaitMs: 20, start: () => child, kill: (pid) => { kills.push(pid); return new Promise(() => {}); } });
+    child.emit("spawn");
+    return { child, kills, running };
+  };
+  await withHandTimers(async ({ live, fire }) => {
+    const stop = new AbortController();
+    const s = startedWith(stop.signal);
+    stop.abort();
+    fire(20);
+    const result = await s.running;
+    assert.equal(result.stopped, true);
+    assert.deepEqual(live(), [], "stopped: the run's own timer is released");
+    s.child.emit("close", 0, null);
+    assert.deepEqual(s.kills, [4242], "killed once");
+  });
+  await withHandTimers(async ({ fire }) => {
+    const stop = new AbortController();
+    const s = startedWith(stop.signal);
+    fire(10_000);
+    fire(20);
+    const result = await s.running;
+    assert.equal(result.timedOut, true);
+    assert.equal(getEventListeners(stop.signal, "abort").length, 0, "timed out: the stop listener is released");
+    stop.abort();
+    assert.deepEqual(s.kills, [4242], "a stop after it kills nothing more");
+  });
 });
 
 test("a run past its time and then stopped kills its tree once", async () => {
