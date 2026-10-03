@@ -48,10 +48,20 @@ test("AN AGENT ANOTHER MACHINE DEFINES is not started here, whatever its row rem
     { startable: false, reason: "defined on win32:host-b: it is started there" });
   assert.deepEqual(startabilityOf(rosterAgent({ definition: { state: "defined", ownerMachineId: MINE } }), { machineId: MINE }),
     { startable: false, reason: "the service holds a definition from this host that this host's store does not" });
-  assert.equal(startabilityOf(rosterAgent({ definition: { state: "withdrawn", ownerMachineId: null } }), { machineId: MINE }).startable, true,
-    "control: a withdrawn definition leaves an ordinary managed agent of this machine");
+  // A withdrawn definition is not started anywhere (C6): the service refuses it, so the menu does not offer it.
+  assert.deepEqual(startabilityOf(rosterAgent({ definition: { state: "withdrawn", ownerMachineId: null } }), { machineId: MINE }),
+    { startable: false, reason: "its definition was withdrawn: it is not started" });
   assert.equal(startabilityOf(rosterAgent({ definition: { state: "", ownerMachineId: null } }), { machineId: MINE }).startable, true,
-    "control: an agent no host ever defined");
+    "control: an agent no host ever defined is started the ordinary way");
+  assert.equal(startabilityOf(rosterAgent(), { machineId: MINE }).startable, true, "control: a row with no definition field");
+});
+
+test("THE ACCEPTED OWNER OVERRULES THIS HOST'S OWN DEFINITION (review of 0.8.2): custody moved, the old copy starts nothing", () => {
+  const local = reading("a");
+  assert.equal(startabilityOf(rosterAgent({ definition: { state: "defined", ownerMachineId: MINE } }), { machineId: MINE, definition: local }).startable,
+    true, "control: this host's definition, accepted for this host");
+  assert.deepEqual(startabilityOf(rosterAgent({ definition: { state: "defined", ownerMachineId: "win32:host-b" } }), { machineId: MINE, definition: local }),
+    { startable: false, reason: "defined on win32:host-b: it is started there" });
 });
 
 test("THE LIST offers defined agents by their definitions and says which are not published yet", () => {
