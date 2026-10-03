@@ -227,7 +227,8 @@ test("a log that does not parse is refused whole, never read as shorter subjects
     "a time that is not one": good.replace("1790000000", "soon"),
     "a record cut after its time": `\0${sha}\x001790000000\0`,
     "a file list git did not open": `\0${sha}\x001790000000\0subject\0file.txt\0`,
-    "an empty file name": `\0${sha}\x001790000000\0subject\0\n\0`,
+    // Followed by a whole record, so nothing after it is cut short and only the empty name is wrong.
+    "an empty file name": `\0${sha}\x001790000000\0subject\0\n\0${sha}\x001790000000\0next\0`,
   };
   for (const [what, text] of Object.entries(broken)) assert.throws(() => parseLog(text), /git log printed/, what);
 });
