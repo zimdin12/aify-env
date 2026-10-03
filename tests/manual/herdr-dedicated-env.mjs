@@ -119,8 +119,12 @@ async function ready(f) {
   assert.ok(![8800, 8801, 8802].includes(Number(new URL(receipt.endpoint).port)));
   events.push({ ready: receipt }); return { item, receipt };
 }
+// A STOP IS ALLOWED LONGER THAN A READ. DELETE /processes kills the tree (lib/kill-tree.mjs, up to 10 s for taskkill)
+// and then confirms the pid is gone (lib/verified-stop.mjs, 1 s), so a 5 s client gave up inside the server's own
+// budget: under suite load this test failed 2 runs in 5 with the server still inside its limits (2026-10-03).
+const STOP_REQUEST_MS = 30000;
 async function request(base, route, method = 'GET', body) {
-  const r = await fetch(base + route, { method, signal: AbortSignal.timeout(5000),
+  const r = await fetch(base + route, { method, signal: AbortSignal.timeout(method === 'DELETE' ? STOP_REQUEST_MS : 5000),
     ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
   const value = r.status === 204 ? null : await r.json();
   events.push({ route, method, status: r.status, value }); assert.ok(r.ok, JSON.stringify(value)); return value;
