@@ -91,11 +91,62 @@ test("a worktree's .git file re-pointed outside after the checks is not followed
   assert.match(w.problems(), /this folder is not read: its git directory is .*outside.\.git, outside every granted root/);
 });
 
+test("a range read after a junction on the listed path is re-pointed is the judged repository's history", { skip: onlyWindows }, async () => {
+  // The same schedule for the commits behind the head: hasCommit, contains and the log of the range must read what
+  // was judged too. The outside repository holds the base and not the inside head, so a range read through the
+  // listed path cannot read the same history by coincidence.
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-judged-range-")));
+  const grant = join(scratch, "grant");
+  const inside = join(grant, "inside");
+  const outside = join(scratch, "outside");
+  const base = repo(inside, "the base, in both");
+  git(scratch, "clone", "-q", "--no-hardlinks", inside, outside);
+  git(outside, "commit", "-q", "--allow-empty", "-m", "outside only");
+  git(inside, "commit", "-q", "--allow-empty", "-m", "the inside head");
+  const insideHead = git(inside, "rev-parse", "HEAD");
+  const hop = join(grant, "hop");
+  symlinkSync(inside, hop, "junction");
+
+  // A dashboard that has accepted the base, so the first look reports the range from it to the head.
+  const coverage = { acked: base, sent: [] };
+  let looks = 0;
+  const watcher = new HeadWatcher({
+    api: {
+      watchList: async (hostKey) => ({ hostKey, projects: [{ projectId: "p", name: "n", root: { fsNamespace: "windows", path: slashed(hop) } }] }),
+      reportHead: async () => ({ ok: true, ackedHead: coverage.acked, cursorRevision: 1 }),
+      openRange: async ({ targetHead }) => ({ rangeId: "r1", targetHead }),
+      sendBatch: async (rangeId, batch) => {
+        coverage.sent.push(...batch.commits.map((commit) => commit.subject));
+        if (!batch.hasMore) coverage.acked = insideHead;
+        return { state: batch.hasMore ? "open" : "complete" };
+      },
+      resync: async () => { throw new Error("no resync is expected"); },
+    },
+    git: new GitReader(),
+    machineId: "win32:judged-host",
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [grant] }), "win32"), [], "win32"),
+    reporter: "aify-env:win32:judged-host:r",
+    fingerprint: (dirs) => {
+      const print = headFingerprint(dirs);
+      if (looks++ === 0) { rmdirSync(hop); symlinkSync(outside, hop, "junction"); }
+      return print;
+    },
+  });
+  await watcher.tick();
+  assert.deepEqual(watcher.state().problems, []);
+  assert.deepEqual(coverage.sent, ["the inside head"], "the range of the repository that was judged");
+});
+
 test("a head asked for by a folder's path, not its judged places, runs no git", async () => {
   // The way back to the bug is one call that passes the listed path again. It is refused, not quietly run there.
   let started = 0;
   const reader = new GitReader({ execFile: () => { started += 1; }, findGit: () => "C:/git/git.exe" });
   await assert.rejects(reader.head("C:/w/proj"), /needs the folder's judged working tree and git directory/);
   await assert.rejects(reader.head({ toplevel: "C:/w/proj" }), /needs the folder's judged working tree and git directory/);
+  // And every read of the history behind a head.
+  const id = "a".repeat(40);
+  await assert.rejects(reader.hasCommit("C:/w/proj", id), /needs the folder's judged working tree and git directory/);
+  await assert.rejects(reader.contains("C:/w/proj", id, id), /needs the folder's judged working tree and git directory/);
+  await assert.rejects(reader.commitsBetween("C:/w/proj", id, id), /needs the folder's judged working tree and git directory/);
   assert.equal(started, 0);
 });
