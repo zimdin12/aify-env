@@ -101,6 +101,8 @@ test("a client runs only in a folder listed for its project and granted now", as
   for (const [folders, roots] of [
     [[{ projectId: "p2", path: "C:/w/p2", real: "C:/w/p2", platform: "win32" }], ["c:/w"]],
     [[{ projectId: "p1", path: "C:/elsewhere/p1", real: "C:/elsewhere/p1", platform: "win32" }], ["c:/w"]],
+    // Listed outside the grant, though it leads inside: the grant is of what the operator listed, so it is not served.
+    [[{ projectId: "p1", path: "C:/elsewhere/p1", real: "C:/w/p1", platform: "win32" }], ["c:/w"]],
   ]) {
     const s = setUp({ folders, roots });
     await s.runner.pass();
