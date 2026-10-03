@@ -40,6 +40,20 @@ test("A DEFINITION DECIDES: its mode over the roster's, its validity, and the ro
     "control: without a definition the roster's mode still decides");
 });
 
+test("AN AGENT ANOTHER MACHINE DEFINES is not started here, whatever its row remembers", () => {
+  // External review of 0.8.1: the row still named this machine, so the menu offered a start of an agent whose
+  // owner starts it too. The roster's `definition` is the service's word on who defines it.
+  const elsewhere = { state: "defined", ownerMachineId: "win32:host-b" };
+  assert.deepEqual(startabilityOf(rosterAgent({ definition: elsewhere }), { machineId: MINE }),
+    { startable: false, reason: "defined on win32:host-b: it is started there" });
+  assert.deepEqual(startabilityOf(rosterAgent({ definition: { state: "defined", ownerMachineId: MINE } }), { machineId: MINE }),
+    { startable: false, reason: "the service holds a definition from this host that this host's store does not" });
+  assert.equal(startabilityOf(rosterAgent({ definition: { state: "withdrawn", ownerMachineId: null } }), { machineId: MINE }).startable, true,
+    "control: a withdrawn definition leaves an ordinary managed agent of this machine");
+  assert.equal(startabilityOf(rosterAgent({ definition: { state: "", ownerMachineId: null } }), { machineId: MINE }).startable, true,
+    "control: an agent no host ever defined");
+});
+
 test("THE LIST offers defined agents by their definitions and says which are not published yet", () => {
   const roster = { agents: {
     defined: rosterAgent({ sessionMode: "resident" }),
