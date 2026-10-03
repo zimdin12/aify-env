@@ -191,7 +191,7 @@ test("AN UNREADABLE ENTRY makes the snapshot incomplete, and is never read as a 
   assert.equal((await store.snapshot({ installed: ALL })).complete, true, "and readable again, it is complete");
 });
 
-test("THE LOCK is never taken over: a live holder waits then fails, a dead one is reported with the remedy", async () => {
+test("THE LOCK: a live holder waits then fails; a dead one on this host is taken over; one on another host is reported", async () => {
   const dir = tempDir();
   const store = storeIn(dir);
   await store.set("a", agent(), { installed: ALL });
@@ -201,11 +201,23 @@ test("THE LOCK is never taken over: a live holder waits then fails, a dead one i
   assert.throws(() => DefinitionStore.unlock({ dir }), /held by running process/);
   assert.equal(JSON.parse(fs.readFileSync(lockPath, "utf8")).nonce, "live", "a live holder's lock is never removed");
   const dead = deadPid();
-  fs.writeFileSync(lockPath, JSON.stringify({ pid: dead, atMs: 1, nonce: "dead" }));
+  // An aify-env killed while it held the lock, the way a restart during a defined start leaves it (external
+  // review of 0.8.1): the next call takes it over instead of refusing until an operator unlocks it.
+  for (const host of [os.hostname(), undefined]) {
+    fs.writeFileSync(lockPath, JSON.stringify({ pid: dead, atMs: 1, nonce: "dead", host }));
+    assert.equal((await store.list()).definitions.length, 1, `a dead holder on this host is taken over (host ${host ?? "unnamed, as 0.8.1 wrote it"})`);
+    assert.equal(fs.existsSync(lockPath), false, "and the taking call releases it");
+  }
+  // A dead pid on ANOTHER host says nothing about that host's process: still reported, still not taken.
+  fs.writeFileSync(lockPath, JSON.stringify({ pid: dead, atMs: 1, nonce: "elsewhere", host: "another-host" }));
   await assert.rejects(store.list(), (error) => error.holderAlive === false && /aify-env agents unlock/.test(error.message));
-  assert.ok(fs.existsSync(lockPath), "a dead holder's lock is reported, still not taken");
-  assert.equal(DefinitionStore.unlock({ dir }).pid, dead);
-  assert.equal((await store.list()).definitions.length, 1, "after the operator's unlock the store opens");
+  assert.equal(JSON.parse(fs.readFileSync(lockPath, "utf8")).nonce, "elsewhere", "another host's lock is not taken");
+  // A torn lock may be a live writer between open and write: never taken.
+  fs.writeFileSync(lockPath, "{\"pid\": ");
+  await assert.rejects(store.list(), /aify-env agents unlock/);
+  assert.equal(fs.readFileSync(lockPath, "utf8"), "{\"pid\": ", "a torn lock is not taken");
+  assert.ok(DefinitionStore.unlock({ dir }), "the operator's unlock still clears what the store will not take");
+  assert.equal((await store.list()).definitions.length, 1);
 });
 
 test("TWO WRITERS RACING: the second waits for the first and then sees its revision", async () => {

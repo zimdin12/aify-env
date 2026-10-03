@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // P0 C2's interruption witnesses, for real: a child process runs one store call and kills itself at a
 // named durable step (fixtures/agent-definitions/crash-at.mjs), leaving its lock, intent and half-done
-// work exactly as a crash would. The operator's `unlock` then clears the dead holder's lock, and the
+// work exactly as a crash would. The operator's `unlock` clears the dead holder's lock (the last test here
+// shows the next open taking it over without one), and the
 // next open must settle the operation and leave ledger, file, trash and `.recovered/` agreeing.
 
 import assert from "node:assert/strict";
@@ -29,7 +30,7 @@ function crash(dir, spec) {
   assert.notEqual(run.status, 0, `the child finished without reaching ${spec.crashAt.name}: nothing was interrupted`);
   assert.equal(run.stderr.includes("Error"), false, `the child failed instead of crashing: ${run.stderr}`);
   const holder = DefinitionStore.unlock({ dir });
-  assert.ok(holder, "a crashed call leaves its lock, which only the operator's unlock clears");
+  assert.ok(holder, "a crashed call leaves its lock");
   const intent = fs.existsSync(file(dir, ".intent.json")) ? readJson(file(dir, ".intent.json")) : null;
   return intent?.operation ?? ledgerOf(dir).lastOperation;
 }
@@ -224,4 +225,18 @@ test("A NEW ID SETTLED NOT-COMMITTED BY THE OPERATOR still spends the incarnatio
   const { definitions } = await store.list();
   assert.deepEqual(definitions.map((d) => [d.id, d.incarnation]), [["a", 2]], "the file is adopted as a new id, after incarnation 1");
   assert.equal((await store.set("b", agent("B"), { installed: ALL })).incarnation, 3);
+});
+
+test("A CRASHED HOLDER'S LOCK is taken over by the next open, with no unlock, and its operation settles", async () => {
+  // External review of 0.8.1: an aify-env killed while it held the lock (a restart during a defined start) left
+  // every later call refused until an operator ran `aify-env agents unlock`.
+  const { dir, store } = await withBefore();
+  const run = spawnSync(process.execPath, [CRASH_AT, dir, JSON.stringify(
+    { call: "set", id: "a", agent: agent("After"), crashAt: { name: "applied", op: "set" } })], { encoding: "utf8" });
+  assert.notEqual(run.status, 0, "the child must die holding the lock, or nothing was interrupted");
+  assert.ok(fs.existsSync(file(dir, ".lock")), "the dead child's lock is there");
+  const listed = await store.list();
+  assert.equal(listed.definitions.find((d) => d.id === "a").agent.name, "After", "the interrupted set is settled forward");
+  assert.equal(fs.existsSync(file(dir, ".lock")), false);
+  assert.equal(fs.existsSync(file(dir, ".intent.json")), false);
 });
