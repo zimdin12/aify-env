@@ -115,7 +115,32 @@ test("a HEAD naming a ref that is not under refs/ is not read", { skip: onlyWind
   writeFileSync(join(l.dotGit, "HEAD"), "ref: refs/../../../outside/.git/refs/heads/main\n");
   const seen = await look(l);
   assert.deepEqual(seen.reported, []);
-  assert.match(seen.problems, /its HEAD names "refs\/\.\.\/\.\.\/\.\.\/outside\/\.git\/refs\/heads\/main", which is not a ref under refs\//);
+  assert.match(seen.problems, /its HEAD names "refs\/\.\.\/\.\.\/\.\.\/outside\/\.git\/refs\/heads\/main", which is not a ref name git accepts under refs\//);
+});
+
+test("a HEAD naming a ref that climbs out with backslashes is not read", { skip: onlyWindows }, async () => {
+  // Measured on the second version: a check that splits on "/" passed this, and Windows read the backslashes as
+  // separators, so the fingerprint statted the other repository's HEAD before anything refused.
+  const l = layout();
+  const climbing = "refs/heads/x\\..\\..\\..\\..\\..\\..\\outside\\.git\\HEAD";
+  writeFileSync(join(l.dotGit, "HEAD"), `ref: ${climbing}\n`);
+  const seen = await look(l);
+  assert.deepEqual(seen.reported, []);
+  assert.ok(seen.problems.includes(`its HEAD names ${JSON.stringify(climbing)}, which is not a ref name git accepts under refs/`), seen.problems);
+});
+
+test("a store borrowed from inside the grant, holding a way out, is not read", { skip: onlyWindows }, async () => {
+  // Measured on the second version: the borrowed store's own path was judged and its contents were not, and git log
+  // in the folder read the other repository's history through the store's pack junction.
+  const l = layout();
+  git(l.outside, "gc", "-q");
+  const store = join(l.grant, "store", "objects");
+  mkdirSync(join(store, "info"), { recursive: true });
+  symlinkSync(join(l.outsideGit, "objects", "pack"), join(store, "pack"), "junction");
+  writeFileSync(join(l.dotGit, "objects", "info", "alternates"), `${slashed(store)}\n`);
+  const seen = await look(l);
+  assert.deepEqual(seen.reported, []);
+  assert.match(seen.problems, /its object store borrows objects from .*grant.store.objects, which holds a link at .*store.objects.pack;/);
 });
 
 test("HEAD given a second name after a folder was read is refused on the next look, quiet or not", { skip: onlyWindows }, async () => {

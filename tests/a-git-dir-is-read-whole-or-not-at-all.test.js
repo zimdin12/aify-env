@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { containmentOf, quietContainmentOf } from "../lib/plugins/aify-dashboard/git-dir-contents.mjs";
+import { containmentOf, isRefName, quietContainmentOf } from "../lib/plugins/aify-dashboard/git-dir-contents.mjs";
 
 const plain = { isSymbolicLink: () => false, isDirectory: () => false, nlink: 1 };
 const missing = () => { throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" }); };
@@ -51,6 +51,31 @@ test("anything the fingerprint is about to read that cannot be judged refuses th
   const file = { isSymbolicLink: () => false, isDirectory: () => false, nlink: 1 };
   assert.equal(quietContainmentOf({ gitDir: "C:/g/.git", commonDir: "C:/g/.git" }, { lstat: () => file, readFile: () => `${"0".repeat(40)}\n` }),
     "", "a detached HEAD names no ref, and is no reason");
+});
+
+test("a ref name is judged by git's own grammar, each rule alone", () => {
+  // The bug: a check that splits on "/" and refuses only empty, "." and ".." parts, so a name git would never take
+  // still names a path, and on Windows a backslash names one outside the git directory.
+  for (const name of ["refs/heads/main", "refs/heads/feature/über", "refs/tags/v1.2.3", "refs/heads/a@b", "refs/remotes/origin/HEAD"]) {
+    assert.equal(isRefName(name), true, name);
+  }
+  const refused = {
+    "not under refs/": "heads/main",
+    "a backslash": "refs/heads/x\\y",
+    "a parent part": "refs/heads/../x",
+    "two dots": "refs/heads/a..b",
+    "@{": "refs/heads/a@{1}",
+    "an empty part": "refs/heads//x",
+    "a trailing slash": "refs/heads/x/",
+    "a trailing dot": "refs/heads/x.",
+    "a part starting with a dot": "refs/heads/.x",
+    ".lock": "refs/heads/x.lock",
+    "a space": "refs/heads/a b",
+    "a control character": "refs/heads/a\tb",
+    "DEL": "refs/heads/a\x7fb",
+    "~": "refs/heads/a~1", "^": "refs/heads/a^", ":": "refs/heads/a:b", "?": "refs/heads/a?", "*": "refs/heads/a*", "[": "refs/heads/a[",
+  };
+  for (const [rule, name] of Object.entries(refused)) assert.equal(isRefName(name), false, rule);
 });
 
 test("an alternates entry that does not resolve refuses the folder", () => {

@@ -37,6 +37,8 @@ test("a folder rebound to another repository is resolved again and its new head 
     fingerprint: ({ gitDir }) => `HEAD=ref: refs/heads/main|of ${gitDir}`,
     binding: () => `bound to ${now.bound}`,
     realpath: (path) => path,
+    // Its git directories are made up, as its fingerprint and binding are, so there is nothing on disk to look inside.
+    contents: { quiet: () => "", nested: () => "" },
   });
   await watcher.tick();
   assert.deepEqual(reports, [HEADS.A]);
