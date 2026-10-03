@@ -117,6 +117,29 @@ async function setUp(t) {
 
 const logRuns = (spawns) => spawns.filter((args) => args[0] === "log" && args.includes("--reverse")).length;
 
+/**
+ * `count` empty commits on the checked-out branch, named "change 1" onward, every `fileEvery`th adding file-<i>.txt,
+ * in ONE git process. One process per commit took 40 s of the runner's 60 s per-file limit under the full suite's
+ * load. The commits are as real as `git commit` makes them; only the working tree is left where it was, and the
+ * watcher reads refs and history, never the working tree.
+ *
+ * Each is dated one second after the one before, starting after the current head, unless `before` asks for them all
+ * to be dated before it, as a clock-skewed machine or imported history leaves them.
+ */
+function commitMany(repo, count, fileEvery, { before = false } = {}) {
+  const branch = git(repo, "symbolic-ref", "HEAD");
+  const parent = git(repo, "rev-parse", "HEAD");
+  const headAt = Number(git(repo, "log", "-1", "--format=%ct", "HEAD"));
+  const at = (i) => (before ? headAt - 10_000 + i : headAt + i);
+  let stream = "";
+  for (let i = 1; i <= count; i += 1) {
+    stream += `commit ${branch}\ncommitter t <t@example.invalid> ${at(i)} +0000\ndata <<END\nchange ${i}\nEND\n`;
+    if (i === 1) stream += `from ${parent}\n`;
+    if (i % fileEvery === 0) stream += `M 100644 inline file-${i}.txt\ndata <<END\n${i}\nEND\n`;
+  }
+  execFileSync("git", ["fast-import", "--quiet"], { cwd: repo, input: stream });
+}
+
 test("batches are cut at fifty, each after the last one's final commit, the last one closing the range", () => {
   const commits = Array.from({ length: 2 * BATCH_SIZE + 3 }, (_, i) => ({ sha: `${i}`.padStart(40, "0") }));
   const batches = batchesOf(commits);
@@ -132,10 +155,7 @@ test("the commits since the accepted head are reported oldest first, with their 
   // dashboard knows where a folder is and nothing of how it got there.
   const s = await setUp(t);
   await s.watcher.tick();
-  for (let i = 1; i <= 55; i += 1) {
-    if (i % 11 === 0) writeFileSync(join(s.repo, `file-${i}.txt`), `${i}\n`), git(s.repo, "add", `file-${i}.txt`);
-    git(s.repo, "commit", "-q", "--allow-empty", "-m", `change ${i}`);
-  }
+  commitMany(s.repo, 55, 11);
   await s.tick();
 
   const expected = git(s.repo, "log", "--reverse", "--format=%H", "HEAD~55..HEAD").split("\n");
@@ -155,6 +175,20 @@ test("the commits since the accepted head are reported oldest first, with their 
   await s.tick();
   assert.equal(s.spawns.length, spawnsBefore);
   assert.equal(s.dashboard.sent.length, sentBefore);
+});
+
+test("commits dated before the head they follow are still a range forward from it, not a gap", { skip: onlyWindows }, async (t) => {
+  // The bug: whether the accepted head is in the new head's history was asked of `git log A ^B`, whose walk stops by
+  // commit date. With ten or more commits dated before the accepted head (a clock-skewed machine, imported history)
+  // it answered "not in its history" (measured, git 2.54), and the dashboard was told to record a gap where those
+  // commits are.
+  const s = await setUp(t);
+  await s.watcher.tick();
+  commitMany(s.repo, 12, 0, { before: true });
+  await s.tick();
+  assert.deepEqual(s.dashboard.state.gaps, [], "no gap");
+  assert.equal(s.dashboard.state.stored.length, 12, "every commit, as a range");
+  assert.equal(s.dashboard.state.ackedHead, git(s.repo, "rev-parse", "HEAD"));
 });
 
 test("a refused range is retried from the cursor the dashboard gave, without reading the history again", { skip: onlyWindows }, async (t) => {
@@ -193,7 +227,7 @@ test("a range the dashboard superseded leaves coverage short, which is shown and
   assert.deepEqual(s.watcher.state().problems, []);
   assert.equal(logRuns(s.spawns), 1, "the range's history was read once");
   assert.equal(s.spawns.filter((args) => args.some((arg) => arg.endsWith("^{commit}"))).length, 1, "the accepted head was looked up once");
-  assert.equal(s.spawns.filter((args) => args[0] === "log" && args[1] === "-1").length, 1, "its place in the history was decided once");
+  assert.equal(s.spawns.filter((args) => args[0] === "merge-base").length, 1, "its place in the history was decided once");
 });
 
 test("file names and subjects arrive exactly as git holds them", { skip: onlyWindows }, async (t) => {
@@ -257,6 +291,18 @@ test("only exit 1 with nothing on stderr reads as missing", async () => {
   assert.equal(await answering(1, "").hasCommit({ toplevel: "C:/x", gitDir: "C:/x/.git" }, id), false);
   await assert.rejects(answering(128, "").hasCommit({ toplevel: "C:/x", gitDir: "C:/x/.git" }, id), /failed/, "another exit, silent");
   await assert.rejects(answering(1, "error: unable to read objects\n").hasCommit({ toplevel: "C:/x", gitDir: "C:/x/.git" }, id), /unable to read/, "exit 1 that says why");
+});
+
+test("only exit 1 with nothing on stderr reads as not in the history", async () => {
+  // Each limb of contains' rule, alone. A failure read as "not in its history" sends a resync named reset or unknown,
+  // and the dashboard records a gap the folder never had; so does reading exit 0 any other way than "it is".
+  const answering = (code, stderr) => new GitReader({ execFile: (file, args, options, callback) => (code === 0 ? callback(null, "", "") : callback(Object.assign(new Error("exited"), { code }), "", stderr)) });
+  const places = { toplevel: "C:/x", gitDir: "C:/x/.git" };
+  const id = "f".repeat(40);
+  assert.equal(await answering(0, "").contains(places, id, id), true);
+  assert.equal(await answering(1, "").contains(places, id, id), false);
+  await assert.rejects(answering(128, "").contains(places, id, id), /failed/, "another exit, silent");
+  await assert.rejects(answering(1, "fatal: bad object\n").contains(places, id, id), /bad object/, "exit 1 that says why");
 });
 
 test("a failure to look up the accepted head sends no resync and is shown", { skip: onlyWindows }, async (t) => {
