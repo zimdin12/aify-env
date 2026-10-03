@@ -68,6 +68,9 @@ def same_id(i):
 
 ID_128 = "a" * 128
 EMOJI_128 = "\U0001F600" * 128  # 128 code points, 256 UTF-16 units
+#: A dashboard project id is a ULID (dashboard server/src/registration/projects.ts:170).
+PROJECT = "01J9ZQ4V8K3M5N7P2R6S0T1W4X"
+SECRETS = {"project": PROJECT, "names": ["OPENAI_API_KEY", "STRIPE_KEY"]}
 
 CASES = [
     # --- valid ---
@@ -128,6 +131,58 @@ CASES = [
     case("a NUL in a value", "coder-1", body(agent(env={"X": "a\u0000b"})), ["agent.env.X: nul"]),
     case("a 4097-byte value", "coder-1", body(agent(env={"X": "y" * 4097})), ["agent.env.X: too-large"]),
     case("env is a list", "coder-1", body(agent(env=[])), ["agent.env: type"]),
+    # --- secrets: the one optional agent field (dashboard docs/DESIGN-SECRETS-INJECTION.md, "The D1 schema rules").
+    # Absent means none, and is every case above. Present, both halves must be non-empty.
+    case("secrets naming two of a project's", "coder-1", body(agent(secrets=SECRETS)), []),
+    case("secrets at the limit: 32 names of 64 characters", "coder-1",
+         body(agent(secrets={"project": PROJECT, "names": [f"K{i:02d}" + "x" * 61 for i in range(32)]})), []),
+    case("secrets for the fleet-wide project", "coder-1", body(agent(secrets={**SECRETS, "project": "environment"})), []),
+    case("secrets is a list", "coder-1", body(agent(secrets=[])), ["agent.secrets: type"]),
+    case("secrets is null", "coder-1", body(agent(secrets=None)), ["agent.secrets: type"]),
+    case("an unknown key in secrets", "coder-1", body(agent(secrets={**SECRETS, "values": {}})),
+         ["agent.secrets.values: unknown-field"]),
+    case("an unnameable key in secrets", "coder-1", body(agent(secrets={**SECRETS, "a b": 1})), ["agent.secrets: unknown-field"]),
+    case("secrets without a project", "coder-1", body(agent(secrets=without(SECRETS, "project"))),
+         ["agent.secrets.project: missing"]),
+    case("secrets without names", "coder-1", body(agent(secrets=without(SECRETS, "names"))), ["agent.secrets.names: missing"]),
+    case("a number project", "coder-1", body(agent(secrets={**SECRETS, "project": 7})), ["agent.secrets.project: type"]),
+    case("a lone surrogate in the project", "coder-1", body(agent(secrets={**SECRETS, "project": "p\ud800"})),
+         ["agent.secrets.project: malformed-unicode"]),
+    case("a project with a space", "coder-1", body(agent(secrets={**SECRETS, "project": "my project"})),
+         ["agent.secrets.project: pattern"]),
+    case("a project with LF", "coder-1", body(agent(secrets={**SECRETS, "project": PROJECT + "\n"})),
+         ["agent.secrets.project: pattern"]),
+    case("an empty project", "coder-1", body(agent(secrets={**SECRETS, "project": ""})), ["agent.secrets.project: empty"]),
+    case("no names", "coder-1", body(agent(secrets={**SECRETS, "names": []})), ["agent.secrets.names: empty"]),
+    case("the empty form is not 'none': absent is", "coder-1", body(agent(secrets={"project": "", "names": []})),
+         ["agent.secrets.project: empty", "agent.secrets.names: empty"]),
+    case("names is a string", "coder-1", body(agent(secrets={**SECRETS, "names": "OPENAI_API_KEY"})),
+         ["agent.secrets.names: type"]),
+    case("33 names", "coder-1", body(agent(secrets={**SECRETS, "names": [f"K{i}" for i in range(33)]})),
+         ["agent.secrets.names: too-many"]),
+    case("a number name", "coder-1", body(agent(secrets={**SECRETS, "names": ["OK", 5]})), ["agent.secrets.names: bad-name"]),
+    case("a name starting with a digit", "coder-1", body(agent(secrets={**SECRETS, "names": ["1KEY"]})),
+         ["agent.secrets.names: bad-name"]),
+    case("a name starting with an underscore, which env allows and the dashboard does not", "coder-1",
+         body(agent(secrets={**SECRETS, "names": ["_KEY"]})), ["agent.secrets.names: bad-name"]),
+    case("a 65-character name", "coder-1", body(agent(secrets={**SECRETS, "names": ["K" * 65]})),
+         ["agent.secrets.names: bad-name"]),
+    case("an AIFY_ name", "coder-1", body(agent(secrets={**SECRETS, "names": ["AIFY_KEY"]})),
+         ["agent.secrets.names.AIFY_KEY: reserved"]),
+    case("a harness_ name in lower case", "coder-1", body(agent(secrets={**SECRETS, "names": ["harness_extra"]})),
+         ["agent.secrets.names.harness_extra: reserved"]),
+    case("a name repeated in another case", "coder-1", body(agent(secrets={**SECRETS, "names": ["API_KEY", "api_key"]})),
+         ["agent.secrets.names.api_key: duplicate"]),
+    case("a name that is also an env key, in another case", "coder-1",
+         body(agent(env={"OPENAI_API_KEY": "x"}, secrets={**SECRETS, "names": ["openai_api_key"]})),
+         ["agent.secrets.names.openai_api_key: collides-with-env"]),
+    # U+0131 upper-cases to I in both languages: only valid (ASCII) env names are compared, so this is no collision.
+    case("an env key that is no env name collides with nothing", "coder-1",
+         body(agent(env={"ıKEY": "x"}, secrets={**SECRETS, "names": ["IKEY"]})), ["agent.env: bad-name"]),
+    case("several secrets problems, listed out of order", "coder-1",
+         body(agent(secrets={"project": "", "names": ["aify_x", "1BAD", "ok", "OK"], "extra": 1})),
+         ["agent.secrets.extra: unknown-field", "agent.secrets.project: empty", "agent.secrets.names.aify_x: reserved",
+          "agent.secrets.names: bad-name", "agent.secrets.names.OK: duplicate"]),
     # --- shape ---
     case("an unknown agent field", "coder-1", body({**agent(), "systemPrompt": "x"}), ["agent.systemPrompt: unknown-field"]),
     case("an unknown top-level field", "coder-1", body(profile="x"), ["profile: unknown-field"]),
@@ -201,6 +256,9 @@ AGENT_VECTORS = [
                     env={"ZED": "\u00e9", "ALPHA": "1", "MID": "\t"})},
     {"name": "env keys naming Object.prototype members are kept and sorted like any other",
      "agent": agent(env={"toString": "t", "__proto__": "p", "constructor": "c", "A": "a"})},
+    # secrets: keys sorted like any object's, names kept in their written order, so the two orders digest apart.
+    {"name": "secrets, names in their written order", "agent": agent(secrets=SECRETS)},
+    {"name": "secrets, the same names reversed", "agent": agent(secrets={**SECRETS, "names": SECRETS["names"][::-1]})},
 ]
 for v in AGENT_VECTORS:
     v.update(golden(v["agent"]))
