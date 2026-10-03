@@ -14,24 +14,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
-import { ProviderRunner, SCRIPT } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
+import { CleanupWarnings, ProviderRunner, SCRIPT } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
 
 const KEY = "dashboard-key-sentinel-7f3a";
 const CHECKOUT = "C:/checkout";
 const UNCONFIRMED = "the client's process tree was not confirmed ended within 10 s";
 
-/** A runner for one project whose client runs end as `exits` say, one per run; `pending` can be emptied to go idle. */
-function setUp(exits) {
-  const s = { pending: [{ projectId: "p1", queued: 1 }], runs: 0 };
+/**
+ * A runner for one project whose client runs end as `exits` say, one per run; `pending` can be emptied to go idle.
+ * `endpoint`, `projectId` and `cleanupWarnings` let two runners share one store, as two dashboards in one process do.
+ */
+function setUp(exits, { endpoint = "http://127.0.0.1:9", projectId = "p1", cleanupWarnings } = {}) {
+  const s = { pending: [{ projectId, queued: 1 }], runs: 0 };
   s.runner = new ProviderRunner({
     api: { providerPending: async (hostKey) => ({ hostKey, projects: s.pending }) },
     credential: async () => KEY,
-    folders: () => [{ projectId: "p1", path: "C:/w/p1", real: "C:/w/p1", platform: "win32" }],
+    folders: () => [{ projectId, path: "C:/w/p1", real: "C:/w/p1", platform: "win32" }],
     watchRoots: async () => ({ roots: ["c:/w"], problems: [] }),
     realpath: (path) => path,
     config: () => ({ config: { providerCheckout: CHECKOUT }, problem: "" }),
-    endpoint: "http://127.0.0.1:9",
+    endpoint,
     hostKey: "h",
     reporter: "aify-env:win32:h:r",
     parentEnv: {},
@@ -41,6 +44,7 @@ function setUp(exits) {
       s.runs += 1;
       return { code: 0, signal: null, timedOut: false, stopped: false, error: "", unconfirmed: "", ...(exits.shift() ?? {}) };
     },
+    ...(cleanupWarnings ? { cleanupWarnings } : {}),
   });
   s.rows = () => s.runner.state().problems.filter((row) => row.includes("not confirmed ended"));
   return s;
@@ -53,7 +57,7 @@ test("a stop whose kill was not confirmed is said, and stops nothing", async () 
   assert.equal(state.runs, 0, "a stop is still not a run");
   assert.deepEqual(state.stopped, [], "and not a stop of the project");
   assert.equal(s.rows().length, 1);
-  assert.match(s.rows()[0], /^project p1: the provider client was killed when it was stopped, and the client's process tree was not confirmed ended within 10 s: its processes may still be running/);
+  assert.match(s.rows()[0], /^project p1: the provider client serving http:\/\/127\.0\.0\.1:9 was killed when it was stopped, and the client's process tree was not confirmed ended within 10 s: its processes may still be running/);
 });
 
 test("a timeout whose kill was not confirmed is said, the project still runs, and the row outlives later passes", async () => {
@@ -61,7 +65,7 @@ test("a timeout whose kill was not confirmed is said, the project still runs, an
   const s = setUp([{ code: null, timedOut: true, error: failed, unconfirmed: failed }]);
   await s.runner.pass();
   assert.deepEqual(s.runner.state().stopped, [], "a retry, not a stop");
-  assert.match(s.rows()[0] ?? "", /^project p1: the provider client was killed when it ran past its time, and the client's process tree was not confirmed ended: taskkill refused <the dashboard key>/);
+  assert.match(s.rows()[0] ?? "", /^project p1: the provider client serving http:\/\/127\.0\.0\.1:9 was killed when it ran past its time, and the client's process tree was not confirmed ended: taskkill refused <the dashboard key>/);
   assert.ok(!s.runner.state().problems.join("\n").includes(KEY), "no key in a row");
   // A later run that ends well says nothing about the tree that was not confirmed gone, and neither does an idle pass.
   await s.runner.pass();
@@ -78,6 +82,25 @@ test("one row per project, naming its latest kill that was not confirmed", async
   await s.runner.pass();
   assert.equal(s.rows().length, 1);
   assert.match(s.rows()[0], /taskkill exited 1/);
+});
+
+test("a project id under two dashboards is two rows, each naming its dashboard, and the key cannot run them together", async () => {
+  // The bug (review of de1a942, F3-N1): rows were kept by project id alone in a store one process shares, so the same
+  // id from a second dashboard replaced the first one's row, and a row did not say which dashboard it came from.
+  const shared = new CleanupWarnings();
+  const failing = (marker) => [{ code: null, timedOut: true, unconfirmed: `the client's process tree was not confirmed ended: ${marker}` }];
+  for (const [endpoint, projectId, marker] of [["http://a:1", "p1", "from-a"], ["http://b:1", "p1", "from-b"], ["http://a:1", "b:1|p1", "joined-1"], ["http://a:1|b:1", "p1", "joined-2"]]) {
+    await setUp(failing(marker), { endpoint, projectId, cleanupWarnings: shared }).runner.pass();
+  }
+  const rows = shared.rows();
+  assert.equal(rows.length, 4, rows.join("\n"));
+  for (const [endpoint, projectId, marker] of [["http://a:1", "p1", "from-a"], ["http://b:1", "p1", "from-b"]]) {
+    assert.ok(rows.some((row) => row.startsWith(`project ${projectId}: the provider client serving ${endpoint} `) && row.includes(marker)), marker);
+  }
+  // The same dashboard and project again: still one row, its latest.
+  await setUp(failing("from-a-again"), { endpoint: "http://a:1", projectId: "p1", cleanupWarnings: shared }).runner.pass();
+  assert.equal(shared.rows().length, 4);
+  assert.ok(shared.rows().some((row) => row.includes("from-a-again")) && !shared.rows().some((row) => row.includes("from-a:")));
 });
 
 test("through the plugin, the row outlives its stop and start, and a plugin rebuilt in the same process", async (t) => {
