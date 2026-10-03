@@ -10,8 +10,9 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { hostProof, hostProofFor, readOrCreateHostSecret } from "../lib/host-secret.mjs";
-import { CommsApi, HOST_PROOF_HEADER, mintBridgeIdentity } from "../lib/plugins/aify-comms/api.mjs";
+import { HOST_PROOF_HEADER, hostProof, hostProofFor, readOrCreateHostSecret } from "../lib/host-secret.mjs";
+import { CommsApi, mintBridgeIdentity } from "../lib/plugins/aify-comms/api.mjs";
+import { postAdvertisement } from "../lib/post-advertisement.mjs";
 import { factoryArguments } from "../lib/plugins/index.mjs";
 
 const scratch = () => mkdtempSync(join(tmpdir(), "aify-host-secret-"));
@@ -81,4 +82,24 @@ test("the plugin registry hands each plugin the proof for its own service name, 
   assert.equal(comms.hostProof(), "proof-for-aify-comms");
   assert.equal(dashboard.hostProof(), "proof-for-aify-dashboard", "never another service's proof");
   assert.equal(comms.endpoint, "http://127.0.0.1:8800");
+});
+
+test("the advertiser's heartbeat carries the proof too, for the service it is sent to", async () => {
+  // Review of 98b0860, H2-R3: the advertisement is a heartbeat, and it went without one, so a host whose
+  // plugin had enrolled was refused its own advertisements.
+  const sent = [];
+  const fetchImpl = async (url, init) => { sent.push(init.headers); return { status: 200 }; };
+  await postAdvertisement("http://127.0.0.1:8800/api/v1/environments/heartbeat", {}, "k", "aify-comms",
+    { proofFor: (name) => `proof-for-${name}`, fetchImpl });
+  assert.equal(sent[0][HOST_PROOF_HEADER], "proof-for-aify-comms");
+  await postAdvertisement("http://x", {}, "k", "aify-comms", { proofFor: () => { throw new Error("no secret"); }, fetchImpl });
+  assert.equal(sent[1][HOST_PROOF_HEADER], undefined, "a proof that cannot be made is left off, not invented");
+  await postAdvertisement("http://x", {}, "k", "", { proofFor: () => "never", fetchImpl });
+  assert.equal(sent[2][HOST_PROOF_HEADER], undefined, "no service named, no proof");
+
+  const { advertiseTo } = await import("../lib/advertise.mjs");
+  const named = [];
+  await advertiseTo({ targets: [{ name: "aify-comms", url: "http://x" }], body: {},
+    post: async (url, body, key, name) => { named.push(name); return { status: 200 }; }, credential: async () => "" });
+  assert.deepEqual(named, ["aify-comms"], "advertiseTo hands post the service's name");
 });

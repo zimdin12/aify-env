@@ -53,7 +53,9 @@ const root = fs.mkdtempSync(path.join(parent, PREFIX));
 
 // All three, because which one is read depends on the platform: TMPDIR on POSIX, TEMP and TMP on
 // Windows. Setting one and not the others leaves the leak in place on the other platform, silently.
-const env = { ...process.env, TMPDIR: root, TEMP: root, TMP: root };
+// THE HOST SECRET TOO (lib/host-secret.mjs): a plugin or a daemon that sends a proof makes it on first use,
+// and a full run made the operator's real ~/.aify/host-secret on 2026-10-03 before this line existed.
+const env = { ...process.env, TMPDIR: root, TEMP: root, TMP: root, AIFY_HOST_SECRET_FILE: path.join(root, 'host-secret') };
 
 const files = fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map((f) => path.join('tests', f));
 
