@@ -69,6 +69,18 @@ test("THE DECISION takes C4's steps in order", () => {
   assert.deepEqual(decide(request(), current()), { verdict: "apply" }, "5");
 });
 
+test("A REQUEST NAMING secrets is refused, whatever it sets, and nothing else about the request changes", () => {
+  // The bug (review of the D1 slice): `secrets` became an agent field, and the merge patch applies any field it is
+  // handed. A patch could set it, and with absent the only "none", no patch could ever clear it again: a null writes
+  // the neutral "", which C1 refuses. It is not changed by request until the editor that defines clearing exists.
+  const decide = (patch) => requestDecision({ request: request({ patch }), storeId: "s1", current: current(), trashed: null });
+  const reason = "secrets is not changed by request yet; edit the definition file on this host";
+  for (const patch of [{ secrets: { project: "p1", names: ["KEY"] } }, { secrets: null }, { model: "x", secrets: { project: "p1", names: ["KEY"] } }]) {
+    assert.deepEqual(decide(patch), { verdict: "refused", reason }, JSON.stringify(patch));
+  }
+  assert.deepEqual(decide({ model: "x" }), { verdict: "apply" }, "the control: the same request without it applies");
+});
+
 const launch = (over = {}) => ({ agentId: "a", runtime: "claude-code",
   definition: { storeId: "s1", incarnation: 1, revision: 2 }, ...over });
 const listing = (over = {}) => ({ storeId: "s1", definitions: [current()], ...over });
