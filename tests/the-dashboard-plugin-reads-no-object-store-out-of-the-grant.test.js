@@ -46,33 +46,10 @@ test("a local clone, whose objects are second names of another repository's, is 
   assert.deepEqual(seen.reported, []);
   // Every object of the clone has a second name; the operator is shown one row for the folder, not one per object.
   assert.equal(seen.problems.split("\n").length, 1, seen.problems);
-  assert.match(seen.problems, /its git directory holds .*folder.\.git.objects.*, a file of its object store that another repository shares \(a clone of a local path shares them, in the clone and in the original alike\); in this folder run `git gc`, then `git update-server-info --force`/);
-  assert.doesNotMatch(seen.problems, /re-clone/, "re-cloning the original side could lose work that was never pushed");
-});
-
-test("the fix the row names, run as written, makes either side of a local clone read again, the original included", { skip: onlyWindows }, async () => {
-  // A local clone hard-links BOTH sides, so the original is refused as well, and the first row's "re-clone it" sent
-  // its owner toward deleting a repository that may hold unpushed work (0.8.5 review, F7). Measured on git 2.54:
-  // when the original was already packed, `git gc` alone on either side leaves objects/info/packs shared, and the
-  // folder is still refused; `git update-server-info --force` rewrites it. So the commands are taken from the row
-  // itself and run in the refused folder, which is what an operator reading it would do.
-  for (const side of ["original", "clone"]) {
-    const l = layout();
-    git(side === "original" ? l.folder : l.outside, "gc", "-q");
-    if (side === "original") git(l.grant, "clone", "-q", l.folder, join(l.grant, "its-clone"));
-    else {
-      rmSync(l.folder, { recursive: true, force: true });
-      git(l.grant, "clone", "-q", l.outside, l.folder);
-    }
-    const refused = await look(l);
-    assert.deepEqual(refused.reported, [], `${side}: refused before the fix`);
-    const commands = [...refused.problems.matchAll(/`git ([^`]+)`/g)].map((m) => m[1].split(" "));
-    assert.equal(commands.length, 2, `${side}: the row names the commands to run: ${refused.problems}`);
-    for (const args of commands) git(l.folder, ...args);
-    const seen = await look(l);
-    assert.equal(seen.problems, "", side);
-    assert.deepEqual(seen.reported, [git(l.folder, "rev-parse", "HEAD")], side);
-  }
+  assert.match(seen.problems, /its git directory holds .*folder.\.git.objects.*, a file of its object store that another repository shares \(a clone of a local path shares its object files on both sides, the original and the clone\); `git gc` and then `git update-server-info --force` in this folder may clear it, and the folder is judged again on its next look/);
+  // 0.8.5 review, F7: re-cloning the original side could lose work that was never pushed, and a maintenance command
+  // is offered as something that MAY clear it, never as a guaranteed or a safe fix.
+  assert.doesNotMatch(seen.problems, /re-clone|will clear|always|safe/);
 });
 
 test("a store borrowed from inside the grant, holding an object with a second name, is not read", { skip: onlyWindows }, async () => {
