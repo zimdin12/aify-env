@@ -158,6 +158,24 @@ test("A REFUSED ID is kept with its reason and logged once, and a push that refu
   assert.deepEqual(sync.state.refused, [], "control: a later push that refuses nothing clears it");
 });
 
+test("A REFUSAL BESIDE A FREED ID survives a fresh retry that fails", async () => {
+  const store = await defined();
+  const reason = "defined on win32:host-b";
+  const api = recordingApi({ pushAnswers: [{ ok: true, refused: [{ id: "lead", reason: FREE_SINCE }, { id: "other", reason }] }] });
+  const sync = syncWith(store, api);
+  let pushes = 0;
+  const pushDefinitions = api.pushDefinitions;
+  api.pushDefinitions = async (...args) => {
+    pushes += 1;
+    if (pushes === 2) throw new Error("the service went away");
+    return pushDefinitions(...args);
+  };
+  await sync.pass(ENV);
+  assert.equal(pushes, 2, "the freed id was retried with a fresh revision");
+  assert.match(sync.state.lastPushError, /went away/);
+  assert.deepEqual(sync.state.refused, [{ id: "other", reason }], "the ordinary refusal is still held");
+});
+
 test("THE SERVICE UNREACHABLE: the claim's failure is recorded and the push still tried; a failed push is retried next pass", async () => {
   const store = await defined();
   const down = new CommsApiError("connect ECONNREFUSED", { status: 0 });
