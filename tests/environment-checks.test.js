@@ -226,7 +226,10 @@ test("advertiseAttemptCause separates a refusal from an outage", () => {
   // service that refused our key is a fault on THIS host; a service that is down is somebody else's.
   assert.equal(advertiseAttemptCause({ ok: true, status: 200 }), "accepted");
   assert.equal(advertiseAttemptCause({ ok: false, status: 401 }), "refused-credential");
-  assert.equal(advertiseAttemptCause({ ok: false, status: 403 }), "refused-credential");
+  // A 403 is not the key: the service answers a wrong or missing key with 401 (0.8.5 review, F8).
+  assert.equal(advertiseAttemptCause({ ok: false, status: 403, error: "machine m proves itself with a host proof" }), "refused-host-proof");
+  assert.equal(advertiseAttemptCause({ ok: false, status: 403, error: "only the operator may do that" }), "refused-forbidden");
+  assert.equal(advertiseAttemptCause({ ok: false, status: 403 }), "refused-forbidden");
   assert.equal(advertiseAttemptCause({ ok: false, status: 0, error: "ECONNREFUSED" }), "unreachable");
   assert.equal(advertiseAttemptCause({ ok: false, status: 500 }), "refused-other");
   // NEVER ATTEMPTED is not a failed attempt: a daemon that has not beaten yet gathered no evidence.
@@ -267,10 +270,40 @@ test("a credential that IS set and still refused is named as WRONG, not missing"
   const credentials = { "aify-comms": { keyEnv: ["AIFY_API_KEY"], hasCredential: true } };
   const check = advertiseCredentialCheck({
     answered: true, enabled: true, credentials,
-    attempts: { "aify-comms": { ok: false, status: 403 } },
+    attempts: { "aify-comms": { ok: false, status: 401, error: '{"error":"Invalid or missing API key."}' } },
   });
   assert.equal(check.state, "failed");
   assert.match(check.detail, /wrong value, not a missing one/);
+});
+
+// 0.8.5 review, F8. The doctor read every 403 as a wrong key and said so; the service answers a wrong or missing
+// key with 401, and a 403 means a host proof, an operator claim or a scope. Each test holds the key SET, the case
+// in which the old row said "it is the wrong value".
+const keySet = { "aify-comms": { keyEnv: ["AIFY_API_KEY"], hasCredential: true } };
+const checkFor = (attempt) => advertiseCredentialCheck({
+  answered: true, enabled: true, credentials: keySet, attempts: { "aify-comms": attempt },
+});
+const PROOF_REFUSAL = '{"detail":"environment heartbeat refused: machine win32:abc proves itself with a host proof and this request presents a different one. If this is that machine\'s aify-env after its ~/.aify/host-secret was replaced, an operator resets it: POST /host-proofs/win32:abc/reset"}';
+
+test("a 403 naming a host proof says the service holds another proof for this machine, and names the reset route", () => {
+  const check = checkFor({ ok: false, status: 403, error: PROOF_REFUSAL });
+  assert.equal(check.state, "failed");
+  assert.match(check.detail, /already holds a different host proof for this machine/);
+  assert.match(`${check.detail} ${check.fix}`, /POST \/host-proofs\/win32:abc\/reset/, "the route the service named");
+  assert.doesNotMatch(`${check.detail} ${check.fix}`, /wrong value|set one of|Export the variable/, "the key is not the cause");
+  // The text is kept to 300 characters and the route comes last: a long machine id loses it, and the row still
+  // names the reset for the machine the refusal named first.
+  const long = "linux:0123456789abcdef0123456789abcdef";
+  const cut = PROOF_REFUSAL.replaceAll("win32:abc", long).slice(0, 300);
+  assert.doesNotMatch(cut, /\/reset/, "the fixture really is cut before the route");
+  assert.match(checkFor({ ok: false, status: 403, error: cut }).fix, new RegExp(`POST /host-proofs/${long}/reset`));
+});
+
+test("any other 403 is reported as the service's refusal, in its own words, not as a credential", () => {
+  const check = checkFor({ ok: false, status: 403, error: "only the operator may change this" });
+  assert.notEqual(check.state, "passed");
+  assert.match(check.detail, /refused \(403\): only the operator may change this/);
+  assert.doesNotMatch(`${check.detail} ${check.fix || ""}`, /wrong value|set one of|host proof/);
 });
 
 test("advertising switched OFF is a configuration, not a missing credential", () => {

@@ -230,6 +230,28 @@ test("a non-2xx is reported as a failure rather than swallowed", () => {
   });
 });
 
+test("a refusal keeps what the service said, because a 403 has more than one cause and only its text says which", async () => {
+  // 0.8.5 review, F8: the body was discarded (error ""), so the doctor read every 403 as a wrong key, while the
+  // service answers a wrong or missing key with 401 and a 403 for a host proof, an operator claim or a scope.
+  const answer = (status, text) => ({ status, text: async () => text });
+  const proof = '{"detail":"environment heartbeat refused: machine win32:abc proves itself with a host proof and this request presents none. If this is that machine\'s aify-env after its ~/.aify/host-secret was replaced, an operator resets it: POST /host-proofs/win32:abc/reset"}';
+  const [refused] = await advertiseTo({ targets: ["http://a/x"], post: async () => answer(403, proof) });
+  assert.deepEqual([refused.ok, refused.status], [false, 403]);
+  assert.equal(refused.error, proof.slice(0, 300), "the first 300 characters, as the service wrote them");
+  assert.match(refused.error, /host proof/);
+  // A service's text is printed by the doctor: no terminal control reaches it, and no more than 300 characters.
+  const [noisy] = await advertiseTo({ targets: ["http://a/x"], post: async () => answer(403, `a\u001b[2Jb\nc${"x".repeat(400)}`) });
+  assert.equal(noisy.error.length, 300);
+  assert.equal(noisy.error.slice(0, 8), "a [2Jb c");
+  // A body that cannot be read keeps the status: the refusal is still a refusal, with nothing said.
+  const [unread] = await advertiseTo({ targets: ["http://a/x"], post: async () => ({ status: 403, text: async () => { throw new Error("aborted"); } }) });
+  assert.deepEqual([unread.status, unread.error], [403, ""]);
+  // CONTROL: an acceptance carries no text, and its body is not read.
+  let read = false;
+  const [accepted] = await advertiseTo({ targets: ["http://a/x"], post: async () => ({ status: 200, text: async () => { read = true; return "ok"; } }) });
+  assert.deepEqual([accepted.ok, accepted.error, read], [true, "", false]);
+});
+
 // -- which harnesses aify-wrapper was installed for --------------------------------------------
 
 const WRAPPER = `#!/usr/bin/env bash\nHARNESS_WRAPPER_VERSION="0.6.0"\nexec claude "$@"\n`;
@@ -628,14 +650,14 @@ test("a target whose registry entry declares NO key variable can never be given 
   assert.equal(credentialReadiness(targets, { AIFY_API_KEY: "k" }).legacy.hasCredential, false);
 });
 
-test("attemptsByService keeps the last outcome per service, and NO response body", () => {
+test("attemptsByService keeps the last outcome per service, its refusal text included, and nothing else", () => {
   const targets = [{ name: "aify-comms", url: "http://a", keyEnv: [] }];
   const attempts = new Map([[acceptanceKey(targets[0]),
-    { at: 1234, ok: false, status: 401, error: "" }]]);
+    { at: 1234, ok: false, status: 403, error: "refused: host proof", body: "not carried" }]]);
   const out = attemptsByService(targets, attempts);
-  assert.deepEqual(out["aify-comms"], { at: 1234, ok: false, status: 401, error: "" });
-  // A service's error TEXT is its own and could carry anything, including something it should not
-  // have said. Only a status number and this daemon's own transport error travel.
+  assert.deepEqual(out["aify-comms"], { at: 1234, ok: false, status: 403, error: "refused: host proof" });
+  // `error` is a transport error or the refusal's own text, cut and cleaned by `advertiseTo` (F8); no other
+  // field of a recorded attempt travels.
   assert.deepEqual(Object.keys(out["aify-comms"]).sort(), ["at", "error", "ok", "status"]);
 });
 
