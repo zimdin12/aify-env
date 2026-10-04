@@ -83,14 +83,16 @@ test("a start with no definition asks no contributor at all", async () => {
   assert.equal(asked.length, 0);
 });
 
-test("a contributor's refusal, its error or a malformed answer refuses the start, naming the service", async () => {
-  // The bug: a worker started without the secrets its definition names, as if fetching them were optional.
+test("a contributor's refusal, its error or a malformed answer refuses the start, in the host's words", async () => {
+  // The bug: a worker started without the secrets its definition names, as if fetching them were optional. What each
+  // says is the host's sentence; what a contributor's own text never reaches is a-contributors-words-never-reach-a-report.
   const cases = [
-    [contributor({ refused: "secret OPENAI_API_KEY for project p1 was refused: 404 no_such_secret" }), /aify-dashboard: secret OPENAI_API_KEY for project p1 was refused: 404 no_such_secret/],
-    [{ service: "aify-dashboard", field: "secrets", async contribute() { throw new Error("no fetch credential"); } }, /aify-dashboard: no fetch credential/],
-    [contributor({ env: { OPENAI_API_KEY: 5 } }), /aify-dashboard: answered in the wrong shape/],
-    [contributor({ env: [] }), /aify-dashboard: answered in the wrong shape/],
-    [contributor(null), /aify-dashboard: answered in the wrong shape/],
+    [contributor({ refused: { reason: "not-found", variable: "OPENAI_API_KEY" } }), /^a plugin: OPENAI_API_KEY was not found where it is kept$/],
+    [contributor({ refused: { reason: "unreachable" } }), /^a plugin: a variable it supplies could not be fetched$/],
+    [{ field: "secrets", async contribute() { throw new Error("no fetch credential"); } }, /^a plugin failed$/],
+    [contributor({ env: { OPENAI_API_KEY: 5 } }), /^a plugin answered in the wrong shape$/],
+    [contributor({ env: [] }), /^a plugin answered in the wrong shape$/],
+    [contributor(null), /^a plugin answered in the wrong shape$/],
   ];
   for (const [who, reason] of cases) {
     const lead = await definedLead();
@@ -109,7 +111,7 @@ test("a contributor that never answers, and ignores its signal, is given up on a
   const began = Date.now();
   const answer = await contributedEnv({ contributors: [{ service: "aify-dashboard", contribute: (asked) => { signal = asked.signal; return new Promise(() => {}); } }],
     definition: {}, waitMs: 200 });
-  assert.match(answer.refused, /aify-dashboard: did not answer within 0\.2 s/);
+  assert.match(answer.refused, /^a plugin did not answer within 0\.2 s$/);
   assert.ok(Date.now() - began < 2_000, "bounded");
   assert.equal(signal.aborted, true, "and the contributor is told to stop");
   assert.ok(SPAWN_ENV_WAIT_MS > 10_000 && SPAWN_ENV_WAIT_MS <= 30_000, "above the contributor's own 10 s request limit, and bounded");
@@ -118,8 +120,8 @@ test("a contributor that never answers, and ignores its signal, is given up on a
 test("a definition naming secrets, on a host where no started plugin supplies them, is refused, not started bare", async () => {
   // The bug: with no contributor for `secrets`, nobody fetches, nothing refuses, and the worker runs without what its
   // definition names (rule 5). That is every host where aify-dashboard is not a started plugin, or declined. A
-  // contributor of something else does not count, and a definition that names no secrets still starts with none.
-  const other = { ...contributor({ env: {} }), service: "elsewhere", field: "other" };
+  // contributor that declares no field does not count, and a definition that names no secrets still starts with none.
+  const other = { async contribute() { return { env: {} }; } };
   for (const contributors of [[], [other]]) {
     const lead = await definedLead();
     const { result, reports, starts } = await start(lead, contributors);
@@ -156,11 +158,12 @@ test("a defined start with contributors and no store to read its definition from
 
 test("a name the launch or the definition already sets refuses the start, in any case on Windows; an inherited one is replaced", () => {
   // The bug: a silent winner between two sources of one variable.
+  // A reason names the contributed variable only when the definition names it, and never the other side's spelling.
   const reserved = { launch: { OPENAI_API_KEY: "a" }, definition: {} };
-  assert.match(layeredEnv({ OPENAI_API_KEY: "a" }, { openai_api_key: "s" }, { ...reserved, windows: true }).refused,
-    /openai_api_key collides with OPENAI_API_KEY, which the launch sets/);
-  assert.match(layeredEnv({}, { K: "s" }, { launch: {}, definition: { k: "d" }, windows: true }).refused,
-    /K collides with k, which the definition sets/);
+  assert.equal(layeredEnv({ OPENAI_API_KEY: "a" }, { openai_api_key: "s" }, { ...reserved, windows: true }).refused,
+    "a variable a plugin set collides with a variable the launch sets");
+  assert.equal(layeredEnv({}, { K: "s" }, { launch: {}, definition: { k: "d" }, windows: true, named: new Set(["K"]) }).refused,
+    "K collides with a variable the definition sets");
   // Not on POSIX, where case makes two names.
   assert.deepEqual(layeredEnv({ k: "d" }, { K: "s" }, { launch: {}, definition: { k: "d" }, windows: false }).env, { k: "d", K: "s" });
   // Over an inherited daemon variable of the same name, in another case, the contribution wins and leaves one spelling.
@@ -170,16 +173,19 @@ test("a name the launch or the definition already sets refuses the start, in any
 
 test("a value holding NUL refuses the start, named without its value", () => {
   // The bug: an env block cannot carry NUL, so the value would arrive cut short, not refused.
-  const refused = layeredEnv({}, { K: "ab\u0000cd" }, { launch: {}, definition: {}, windows: true }).refused;
-  assert.match(refused, /K holds a NUL/);
+  const refused = layeredEnv({}, { K: "ab\u0000cd" }, { launch: {}, definition: {}, windows: true, named: new Set(["K"]) }).refused;
+  assert.equal(refused, "K holds a NUL, which an environment block cannot carry");
   assert.ok(!refused.includes("ab"), "no part of the value");
+  // A name the definition does not name is not quoted.
+  assert.equal(layeredEnv({}, { K: "a\u0000" }, { launch: {}, definition: {}, windows: true }).refused,
+    "a variable a plugin set holds a NUL, which an environment block cannot carry");
 });
 
 test("two contributors naming one variable refuse the start", async () => {
   const lead = await definedLead();
-  const { result } = await start(lead, [contributor({ env: { K: "1" } }), { ...contributor({ env: { k: "2" } }), service: "other" }]);
+  const { result } = await start(lead, [contributor({ env: { OPENAI_API_KEY: "1" } }), contributor({ env: { OPENAI_API_KEY: "2" } })]);
   assert.equal(result.outcome, "refused");
-  assert.match(result.detail, /two plugins set k: aify-dashboard and other/i);
+  assert.equal(result.detail, "two values were contributed for OPENAI_API_KEY");
 });
 
 test("a definition edited between the fetch and admission refuses the start", async () => {
