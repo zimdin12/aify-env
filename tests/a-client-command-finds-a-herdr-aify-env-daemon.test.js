@@ -16,7 +16,7 @@ import { ACTION_RECEIPT_LIMIT, chooseEnvEndpoint, findEnvEndpoint } from "../lib
 
 const DEFAULT = "http://127.0.0.1:8802";
 const DAEMON = "http://127.0.0.1:49999";
-const everyoneAlive = () => true;
+const everyoneAlive = () => "alive";
 
 /** A home whose herdr profile holds `receipts`, oldest first, each `{endpoint, pid, envInstance}`. */
 function homeWith(receipts) {
@@ -43,21 +43,21 @@ const answering = (identities, asked = []) => async (url) => {
 
 test("nothing at the default port: the live daemon its receipt names is the one asked", async () => {
   const fetchImpl = answering({ [DAEMON]: { pid: 4242, instance: "inst-1" } });
-  assert.deepEqual(await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl, alive: everyoneAlive }),
+  assert.deepEqual(await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl, state: everyoneAlive }),
     { endpoint: DAEMON, problem: "" });
 });
 
 test("a receipt whose address answers as another daemon is not taken", async () => {
   const fetchImpl = answering({ [DAEMON]: { pid: 7, instance: "someone-else" } });
-  assert.deepEqual(await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl, alive: everyoneAlive }),
+  assert.deepEqual(await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl, state: everyoneAlive }),
     { endpoint: DEFAULT, problem: "" }, "falls back to the default");
 });
 
 test("CONTROLS: a named endpoint wins, and an environment at the default port is kept", async () => {
   const fetchImpl = answering({ [DAEMON]: { pid: 4242, instance: "inst-1" }, [DEFAULT]: { pid: 1, instance: "default" } });
   assert.equal((await findEnvEndpoint({ env: { AIFY_ENV_ENDPOINT: "http://127.0.0.1:5555" }, home: homeWithReceipt(),
-    fetchImpl, alive: everyoneAlive })).endpoint, "http://127.0.0.1:5555");
-  assert.equal((await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl, alive: everyoneAlive })).endpoint, DEFAULT);
+    fetchImpl, state: everyoneAlive })).endpoint, "http://127.0.0.1:5555");
+  assert.equal((await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl, state: everyoneAlive })).endpoint, DEFAULT);
 });
 
 test("chooseEnvEndpoint: a named endpoint is taken without asking anything", async () => {
@@ -78,7 +78,7 @@ test("two live daemons are named, not chosen between", async () => {
   const other = "http://127.0.0.1:50001";
   const home = homeWith([{ endpoint: other, pid: 11, envInstance: "b" }, { endpoint: DAEMON, pid: 4242, envInstance: "inst-1" }]);
   const fetchImpl = answering({ [DAEMON]: { pid: 4242, instance: "inst-1" }, [other]: { pid: 11, instance: "b" } });
-  const chosen = await findEnvEndpoint({ env: {}, home, fetchImpl, alive: everyoneAlive });
+  const chosen = await findEnvEndpoint({ env: {}, home, fetchImpl, state: everyoneAlive });
   assert.equal(chosen.endpoint, "");
   assert.match(chosen.problem, /2 herdr-aify env daemons answer/);
 });
@@ -89,7 +89,7 @@ test("a daemon past the doctor's eight is found, and dead invocations cost no pr
   const home = homeWith([{ endpoint: DAEMON, pid: 4242, envInstance: "inst-1" }, ...dead]);
   const asked = [];
   const fetchImpl = answering({ [DAEMON]: { pid: 4242, instance: "inst-1" } }, asked);
-  const chosen = await findEnvEndpoint({ env: {}, home, fetchImpl, alive: (pid) => pid === 4242 });
+  const chosen = await findEnvEndpoint({ env: {}, home, fetchImpl, state: (pid) => (pid === 4242 ? "alive" : "gone") });
   assert.deepEqual(chosen, { endpoint: DAEMON, problem: "" });
   assert.deepEqual(asked, [`${DEFAULT}/health`, `${DAEMON}/health`], "only the default and the live receipt are probed");
   assert.ok(21 <= ACTION_RECEIPT_LIMIT, "control: the population fits the limit, so the look was complete");
@@ -103,4 +103,54 @@ test("EVERY CLIENT COMMAND asks through it, refuses on its problem, and keeps no
     assert.match(source, /\.problem\b/, `${command} acts on an unresolved answer`);
     assert.doesNotMatch(source, /127\.0\.0\.1:8802/, `${command} keeps no default-port constant of its own`);
   }
+});
+
+// A LOOK THAT DID NOT HAPPEN IS NOT "NONE" (review of 3f1e1ec): a listing, stat or read that failed, or a process
+// whose state is unknown, each returned the default with an empty problem, which attach and run then act on.
+const failing = (code, onlyFor) => (target) => {
+  if (!onlyFor || String(target).includes(onlyFor)) throw Object.assign(new Error(code), { code });
+};
+const ioWith = (overrides) => ({ ...fs, ...overrides });
+const nobodyAnswers = answering({});
+
+test("a listing that failed for a reason other than absence is a problem, not the default", async () => {
+  const chosen = await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl: nobodyAnswers, state: everyoneAlive,
+    io: ioWith({ readdirSync: failing("EACCES") }) });
+  assert.deepEqual(chosen.endpoint, "");
+  assert.match(chosen.problem, /1 herdr-aify env receipt\(s\) could not be read.*AIFY_ENV_ENDPOINT/);
+});
+
+test("a ready file that could not be looked at, or read, is a problem", async () => {
+  for (const io of [ioWith({ statSync: failing("EACCES", "ready.json") }), ioWith({ readFileSync: failing("EBUSY", "ready.json") })]) {
+    const chosen = await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl: nobodyAnswers, state: everyoneAlive, io });
+    assert.deepEqual([chosen.endpoint, /could not be read/.test(chosen.problem)], ["", true], chosen.problem);
+  }
+  const home = homeWith([{ endpoint: "not-an-endpoint", pid: 4242, envInstance: "inst-1" }]);
+  const corrupt = await findEnvEndpoint({ env: {}, home, fetchImpl: nobodyAnswers, state: everyoneAlive });
+  assert.deepEqual([corrupt.endpoint, /could not be read/.test(corrupt.problem)], ["", true], "an invalid receipt too");
+});
+
+test("a receipt whose process state is unknown is a problem, and is not probed", async () => {
+  const asked = [];
+  const chosen = await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl: answering({}, asked), state: () => "unknown" });
+  assert.equal(chosen.endpoint, "");
+  assert.match(chosen.problem, /whether herdr-aify env pid 4242 still runs could not be told.*AIFY_ENV_ENDPOINT/);
+  assert.deepEqual(asked, [`${DEFAULT}/health`]);
+});
+
+test("CONTROLS: no invocations folder, a folder with no ready file, and a gone pid are facts, not problems", async () => {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "aify-import-home-"));
+  assert.deepEqual(await findEnvEndpoint({ env: {}, home: empty, fetchImpl: nobodyAnswers, state: everyoneAlive }),
+    { endpoint: DEFAULT, problem: "" }, "nothing ran here");
+  const notReady = homeWithReceipt();
+  fs.mkdirSync(path.join(notReady, ".aify", "herdr", "invocations", "never-ready"));
+  fs.writeFileSync(path.join(notReady, ".aify", "herdr", "invocations", "stray-file"), "");
+  assert.deepEqual(await findEnvEndpoint({ env: {}, home: notReady, fetchImpl: nobodyAnswers, state: () => "gone" }),
+    { endpoint: DEFAULT, problem: "" }, "an invocation that never became ready, a stray file, and a dead daemon");
+  const fetchImpl = answering({ [DAEMON]: { pid: 4242, instance: "inst-1" } });
+  assert.deepEqual(await findEnvEndpoint({ env: {}, home: notReady, fetchImpl, state: everyoneAlive }),
+    { endpoint: DAEMON, problem: "" }, "and the live one is still found beside them");
+  // Linux answers a stray FILE's `<file>/ready.json` with ENOTDIR; Windows answers ENOENT, so it is injected here.
+  assert.deepEqual(await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl: nobodyAnswers, state: everyoneAlive,
+    io: ioWith({ statSync: failing("ENOTDIR", "ready.json") }) }), { endpoint: DEFAULT, problem: "" }, "ENOTDIR is not ready");
 });

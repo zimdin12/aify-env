@@ -11,7 +11,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { definitionBytesProblems, MAX_COUNTER } from "../lib/agent-definition-schema.mjs";
-import { DefinitionRefused, DefinitionStore, DefinitionStoreError, processAlive } from "../lib/agent-definitions.mjs";
+import { DefinitionRefused, DefinitionStore, DefinitionStoreError, processAlive, processState } from "../lib/agent-definitions.mjs";
 
 const ALL = new Set(["claude", "codex", "hermes"]);
 const agent = (over = {}) => ({
@@ -279,6 +279,14 @@ test("WHO COUNTS AS RUNNING", () => {
   assert.equal(processAlive(process.pid), true);
   assert.equal(processAlive(deadPid()), false);
   for (const bad of [0, -1, 1.5, "12", null]) assert.equal(processAlive(bad), false, String(bad));
+});
+
+test("A PROBE THAT PROVES NEITHER is unknown, and a lock holder in that state is not broken (review of 3f1e1ec)", () => {
+  const throwing = (code) => () => { throw Object.assign(new Error(code), { code }); };
+  assert.deepEqual([processState(1234, () => true), processState(1234, throwing("EPERM")), processState(1234, throwing("ESRCH")),
+    processState(1234, throwing("EINVAL")), processState(1234, throwing(undefined))], ["alive", "alive", "gone", "unknown", "unknown"]);
+  assert.equal(processAlive(1234, throwing("EINVAL")), true, "the lock code reads unknown as possibly running");
+  assert.equal(processAlive(1234, throwing("ESRCH")), false, "control: a proven-gone holder is still reclaimed");
 });
 
 test("EDGES: a link entry is not overwritten, an outcome is asked only by operation id, an unreadable intent is not settled", async () => {

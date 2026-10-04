@@ -115,9 +115,10 @@ test("content opens are capped whatever the receipts hold, and the rest is unche
   const { io, reads } = fakeFs(dirs);
   const scan = readyReceipts("/root", io);
   assert.equal(reads.length, RECEIPT_LIMIT, `${reads.length} receipt files opened`);
-  assert.deepEqual(scan, { receipts: [], unread: 1000 - RECEIPT_LIMIT });
+  // The opened eight are malformed, so they are unreadable, not checked (review of 3f1e1ec): all 1,000 are unchecked.
+  assert.deepEqual(scan, { receipts: [], unread: 1000 - RECEIPT_LIMIT, unreadable: RECEIPT_LIMIT });
   const answer = await discoverServingEndpoint({ ...scan, fetchHealth });
-  assert.deepEqual(answer, { endpoint: "", unchecked: 1000 - RECEIPT_LIMIT });
+  assert.deepEqual(answer, { endpoint: "", unchecked: 1000 });
   assert.equal((await environmentFrom(answer)).state, STATE.UNANSWERED, "a partial look claimed no environment");
 });
 
@@ -125,7 +126,7 @@ test("eight malformed newer receipts leave an older live one unchecked, and say 
   const dirs = { live: { mtime: 1, ready: receiptFor(1) } };
   for (let n = 0; n < 8; n += 1) dirs[`bad-${n}`] = { mtime: 10 + n, ready: "{not json" };
   const { io } = fakeFs(dirs);
-  assert.deepEqual(readyReceipts("/root", io), { receipts: [], unread: 1 });
+  assert.deepEqual(readyReceipts("/root", io), { receipts: [], unread: 1, unreadable: 8 });
 });
 
 test("a live daemon found among the checked receipts is judged, and unchecked older ones are named (review, T3 round 3)", async () => {
