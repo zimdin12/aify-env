@@ -124,6 +124,11 @@ CASES = [
     case("an env name starting with a digit", "coder-1", body(agent(env={"1BAD": "x"})), ["agent.env: bad-name"]),
     case("an env name with a newline", "coder-1", body(agent(env={"A\n": "x"})), ["agent.env: bad-name"]),
     case("an aify_ name in lower case", "coder-1", body(agent(env={"aify_x": "x"})), ["agent.env.aify_x: reserved"]),
+    # The launchers' namespace (external review of 0.8.4): HARNESS_EXTRA_ENV forced another agent's session id.
+    case("HARNESS_EXTRA_ENV", "coder-1", body(agent(env={"HARNESS_EXTRA_ENV": "HERMES_SESSION_ID=x"})),
+         ["agent.env.HARNESS_EXTRA_ENV: reserved"]),
+    case("a harness_ name in mixed case", "coder-1", body(agent(env={"Harness_Role": "x"})), ["agent.env.Harness_Role: reserved"]),
+    case("a name that only contains HARNESS_", "coder-1", body(agent(env={"MY_HARNESS_FLAG": "1"})), []),
     case("a number value", "coder-1", body(agent(env={"X": 1})), ["agent.env.X: type"]),
     case("a NUL in a value", "coder-1", body(agent(env={"X": "a\u0000b"})), ["agent.env.X: nul"]),
     case("a 4097-byte value", "coder-1", body(agent(env={"X": "y" * 4097})), ["agent.env.X: too-large"]),

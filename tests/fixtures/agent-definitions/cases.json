@@ -1137,6 +1137,82 @@
    ]
   },
   {
+   "name": "HARNESS_EXTRA_ENV",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {
+      "HARNESS_EXTRA_ENV": "HERMES_SESSION_ID=x"
+     },
+     "herdrSpace": true
+    }
+   },
+   "problems": [
+    "agent.env.HARNESS_EXTRA_ENV: reserved"
+   ]
+  },
+  {
+   "name": "a harness_ name in mixed case",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {
+      "Harness_Role": "x"
+     },
+     "herdrSpace": true
+    }
+   },
+   "problems": [
+    "agent.env.Harness_Role: reserved"
+   ]
+  },
+  {
+   "name": "a name that only contains HARNESS_",
+   "population": "candidate",
+   "fileId": "coder-1",
+   "body": {
+    "version": 1,
+    "agent": {
+     "id": "coder-1",
+     "name": "Coder One",
+     "role": "coder",
+     "harness": "claude",
+     "mode": "managed",
+     "workspace": "C:/Docker/project",
+     "model": "",
+     "effort": "",
+     "instructions": "",
+     "env": {
+      "MY_HARNESS_FLAG": "1"
+     },
+     "herdrSpace": true
+    }
+   },
+   "problems": []
+  },
+  {
    "name": "a number value",
    "population": "candidate",
    "fileId": "coder-1",
