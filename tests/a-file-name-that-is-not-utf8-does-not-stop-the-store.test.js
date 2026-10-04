@@ -28,14 +28,17 @@ const agent = (over = {}) => ({
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), "aify-defs-name-"));
 // `bad`, the byte 0xFF (never valid UTF-8), `.json`.
 const BAD_NAME = Buffer.concat([Buffer.from("bad"), Buffer.from([0xff]), Buffer.from(".json")]);
-const DECODED_ID = "bad\uFFFD";
+// Shown by its bytes, never by what they decode to: the decoded string is not the file's name, and 0xFE decodes to
+// the same U+FFFD as 0xFF. Every byte outside printable ASCII, and the backslash, is written as a backslash, x, hex.
+const ESCAPED_ID = String.raw`bad\xFF`;
+const OTHER_BAD_NAME = Buffer.concat([Buffer.from("bad"), Buffer.from([0xfe]), Buffer.from(".json")]);
 
-/** The real listing of `dir`, plus one regular file named BAD_NAME, in the encoding the caller asked for. */
-const withBadName = (dir) => (target, options) => {
+/** The real listing of `dir`, plus a regular file under each bad name, in the encoding the caller asked for. */
+const withBadName = (dir, names = [BAD_NAME]) => (target, options) => {
   const real = fs.readdirSync(target, options);
   if (path.resolve(target) !== path.resolve(dir)) return real;
-  const name = options?.encoding === "buffer" ? BAD_NAME : BAD_NAME.toString("utf8");
-  return [...real, { name, isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false }];
+  const extra = names.map((bytes) => (options?.encoding === "buffer" ? bytes : bytes.toString("utf8")));
+  return [...real, ...extra.map((name) => ({ name, isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false }))];
 };
 
 test("a definition file name that is not UTF-8 is an invalid entry, and every call still works", async () => {
@@ -45,17 +48,30 @@ test("a definition file name that is not UTF-8 is an invalid entry, and every ca
   const listed = await store.list();
   assert.deepEqual(listed.definitions.map((d) => [d.id, d.problems]), [
     ["a", []],
-    [DECODED_ID, ["entry: name-not-utf8"]],
+    [ESCAPED_ID, ["entry: name-not-utf8"]],
   ]);
   // Every public call goes through the same scan; the first version failed them all.
   await store.set("b", agent({ name: "Second" }), { installed: ALL });
   const snap = await store.snapshot({ installed: ALL });
-  assert.deepEqual(snap.entries.map((e) => [e.id, e.state]), [["a", "valid"], ["b", "valid"], [DECODED_ID, "invalid"]]);
+  assert.deepEqual(snap.entries.map((e) => [e.id, e.state]), [["a", "valid"], ["b", "valid"], [ESCAPED_ID, "invalid"]]);
   await store.remove("b");
   assert.equal(fs.existsSync(path.join(dir, ".lock")), false, "no call left its lock behind");
   // Adoption never takes the entry in: the ledger holds only the ids that were set.
   const ledger = JSON.parse(fs.readFileSync(path.join(dir, ".collection.json"), "utf8"));
   assert.deepEqual(Object.keys(ledger.ids).sort(), ["a"]);
+});
+
+test("two bad names that decode alike are two entries, and one going away is neither an adoption nor a removal", async () => {
+  const dir = tempDir();
+  await new DefinitionStore({ dir, lockWaitMs: 300 }).set("a", agent(), { installed: ALL });
+  const both = new DefinitionStore({ dir, lockWaitMs: 300, readdirSync: withBadName(dir, [BAD_NAME, OTHER_BAD_NAME]) });
+  assert.deepEqual((await both.list()).definitions.map((d) => d.id), ["a", String.raw`bad\xFE`, ESCAPED_ID]);
+  const ledgerPath = path.join(dir, ".collection.json");
+  const before = fs.readFileSync(ledgerPath, "utf8");
+  // Both bad names gone, then one back: the ledger records nothing for either.
+  await new DefinitionStore({ dir, lockWaitMs: 300 }).list();
+  await new DefinitionStore({ dir, lockWaitMs: 300, readdirSync: withBadName(dir) }).list();
+  assert.equal(fs.readFileSync(ledgerPath, "utf8"), before, "no operation was recorded for a name that came and went");
 });
 
 test("control: a valid non-ASCII name (ä.json) is listed under its own name, not as a bad one", async () => {
