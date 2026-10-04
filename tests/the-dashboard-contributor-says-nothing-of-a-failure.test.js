@@ -241,6 +241,29 @@ test("THE FINAL CHECK: a stop that lands while the answer is read, after the las
   refusedQuietly(await start(() => [offer], runner), runner, "a plugin: a variable it supplies could not be fetched");
 });
 
+/** An answer whose `name` and `value` reads abort `stop` when `aborting`, through the same exotic seam. */
+function readingAnswer(target, stop, aborting) {
+  const READ = new Set(["name", "value"]);
+  const trip = (key) => { if (aborting && READ.has(key)) stop.abort(); };
+  return new Proxy(target, {
+    get(object, key) { trip(key); return Reflect.get(object, key); },
+    getOwnPropertyDescriptor(object, key) { trip(key); return Reflect.getOwnPropertyDescriptor(object, key); },
+  });
+}
+
+for (const [what, target] of [["a wrong name", { name: "OTHER", value: S }], ["a value that is not a string", { name: "OPENAI_API_KEY", value: 7 }]]) {
+  test(`STOPPED WHILE A MALFORMED ANSWER IS READ (${what}): unreachable, as any stopped call; its unstopped twin is malformed`, async () => {
+    // The bug: the malformed check returned bad-answer before the stop was looked at again.
+    for (const [aborting, reason] of [[true, said("could not be fetched")], [false, said("came back malformed")]]) {
+      const stop = new AbortController();
+      const answer = readingAnswer(target, stop, aborting);
+      const offer = secretsContributor({ service: "aify-dashboard", api: () => ({ secretValue: async () => answer }), stopped: () => stop.signal });
+      const runner = fakeRunner();
+      refusedQuietly(await start(() => [offer], runner), runner, reason);
+    }
+  });
+}
+
 test("an ask whose host signal is already aborted makes no request at all", async (t) => {
   // The check before each request: without it the request is made and fails, which the outcome alone cannot show.
   const { registry, asked } = await dashboardPlugin(t, valid);
