@@ -91,27 +91,27 @@ test("a definition that names no secrets asks the dashboard nothing", async (t) 
   assert.equal(dashboard.requests.length, 1, "the control: a definition naming one secret makes one request");
 });
 
-test("each failure refuses with the secret, the project and the dashboard's code, and never a value", async (t) => {
+test("each failure refuses with the host's reason and the secret's name, and never a value, code or prose", async (t) => {
   // The bug (design D, test 2): a worker started without a secret, or a reason carrying a value. One case per failure,
   // each varying only that failure; every refusal body carries the sentinel in its prose.
   const prose = (code) => ({ error: `refused, and this prose says ${SENTINEL}`, code });
   const cases = [
-    ["no such secret", { status: 404, body: prose("no_such_secret") }, /^secret OPENAI_API_KEY for project p1 was refused: 404 no_such_secret$/],
-    ["no such project", { status: 404, body: prose("no_such_project") }, /was refused: 404 no_such_project$/],
-    ["unreadable", { status: 409, body: prose("unreadable") }, /was refused: 409 unreadable$/],
-    ["no store", { status: 503, body: prose("no_secret_store") }, /was refused: 503 no_secret_store$/],
-    ["a refusal with no code", { status: 500, body: `<html>${SENTINEL}</html>` }, /was refused: 500, with no code$/],
-    ["another name's value", { status: 200, body: { name: "STRIPE_KEY", value: SENTINEL } }, /^secret OPENAI_API_KEY for project p1: the answer was not that secret's value$/],
-    ["a value that is not text", { status: 200, body: { name: "OPENAI_API_KEY", value: 5 } }, /the answer was not that secret's value$/],
-    ["no JSON", { status: 200, body: `${SENTINEL} as plain text` }, /the answer was not that secret's value$/],
+    ["no such secret", { status: 404, body: prose("no_such_secret") }, { refused: { reason: "not-found", variable: "OPENAI_API_KEY" } }],
+    ["no such project", { status: 404, body: prose("no_such_project") }, { refused: { reason: "not-found", variable: "OPENAI_API_KEY" } }],
+    ["unreadable", { status: 409, body: prose("unreadable") }, { refused: { reason: "unreadable", variable: "OPENAI_API_KEY" } }],
+    ["no store", { status: 503, body: prose("no_secret_store") }, { refused: { reason: "unavailable", variable: "OPENAI_API_KEY" } }],
+    ["a known code under another status", { status: 500, body: prose("no_such_secret") }, { refused: { reason: "refused", variable: "OPENAI_API_KEY" } }],
+    ["a code that is an array", { status: 404, body: prose(["no_such_secret"]) }, { refused: { reason: "refused", variable: "OPENAI_API_KEY" } }],
+    ["a refusal with no code", { status: 500, body: `<html>${SENTINEL}</html>` }, { refused: { reason: "refused", variable: "OPENAI_API_KEY" } }],
+    ["another name's value", { status: 200, body: { name: "STRIPE_KEY", value: SENTINEL } }, { refused: { reason: "bad-answer", variable: "OPENAI_API_KEY" } }],
+    ["a value that is not text", { status: 200, body: { name: "OPENAI_API_KEY", value: 5 } }, { refused: { reason: "bad-answer", variable: "OPENAI_API_KEY" } }],
+    ["no JSON", { status: 200, body: `${SENTINEL} as plain text` }, { refused: { reason: "bad-answer", variable: "OPENAI_API_KEY" } }],
   ];
   for (const [what, answer, reason] of cases) {
     const dashboard = await fakeDashboard(t, { OPENAI_API_KEY: answer });
     const { offered } = await started(t, dashboard.endpoint);
     const result = await ask(offered, SECRETS);
-    assert.deepEqual(Object.keys(result), ["refused"], what);
-    assert.match(result.refused, reason, what);
-    assert.ok(!result.refused.includes(SENTINEL), `${what}: no value, and none of the dashboard's prose`);
+    assert.deepEqual(result, reason, what);
     assert.equal(secretRequests(dashboard.requests).length, 1, `${what}: the first failure stops the fetch`);
   }
 });
@@ -124,19 +124,18 @@ test("a redirect is refused, and the place it points to never sees the fetch key
   assert.equal(elsewhere.requests.at(-1).headers["x-aify-secrets-key"], "control");
   elsewhere.requests.length = 0;
   const { offered } = await started(t, dashboard.endpoint);
-  assert.match((await ask(offered, SECRETS)).refused, /^secret OPENAI_API_KEY for project p1 was refused: 302, with no code$/);
+  assert.deepEqual(await ask(offered, SECRETS), { refused: { reason: "refused", variable: "OPENAI_API_KEY" } });
   assert.deepEqual(elsewhere.requests, [], "nothing reached the redirect's target");
 });
 
 test("no fetch credential, or no dashboard answering, refuses; and no credential asks nothing", async (t) => {
   const dashboard = await fakeDashboard(t);
   const { offered } = await started(t, dashboard.endpoint, { fetchKey: "" });
-  assert.equal((await ask(offered, SECRETS)).refused,
-    "secret OPENAI_API_KEY for project p1 could not be fetched: no secretsCredentialRef for aify-dashboard on this host");
+  assert.deepEqual(await ask(offered, SECRETS), { refused: { reason: "no-credential", variable: "OPENAI_API_KEY" } });
   assert.equal(dashboard.requests.length, 0, "and the dashboard was asked nothing, under the API key or any other");
   const silent = await fakeDashboard(t);
   const { offered: unanswered } = await started(t, silent.endpoint.replace(/:\d+$/, ":1"));
-  assert.match((await ask(unanswered, SECRETS)).refused, /^secret OPENAI_API_KEY for project p1 could not be fetched: aify-dashboard did not answer GET /);
+  assert.deepEqual(await ask(unanswered, SECRETS), { refused: { reason: "unreachable", variable: "OPENAI_API_KEY" } });
 });
 
 test("the host's signal stops a fetch in flight, and so does stopping the plugin", { timeout: 10_000 }, async (t) => {
@@ -147,11 +146,11 @@ test("the host's signal stops a fetch in flight, and so does stopping the plugin
   const began = Date.now();
   const pending = ask(offered, SECRETS, host.signal);
   setTimeout(() => host.abort(), 50);
-  assert.match((await pending).refused, /could not be fetched: aify-dashboard did not answer/);
+  assert.deepEqual(await pending, { refused: { reason: "unreachable", variable: "OPENAI_API_KEY" } });
   assert.ok(Date.now() - began < 5_000, "stopped by the signal, not the 10 s request limit");
   const second = ask(offered, SECRETS);
   setTimeout(() => plugin.stop(), 50);
-  assert.match((await second).refused, /could not be fetched/);
+  assert.deepEqual(await second, { refused: { reason: "unreachable", variable: "OPENAI_API_KEY" } });
 });
 
 test("an ordinary instance offers the same contributor, and one not started refuses", async (t) => {
@@ -160,5 +159,5 @@ test("an ordinary instance offers the same contributor, and one not started refu
   assert.equal((await ask(offered, { project: "p1", names: ["OPENAI_API_KEY"] })).env.OPENAI_API_KEY, `${SENTINEL}-OPENAI_API_KEY`);
   const never = createDashboardPlugin({ endpoint: dashboard.endpoint, dedicated: true, service: { name: "aify-dashboard" } });
   assert.deepEqual(await never.capabilities.spawnEnv.contribute({ definition: definition(), signal: new AbortController().signal }),
-    { refused: "the aify-dashboard plugin has not started" });
+    { refused: { reason: "unavailable" } });
 });
