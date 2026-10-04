@@ -10,6 +10,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
+import { definitionProblems, PLUGIN_SUPPLIED_FIELDS } from "../lib/agent-definition-schema.mjs";
 import { workspaceWithinRoots } from "../lib/plugins/aify-comms/claim.mjs";
 import { createHandleBook, runOneControl } from "../lib/plugins/aify-comms/terminal-controls.mjs";
 import { contributedEnv, layeredEnv, SPAWN_ENV_WAIT_MS } from "../lib/plugins/aify-comms/spawn-env.mjs";
@@ -18,8 +19,10 @@ import { PluginHost, PluginProcesses } from "../lib/service-plugins.mjs";
 
 const ALL = new Set(["claude", "codex", "hermes"]);
 const SECRETS = { project: "p1", names: ["OPENAI_API_KEY"] };
-const agent = (over = {}) => ({ name: "Lead", role: "coder", harness: "claude", mode: "managed", workspace: "C:/work",
-  model: "", effort: "", instructions: "", env: {}, herdrSpace: true, secrets: SECRETS, ...over });
+// A field given as undefined is left out, which is how a definition names no secrets.
+const agent = (over = {}) => Object.fromEntries(Object.entries({ name: "Lead", role: "coder", harness: "claude", mode: "managed",
+  workspace: "C:/work", model: "", effort: "", instructions: "", env: {}, herdrSpace: true, secrets: SECRETS, ...over })
+  .filter(([, value]) => value !== undefined));
 
 async function definedLead(over = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-spawn-env-"));
@@ -31,9 +34,9 @@ async function definedLead(over = {}) {
   return { dir, store, launch };
 }
 
-/** A fake contributor: answers `answer` (or what `answer` returns), and records what it was asked. */
+/** A fake contributor of `secrets`: answers `answer` (or what `answer` returns), and records what it was asked. */
 function contributor(answer, asked = []) {
-  return { service: "aify-dashboard", async contribute(request) { asked.push(request); return typeof answer === "function" ? answer(request) : answer; } };
+  return { service: "aify-dashboard", field: "secrets", async contribute(request) { asked.push(request); return typeof answer === "function" ? answer(request) : answer; } };
 }
 
 async function start({ store, launch }, contributors, { baseEnv = {}, beforeAdmit } = {}) {
@@ -84,7 +87,7 @@ test("a contributor's refusal, its error or a malformed answer refuses the start
   // The bug: a worker started without the secrets its definition names, as if fetching them were optional.
   const cases = [
     [contributor({ refused: "secret OPENAI_API_KEY for project p1 was refused: 404 no_such_secret" }), /aify-dashboard: secret OPENAI_API_KEY for project p1 was refused: 404 no_such_secret/],
-    [{ service: "aify-dashboard", async contribute() { throw new Error("no fetch credential"); } }, /aify-dashboard: no fetch credential/],
+    [{ service: "aify-dashboard", field: "secrets", async contribute() { throw new Error("no fetch credential"); } }, /aify-dashboard: no fetch credential/],
     [contributor({ env: { OPENAI_API_KEY: 5 } }), /aify-dashboard: answered in the wrong shape/],
     [contributor({ env: [] }), /aify-dashboard: answered in the wrong shape/],
     [contributor(null), /aify-dashboard: answered in the wrong shape/],
@@ -110,6 +113,30 @@ test("a contributor that never answers, and ignores its signal, is given up on a
   assert.ok(Date.now() - began < 2_000, "bounded");
   assert.equal(signal.aborted, true, "and the contributor is told to stop");
   assert.ok(SPAWN_ENV_WAIT_MS > 10_000 && SPAWN_ENV_WAIT_MS <= 30_000, "above the contributor's own 10 s request limit, and bounded");
+});
+
+test("a definition naming secrets, on a host where no started plugin supplies them, is refused, not started bare", async () => {
+  // The bug: with no contributor for `secrets`, nobody fetches, nothing refuses, and the worker runs without what its
+  // definition names (rule 5). That is every host where aify-dashboard is not a started plugin, or declined. A
+  // contributor of something else does not count, and a definition that names no secrets still starts with none.
+  const other = { ...contributor({ env: {} }), service: "elsewhere", field: "other" };
+  for (const contributors of [[], [other]]) {
+    const lead = await definedLead();
+    const { result, reports, starts } = await start(lead, contributors);
+    assert.equal(result.outcome, "refused", `${contributors.length} contributors`);
+    assert.match(result.detail, /lead names secrets, and no plugin started on this host supplies them/);
+    assert.equal(starts.length, 0);
+    assert.match(reports.at(-1).error, /no plugin started on this host supplies them/);
+  }
+  const plain = await definedLead({ secrets: undefined });
+  const { result } = await start(plain, []);
+  assert.equal(result.outcome, "started", JSON.stringify(result));
+  // So a supplied field must be optional: a required one would refuse every defined start on a host without its plugin.
+  const body = JSON.parse(fs.readFileSync(path.join(plain.dir, "lead.json"), "utf8"));
+  for (const field of PLUGIN_SUPPLIED_FIELDS) {
+    const { [field]: _left, ...without } = body.agent;
+    assert.deepEqual(definitionProblems({ ...body, agent: without }, "lead").filter((p) => p.startsWith(`agent.${field}`)), [], field);
+  }
 });
 
 test("a defined start with contributors and no store to read its definition from is refused, not started bare", async () => {

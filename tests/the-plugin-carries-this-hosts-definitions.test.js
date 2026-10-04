@@ -116,7 +116,7 @@ test("THE HOST'S spawnEnv REACHES A DEFINED START through the plugin, asked abou
     subscribe() { return () => {}; }, canStream() { return true; }, write() {}, resize() {}, async stop() {}, relabel() {}, release() {},
     list() { return []; }, history() { return {}; }, instance() { return "i"; } };
   const asked = [];
-  const contributor = { service: "aify-dashboard", async contribute({ definition }) { asked.push(definition); return { env: { OPENAI_API_KEY: "from-the-contributor" } }; } };
+  const contributor = { service: "aify-dashboard", field: "secrets", async contribute({ definition }) { asked.push(definition); return { env: { OPENAI_API_KEY: "from-the-contributor" } }; } };
   const host = new PluginHost({ processes: new PluginProcesses(runner), environmentId: "", credential: async () => "",
     log: () => {}, spawnEnv: () => [contributor] });
   const plugin = createCommsPlugin({
