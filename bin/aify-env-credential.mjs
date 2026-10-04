@@ -48,6 +48,7 @@ const USAGE = [
   "  aify-env credential status [--service <name>]",
   "  aify-env credential remove --service <name> [--ref <name>]",
   "  aify-env credential remove --ref <name>",
+  "  (--service=<name> and --ref=<name> are the same, for a value that begins with -)",
   "",
   "The key is read from STDIN. There is deliberately no flag that takes it: argv is readable by",
   "every process on the host for as long as the command runs.",
@@ -68,6 +69,14 @@ export function parseCredentialArgs(argv) {
     const arg = args[i];
     if (arg === "--stdin") { options.stdin = true; continue; }
     if (arg === "--service") { options.service = String(args[i + 1] || ""); i += 1; continue; }
+    // THE = FORM IS ONE TOKEN, so its value may begin with `-`: a stored ref or a service named `--x` has no other
+    // exact spelling. What the doctor prints. An empty value is refused, never read as "not given".
+    if (arg.startsWith("--service=")) {
+      options.service = arg.slice("--service=".length);
+      if (!options.service) { options.problem = "--service= needs a service name"; return options; }
+      continue;
+    }
+    if (arg.startsWith("--ref=")) { refGiven = true; options.ref = arg.slice("--ref=".length); continue; }
     if (arg === "--ref") {
       refGiven = true;
       const value = args[i + 1];
