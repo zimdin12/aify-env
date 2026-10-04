@@ -306,33 +306,33 @@ test("A STORE THAT COULD NOT BE READ IS UNANSWERED, never clean", () => {
   assert.equal(answer.state, "unanswered");
   assert.match(answer.detail, /could not be read/);
   // Missing inputs are the same kind of no-evidence rather than a tidy zero.
-  assert.equal(credentialStoreCheck({ storeNames: null, registryRefs: [] }).state, "unanswered");
-  assert.equal(credentialStoreCheck({ storeNames: [], registryRefs: null }).state, "unanswered");
+  assert.equal(credentialStoreCheck({ storeNames: null, references: [] }).state, "unanswered");
+  assert.equal(credentialStoreCheck({ storeNames: [], references: null }).state, "unanswered");
 });
 
 test("a dangling reference outranks an orphan, because it is the one breaking something now", () => {
   // An orphan is a secret nobody presents. A dangling reference is a service that cannot advertise
   // until somebody fixes it, so it is the finding an operator should see first.
   const both = credentialStoreCheck({
-    storeNames: ["stale.key"], registryRefs: ["gone.key"],
+    storeNames: ["stale.key"], references: [{ service: "s", field: "credentialRef", ref: "gone.key" }],
   });
   assert.equal(both.state, "failed");
   assert.match(both.detail, /not stored/);
-  assert.match(both.fix, /installer/);
+  assert.match(both.fix, /`aify-env credential set --service s --ref gone\.key --stdin`/);
 });
 
 test("an orphan is REPORTED, and the fix says why it is not deleted", () => {
-  const answer = credentialStoreCheck({ storeNames: ["a.key", "stale.key"], registryRefs: ["a.key"] });
+  const answer = credentialStoreCheck({ storeNames: ["a.key", "stale.key"], references: [{ service: "s", field: "credentialRef", ref: "a.key" }] });
   assert.equal(answer.state, "failed");
   assert.match(answer.detail, /stale\.key/);
   // Never auto-deleted: a registry that is briefly unreadable would otherwise look like permission
   // to delete everything.
-  assert.match(answer.fix, /reported rather than deleted/);
+  assert.match(answer.fix, /reported, never deleted/);
 });
 
 test("a store whose every file is referenced passes, and an empty one says so", () => {
-  assert.equal(credentialStoreCheck({ storeNames: ["a.key"], registryRefs: ["a.key"] }).state, "passed");
-  const empty = credentialStoreCheck({ storeNames: [], registryRefs: [] });
+  assert.equal(credentialStoreCheck({ storeNames: ["a.key"], references: [{ service: "s", field: "credentialRef", ref: "a.key" }] }).state, "passed");
+  const empty = credentialStoreCheck({ storeNames: [], references: [] });
   assert.equal(empty.state, "passed");
   assert.match(empty.detail, /no credentials stored/);
 });
