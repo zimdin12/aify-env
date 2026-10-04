@@ -47,6 +47,7 @@ const USAGE = [
   "  aify-env credential set --service <name> --stdin [--ref <name>]",
   "  aify-env credential status [--service <name>]",
   "  aify-env credential remove --service <name> [--ref <name>]",
+  "  aify-env credential remove --ref <name>",
   "",
   "The key is read from STDIN. There is deliberately no flag that takes it: argv is readable by",
   "every process on the host for as long as the command runs.",
@@ -60,11 +61,21 @@ export function parseCredentialArgs(argv) {
   const args = Array.isArray(argv) ? argv.map(String) : [];
   const action = args[0] || "";
   const options = { action, service: "", ref: "", stdin: false, problem: "" };
+  // A GIVEN --ref IS HELD TO ITS GRAMMAR, empty included. An empty one used to fall through to the service's default,
+  // so `remove --service s --ref ""` targeted the live key instead of refusing.
+  let refGiven = false;
   for (let i = 1; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === "--stdin") { options.stdin = true; continue; }
     if (arg === "--service") { options.service = String(args[i + 1] || ""); i += 1; continue; }
-    if (arg === "--ref") { options.ref = String(args[i + 1] || ""); i += 1; continue; }
+    if (arg === "--ref") {
+      refGiven = true;
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith("--")) { options.problem = "--ref needs a reference name"; return options; }
+      options.ref = value;
+      i += 1;
+      continue;
+    }
     // A FLAG THAT WOULD CARRY THE SECRET IS REFUSED BY NAME, rather than merely unsupported. An
     // unknown flag that gets ignored is how somebody ends up with the key in their shell history
     // and in the process table, believing it worked -- it did work, and that is the problem.
@@ -80,15 +91,20 @@ export function parseCredentialArgs(argv) {
     options.problem = action ? `unknown action '${action}'` : "no action given";
     return options;
   }
-  if (action !== "status" && !options.service) {
-    options.problem = `${action} needs --service <name>`;
+  // REMOVE MAY NAME THE FILE ALONE: an orphan has no service to name, which is what makes it one. Set always needs one.
+  if (action === "set" && !options.service) {
+    options.problem = "set needs --service <name>";
+    return options;
+  }
+  if (action === "remove" && !options.service && !refGiven) {
+    options.problem = "remove needs --service <name> or --ref <name>";
     return options;
   }
   if (action === "set" && !options.stdin) {
     options.problem = "set needs --stdin: the key is read from standard input, never from argv";
     return options;
   }
-  if (options.ref) {
+  if (refGiven) {
     const bad = credentialRefProblem(options.ref);
     if (bad) options.problem = `--ref ${bad}`;
   }
