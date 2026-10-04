@@ -318,7 +318,7 @@ test("a dangling reference outranks an orphan, because it is the one breaking so
   });
   assert.equal(both.state, "failed");
   assert.match(both.detail, /not stored/);
-  assert.match(both.fix, /`aify-env credential set --service s --ref gone\.key --stdin`/);
+  assert.match(both.fix, /In Bash: `MSYS2_ARG_CONV_EXCL='\*' aify-env credential set --service=s --ref=gone\.key --stdin`/);
 });
 
 test("an orphan is REPORTED, and the fix says why it is not deleted", () => {
