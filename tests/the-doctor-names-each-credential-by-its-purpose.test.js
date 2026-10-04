@@ -179,6 +179,16 @@ test("COMMANDS for literal identities: a space, a leading dash, a path, quotes a
   assert.deepEqual(commandsIn(orphan.fix).map((c) => [c.action, c.problem, c.ref]), [["remove", "", "--orphan-key"]]);
 });
 
+test("A BACKTICK in a service prints no command line, only its exact argv as JSON; a control service still prints one", async () => {
+  // The bug: quoting the backtick, which Bash would accept, prints a command inside the doctor's own backtick span
+  // whose end cannot be told from the text. Ruled 2026-10-04 (1791098756355-5d9a7766): refuse it.
+  const row = await credentialsRow(registry({ "tick`. b": { secretsCredentialRef: "key-t" }, "plain service": { secretsCredentialRef: "key-c" } }), []);
+  const lines = String(row.fix).split("In Bash: ").slice(1);
+  assert.equal(lines.length, 1, `one command line, the control's: ${row.fix}`);
+  assert.ok(lines[0].startsWith("`MSYS2_ARG_CONV_EXCL='*' aify-env credential set '--service=plain service' --ref=key-c --stdin`"), row.fix);
+  assert.ok(row.fix.includes(JSON.stringify(["aify-env", "credential", "set", "--service=tick`. b", "--ref=key-t", "--stdin"])), row.fix);
+});
+
 test("THE CLI: exact refs and services in the = form; a given value that is empty, malformed or missing is refused", () => {
   const ok = (argv) => { const options = parseCredentialArgs(argv); assert.equal(options.problem, "", JSON.stringify(argv)); return options; };
   assert.equal(referenceFor(ok(["remove", "--ref", "dashboard-secrets"])), "dashboard-secrets");
