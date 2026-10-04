@@ -123,9 +123,10 @@ test("a stop that arrives during a tick ends the loop, and detach always detache
     return recorded.fetch(url);
   };
   let clock = 0;
+  let reads = 0;
   const plugin = createDashboardPlugin(
     { ...entry, service: entry, machineId: "win32:h", watchRoots: async () => ({ roots: [], problems: ["none"] }) },
-    { fetch, tickMs: 5, now: () => (clock += LIST_EVERY_MS) },
+    { fetch, tickMs: 5, now: () => { reads += 1; return (clock += LIST_EVERY_MS); } },
   );
   await plugin.start(host);
   for (let waited = 0; release === null; waited += 1) {
@@ -138,6 +139,11 @@ test("a stop that arrives during a tick ends the loop, and detach always detache
   assert.deepEqual(await detaching, { detached: true, held: 0 });
   await settle();
   assert.equal(recorded.calls.length, 2, "the tick in flight finished, and none followed it");
+  // AND NO TICK RAN AT ALL. A stopped client refuses before it fetches, so the fetch count alone cannot see a loop that
+  // goes on ticking after detach; every tick reads the clock, so the reads can.
+  const after = reads;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(reads, after, "no tick ran after detach");
 });
 
 test("the claiming row ignores a plugin that claims nothing", () => {
