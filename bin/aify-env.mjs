@@ -735,6 +735,7 @@ server.listen(port, HOST, async () => {
       environmentId: "",
       credential: async (service) => resolvePluginCredential(service),
       log: (message) => logLine(message),
+      spawnEnv: () => servicePlugins.capabilities("spawnEnv"), // what started plugins add to a worker's env (spawn-env.mjs)
     });
     const shared = {
       version: VERSION,

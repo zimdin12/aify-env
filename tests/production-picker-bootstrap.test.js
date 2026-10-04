@@ -84,6 +84,22 @@ test("production bootstrap preserves fail-closed behavior if the identity produc
   assert.equal(reads, 0, "missing identity must not widen the roster query");
 });
 
+test("THE DAEMON'S PLUGIN HOST offers every started plugin's spawnEnv, asked when a start asks, not captured at boot", async (t) => {
+  // The bug: the host the daemon builds offers no contributors, or a list read once at boot, so a plugin started after
+  // the first never adds to a worker's env. The host is recorded as it is built; a plugin started after boot must count.
+  const built = [];
+  const Recorded = class extends PluginHost { constructor(options) { super(options); built.push(this); } };
+  const facts = { platform: "win32", hostname: "fallback", env: { COMPUTERNAME: "Picker-Windows" }, isWsl: false, exists: () => false };
+  const registry = new ServicePlugins();
+  t.after(() => registry.stopAll());
+  await picker(t, facts, hostIdentityFacts, { PluginHost: Recorded, servicePlugins: registry });
+  assert.equal(built.length, 1);
+  assert.deepEqual(built[0].spawnEnv(), [], "aify-comms offers none");
+  const offered = { service: "later", contribute: async () => ({ env: {} }) };
+  await registry.add({ name: "later", start() {}, stop() {}, capabilities: { spawnEnv: offered } }, built[0]);
+  assert.deepEqual(built[0].spawnEnv(), [offered], "a plugin started after boot is asked too");
+});
+
 test("THE DAEMON'S DEFINITION STORE AND INSTALLED HARNESSES reach the plugin it starts (P0 C3, C7)", async (t) => {
   // A store standing in for the operator's: it records who read it, and never touches a disk.
   const seen = { lists: 0, installed: null };
