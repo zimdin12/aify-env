@@ -336,8 +336,8 @@ const credentialReading = () => ({ env: process.env, root: credentialRoot(), acl
 /** The key for the service a plugin serves, resolved PER CALL through the same store-aware path the
  *  advertiser uses -- so a credential written while this daemon runs reaches a running plugin -- and
  *  from THAT plugin's own registry entry (`pluginCredential`), never the registry's first target. */
-async function resolvePluginCredential(service) {
-  return pluginCredential(service, (target) => credentialForTarget(target, credentialReading()));
+async function resolvePluginCredential(service, field) {
+  return pluginCredential(service, (target) => credentialForTarget(target, credentialReading()), field);
 }
 
 // An escape hatch for anyone who wants the daemon in a terminal without the view taking it over.
@@ -733,7 +733,7 @@ server.listen(port, HOST, async () => {
       // NOT the environment id: its shape is a service's convention, and the plugin derives it from
       // what this host advertises.
       environmentId: "",
-      credential: async (service) => resolvePluginCredential(service),
+      credential: async (service, field) => resolvePluginCredential(service, field),
       log: (message) => logLine(message),
       spawnEnv: () => servicePlugins.capabilities("spawnEnv"), // what started plugins add to a worker's env (spawn-env.mjs)
     });
