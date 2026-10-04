@@ -81,3 +81,54 @@ test("GIVEN THE STORE, the plugin publishes it and refuses a start built from an
   assert.deepEqual(starts, [], "no process was started");
   assert.deepEqual(plugin.state().definitions.published, { storeId, revision: pushes[0].revision });
 });
+
+test("THE HOST'S spawnEnv REACHES A DEFINED START through the plugin, asked about this host's definition", async (t) => {
+  // The bug: the plugin never hands the host's contributors, or the store reading, to its control loop, so every
+  // worker starts without what its definition names, and every test of the parts below still passes.
+  const store = new DefinitionStore({ dir: fs.mkdtempSync(path.join(os.tmpdir(), "aify-plugin-spawn-env-")), lockWaitMs: 300 });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "aify-plugin-launcher-"));
+  const launcher = path.join(root, "claude-aify");
+  fs.writeFileSync(launcher, LAUNCHER_TEXT);
+  await store.set("lead", { ...agent, secrets: { project: "p1", names: ["OPENAI_API_KEY"] } }, { installed: ALL });
+  const { storeId } = await store.list();
+  let handedOut = false;
+  const controlReports = [];
+  const api = {
+    identity: { bridgeId: "bridge-test" },
+    async heartbeat() { return {}; },
+    async claim() { return {}; },
+    async claimControls() {
+      if (handedOut) return { controls: [] };
+      handedOut = true;
+      return { controls: [{ id: "ctl-1", terminalId: "term-1", action: "start" }] };
+    },
+    async launch() {
+      return { launch: { terminalId: "term-1", agentId: "lead", runtime: "claude-code", argv: [launcher, "--aify-agent", "lead"],
+        cwd: root, env: {}, definition: { storeId, incarnation: 1, revision: 1 } } };
+    },
+    async reportControl(id, patch) { controlReports.push({ id, ...patch }); },
+    async terminalOutput() { return {}; },
+    async claimDefinitionRequests() { return { requests: [] }; },
+    async pushDefinitions() { return { ok: true, refused: [] }; },
+  };
+  const starts = [];
+  const runner = { async start(spec) { starts.push(spec); return { id: "proc-1", pid: 1 }; },
+    subscribe() { return () => {}; }, canStream() { return true; }, write() {}, resize() {}, async stop() {}, relabel() {}, release() {},
+    list() { return []; }, history() { return {}; }, instance() { return "i"; } };
+  const asked = [];
+  const contributor = { service: "aify-dashboard", async contribute({ definition }) { asked.push(definition); return { env: { OPENAI_API_KEY: "from-the-contributor" } }; } };
+  const host = new PluginHost({ processes: new PluginProcesses(runner), environmentId: "", credential: async () => "",
+    log: () => {}, spawnEnv: () => [contributor] });
+  const plugin = createCommsPlugin({
+    endpoint: "http://127.0.0.1:1", machineId: "win32:test-host", windows: true, api,
+    advertisement: async () => ({ hostname: "test-host", kind: "win32" }), cwdRoots: async () => [root],
+    readFile: () => LAUNCHER_TEXT, definitions: store, installedHarnesses: async () => ALL,
+    setTimeoutImpl: () => 0, clearTimeoutImpl: () => {},
+  });
+  t.after(() => plugin.stop());
+  await plugin.start(host);
+  await until(() => starts.length > 0 || controlReports.length > 0, "the first control pass");
+  assert.equal(starts.length, 1, JSON.stringify(controlReports));
+  assert.equal(starts[0].env.OPENAI_API_KEY, "from-the-contributor");
+  assert.deepEqual(asked[0].secrets, { project: "p1", names: ["OPENAI_API_KEY"] }, "asked with this host's definition");
+});
