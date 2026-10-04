@@ -57,7 +57,8 @@ async function startWith(contributors, { secrets = true, launchEnv = {}, baseEnv
     spawnEnv: () => contributors,
   });
   const reported = sent.map((s) => JSON.parse(s)).filter((r) => r.method === "PATCH").map((r) => JSON.parse(r.body));
-  return { result, sent, logs, starts, reported };
+  const persisted = await store.boundReading(launch);
+  return { result, sent, logs, starts, reported, persisted };
 }
 
 const secrets = (answer) => ({ service: "aify-dashboard", field: "secrets", contribute: typeof answer === "function" ? answer : async () => answer });
@@ -133,6 +134,61 @@ for (const arm of arms()) {
     assert.ok(!holds([...good.sent, ...good.logs], S), "and the value is in the spec only");
   });
 }
+
+// ⛔ THE DEFINITION A CONTRIBUTOR IS HANDED IS NOT THE HOST'S. The bug: the contributor got the host's own bound object,
+// which the host read again after the callback, for the requested names and for the env it layered on.
+// A contributor that appended a name, or planted an accessor or a proxy, steered the host's own reading.
+const E = `planted${randomBytes(8).toString("hex")}`;
+const mutating = (mutate, answer) => secrets(async ({ definition }) => { mutate(definition); return answer; });
+
+for (const arm of [
+  { id: "a name appended to the requested names, then refused by it", needle: NAME,
+    bad: mutating((d) => d.secrets.names.push(NAME), { refused: { reason: "not-found", variable: NAME } }), reason: WRONG,
+    good: secrets({ refused: { reason: "not-found", variable: "OPENAI_API_KEY" } }), goodReason: notFound },
+  { id: "a name appended to the requested names, then contributed", needle: NAME,
+    bad: mutating((d) => d.secrets.names.push(NAME), { env: { OPENAI_API_KEY: S, [NAME]: "v" } }), reason: "a plugin set a variable its field does not name",
+    good: secrets(value()) },
+]) {
+  test(`MUTATION: ${arm.id} is judged by the host's own reading, not the copy it handed out; the twin reaches its own end`, async () => {
+    const bad = await startWith([arm.bad]);
+    assert.equal(bad.result.detail, arm.reason, JSON.stringify(bad.result));
+    assert.equal(bad.starts.length, 0, "nothing started");
+    assert.deepEqual(bad.reported.map((patch) => [patch.status, patch.error]), [["failed", arm.reason]]);
+    assert.ok(!holds([...bad.sent, ...bad.logs], arm.needle), "the appended name is in no request and no log line");
+    assert.deepEqual(bad.persisted.agent.secrets.names, ["OPENAI_API_KEY"], "the store still names only what it was given");
+    const good = await startWith([arm.good]);
+    if (arm.goodReason) assert.equal(good.result.detail, arm.goodReason);
+    else assert.equal(good.result.outcome, "started", JSON.stringify(good.result));
+  });
+}
+
+for (const arm of [
+  { id: "an accessor planted on the definition's secrets", plant: (d) => { Object.defineProperty(d, "secrets", { get() { arm.reads += 1; throw new Error(E); }, configurable: true }); } },
+  { id: "a proxy planted as the definition's env", plant: (d) => { d.env = new Proxy({}, { ownKeys() { arm.reads += 1; throw new Error(E); } }); } },
+]) {
+  arm.reads = 0;
+  test(`PLANTED: ${arm.id} never runs in the host; the start goes on as the store defines it, and nothing of it is sent`, async () => {
+    const run = await startWith([mutating(arm.plant, value())]);
+    assert.equal(run.result.outcome, "started", JSON.stringify(run.result));
+    assert.equal(run.starts[0].env.OPENAI_API_KEY, S, "the value the contributor gave reached the spec");
+    assert.equal(arm.reads, 0, "the host never ran what was planted");
+    assert.ok(!holds([...run.sent, ...run.logs], E), "nothing of it is in a request or a log line");
+    assert.deepEqual(run.persisted.agent.secrets.names, ["OPENAI_API_KEY"]);
+    const twin = await startWith([secrets(value())]);
+    assert.equal(twin.result.outcome, "started", JSON.stringify(twin.result));
+  });
+}
+
+test("a definition the host cannot copy is the host's sentence, and spawnEnvFor never throws", async () => {
+  // Containment for the host's own reading: a bound definition holding an exotic value refuses, and asks no contributor.
+  const { spawnEnvFor } = await import("../lib/plugins/aify-comms/spawn-env.mjs");
+  let asked = 0;
+  const agent = { ...LEAD, env: new Proxy({}, { ownKeys() { throw new Error(E); } }) };
+  const answer = await spawnEnvFor({ launch: { agentId: "lead", definition: { storeId: "s", incarnation: 1, revision: 1 }, env: {} }, env: {},
+    contributors: [secrets(async () => { asked += 1; return value(); })], definitionFor: async () => ({ agent }), windows: true });
+  assert.deepEqual(answer, { refused: "this host could not read the start's definition" });
+  assert.equal(asked, 0, "no contributor was asked");
+});
 
 test("an inherited daemon variable of the same name, in another case, is replaced, leaving one spelling", async () => {
   const run = await startWith(valid(), { baseEnv: { Openai_Api_Key: "daemon's" } });
