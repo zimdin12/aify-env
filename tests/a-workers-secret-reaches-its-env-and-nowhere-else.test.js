@@ -29,7 +29,10 @@ const ALL = new Set(["claude", "codex", "hermes"]);
 const slashed = (p) => p.replace(/\\/g, "/");
 const noTerminal = !terminalSupport().available && "this host has no terminal support, so no real worker can start";
 
-/** Every form a value could be written in that a plain search would miss. PURE. */
+/**
+ * The four whole-string forms searched: raw, base64, hex and JSON-escaped. PURE. For a plain ASCII value raw and
+ * JSON-escaped are one string. A value split across two records, or written in any other encoding, is not found.
+ */
 const formsOf = (value) => [value, Buffer.from(value).toString("base64"), Buffer.from(value).toString("hex"), JSON.stringify(value).slice(1, -1)];
 
 /** The labels of the places that hold any form of `value`. PURE. */
@@ -143,14 +146,45 @@ async function startDefinedWorker(t, value) {
 
   await until(() => sent.some((s) => s.startsWith('["reportControl"')), "the start to be reported");
   await until(() => fs.existsSync(`${out}.child`), "the worker to write what it saw");
-  const reported = JSON.parse(sent.find((s) => s.startsWith('["reportControl"')));
-  const handle = String(reported[2]?.handle ?? "");
-  // What the host keeps about a running worker: its owned-process record holds the worker only until it exits.
-  const whileRunning = { owned: fs.readFileSync(ownedFile, "latin1"), registry: JSON.stringify(runner.list()), health: JSON.stringify(registry.report()) };
+  // What the host keeps about a running worker, read while it runs: its owned-process record drops it at exit.
+  const whileRunning = { owned: fs.readFileSync(ownedFile, "latin1"), listed: runner.list(), health: JSON.stringify(registry.report()) };
+  const bound = boundWorker({ reported: JSON.parse(sent.find((s) => s.startsWith('["reportControl"')))[2],
+    listed: whileRunning.listed, owned: whileRunning.owned });
+  assert.ok(bound.handle, `the observations are bound to one worker: ${bound.refused}`);
+  const { handle } = bound;
   fs.writeFileSync(`${out}.release`, "");
-  await until(() => !runner.list().some((p) => p.id === handle), "the worker to exit");
+  // THAT worker's exit, by its own id, before anything is read as "after".
+  await until(() => !runner.list().some((p) => p.id === handle), `worker ${handle} to exit`);
   return { root, out, runner, registry, logs, sent, dashboard, storeDir, handle, whileRunning };
 }
+
+/**
+ * The one worker a start produced, or why the observations cannot be bound to one. PURE.
+ *
+ * A start is bound only by a completed report naming a non-empty handle, a live registry row with that id, and an
+ * owned-process entry with that id. An empty handle would match everything: `includes("")` holds for any text, and
+ * "no row has id ''" holds while a real worker still runs.
+ */
+function boundWorker({ reported, listed, owned }) {
+  const handle = String(reported?.handle ?? "");
+  if (reported?.status !== "completed" || !handle) return { refused: `no completed report with a handle: ${JSON.stringify(reported)}` };
+  if (!(Array.isArray(listed) && listed.some((row) => row?.id === handle))) return { refused: `${handle} is not in the runner's registry` };
+  let entries;
+  try { entries = JSON.parse(owned); } catch { return { refused: "env-processes.json is not JSON" }; }
+  if (!(Array.isArray(entries) && entries.some((entry) => entry?.id === handle))) return { refused: `${handle} is not in env-processes.json` };
+  return { handle };
+}
+
+test("the observations bind to a worker only by a completed report's handle, its registry row and its owned entry", () => {
+  // The adverse controls for boundWorker: a report without a handle, an empty record, and a live worker it does not name.
+  const live = [{ id: "worker-A" }];
+  const owned = JSON.stringify([{ id: "worker-A" }]);
+  assert.deepEqual(boundWorker({ reported: { status: "completed", handle: "worker-A" }, listed: live, owned }), { handle: "worker-A" });
+  assert.match(boundWorker({ reported: { status: "completed" }, listed: live, owned: "[]" }).refused, /no completed report with a handle/);
+  assert.match(boundWorker({ reported: { status: "failed", handle: "worker-A" }, listed: live, owned }).refused, /no completed report/);
+  assert.match(boundWorker({ reported: { status: "completed", handle: "worker-B" }, listed: live, owned }).refused, /worker-B is not in the runner's registry/);
+  assert.match(boundWorker({ reported: { status: "completed", handle: "worker-A" }, listed: live, owned: "[]" }).refused, /not in env-processes.json/);
+});
 
 test("THE SENTINEL reaches the worker's env, and no byte of it is anywhere else", { skip: noTerminal, timeout: 60_000 }, async (t) => {
   // The bug: a secret's value written anywhere but the worker's env: a log line, /health, the process registry or its
@@ -166,11 +200,10 @@ test("THE SENTINEL reaches the worker's env, and no byte of it is anywhere else"
   assert.equal(fs.readFileSync(`${run.out}.child`, "utf8"), SENTINEL, "and so did its child");
   for (const form of formsOf(SENTINEL)) assert.deepEqual(holding([["planted", `x${form}y`]], SENTINEL), ["planted"], form);
 
-  // THE REPLAY, as a console attaching late is handed it: the stream outlives the exited process.
-  const [worker] = run.runner.list().length ? run.runner.list() : [{ id: run.handle }];
+  // THE REPLAY of the bound worker, as a console attaching after it exited is handed it.
   const replay = [];
-  const unsubscribe = run.runner.subscribe(run.handle || worker.id, (chunk) => replay.push(String(chunk)));
-  assert.ok(unsubscribe, "the worker's stream is still held, so its replay is read");
+  const unsubscribe = run.runner.subscribe(run.handle, (chunk) => replay.push(String(chunk)));
+  assert.ok(unsubscribe, `worker ${run.handle}'s stream is still held, so its replay is read`);
   unsubscribe();
   const places = [
     ...run.logs.map((line, i) => [`log line ${i}`, line]),
@@ -178,15 +211,15 @@ test("THE SENTINEL reaches the worker's env, and no byte of it is anywhere else"
     ["the runner's registry", JSON.stringify(run.runner.list())],
     ["the runner's history", JSON.stringify(run.runner.history())],
     ["env-processes.json while the worker ran", run.whileRunning.owned],
-    ["the runner's registry while the worker ran", run.whileRunning.registry],
+    ["the runner's registry while the worker ran", JSON.stringify(run.whileRunning.listed)],
     ["/health plugins while the worker ran", run.whileRunning.health],
     ["the runner's replay", replay.join("")],
-    ...run.sent.map((call, i) => [`sent to aify-comms ${i}`, call]),
+    // Labelled by the call, so a leak names its destination: `terminalOutput` is the output stream.
+    ...run.sent.map((call, i) => [`aify-comms ${JSON.parse(call)[0]} (call ${i})`, call]),
     ...run.dashboard.requests.map((request, i) => [`sent to aify-dashboard ${i}`, request]),
     ...filesUnder(run.root, new Set([`${run.out}.bash`, `${run.out}.child`])),
   ];
   assert.ok(places.some(([label]) => label.endsWith("env-processes.json")), "the runner's file was written, so it is searched");
-  assert.ok(run.whileRunning.owned.includes(run.handle), "and while the worker ran it held the worker's entry");
   assert.ok(places.some(([label]) => label.includes("/definitions/")), "the definition store's files are searched");
   const found = holding(places, SENTINEL);
   assert.deepEqual(found, [], `no byte of the value outside the worker's env; found in: ${found.join(", ")}`);
