@@ -177,20 +177,24 @@ witness("THE DAEMON'S OWN WIRING hands the asking plugin's entry to the resolver
   const daemon = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
   const begin = daemon.indexOf("async function resolvePluginCredential(");
   const end = daemon.indexOf(NEWLINE + "}", begin);
-  const property = daemon.split(NEWLINE).filter((line) => line.includes("credential: async (service) =>"));
+  const property = daemon.split(NEWLINE).filter((line) => line.includes("credential: async (service, field) =>"));
   assert.ok(begin > 0 && end > begin, "the daemon's resolver must remain identifiable");
   assert.equal(property.length, 1, "the host's credential property must remain identifiable");
   const resolved = [];
   const context = {
     pluginCredential,
-    credentialForTarget: async (target) => { resolved.push(target.name); return { value: `key-for-${target.name}` }; },
+    credentialForTarget: async (target) => { resolved.push(target.name); return { value: `key-for-${target.credentialRef || target.name}` }; },
     credentialReading: () => ({}),
   };
   const { runInNewContext } = await import("node:vm");
   const host = runInNewContext(`${daemon.slice(begin, end + 2)}; ({ ${property[0].trim()} })`, context);
   assert.equal(await host.credential(comms(OLD, "KEY_OLD")), "key-for-aify-comms");
   assert.equal(await host.credential(null), "", "no entry, no key");
-  assert.deepEqual(resolved, ["aify-comms"]);
+  // And a named credential's field reaches pluginCredential: dropped, the plugin would be handed the API key instead.
+  const dashboard = { name: "aify-dashboard", endpoint: OLD, keyEnv: [], credentialRef: "api",
+    credentialRefs: { credentialRef: "api", secretsCredentialRef: "fetch" } };
+  assert.equal(await host.credential(dashboard, "secretsCredentialRef"), "key-for-fetch");
+  assert.deepEqual(resolved, ["aify-comms", "aify-dashboard"]);
 });
 
 witness("pluginCredential: the entry's own key, and nothing for no entry", async () => {
