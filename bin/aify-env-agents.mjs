@@ -200,7 +200,10 @@ async function main() {
   const installed = new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client));
   try {
     const { code, lines } = await runAgents(intent, { store, installed,
-      importable: async () => importableAgents({ endpoint: await findEnvEndpoint() }) });
+      importable: async () => {
+        const found = await findEnvEndpoint();
+        return found.problem ? { problem: found.problem, services: [] } : importableAgents({ endpoint: found.endpoint });
+      } });
     process.stdout.write(lines.join(EOL) + EOL);
     process.exitCode = code;
   } catch (error) {

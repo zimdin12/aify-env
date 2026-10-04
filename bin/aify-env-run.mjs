@@ -127,7 +127,12 @@ export function startRequestFrom({ service, launcher, label = "", cwd = "", args
 if (process.argv[1] && process.argv[1].endsWith("aify-env-run.mjs")) {
   // Named, else the default port, else the live `herdr-aify env` daemon on the port the OS picked.
   // Found here, not at import, so importing this for its parsers asks nothing.
-  const ENDPOINT = await findEnvEndpoint();
+  const found = await findEnvEndpoint();
+  if (found.problem) {
+    say(`aify-env run: ${found.problem}.`);
+    process.exit(69);
+  }
+  const ENDPOINT = found.endpoint;
   const parsed = parseRunArgs(process.argv.slice(2));
   const built = startRequestFrom({
     ...parsed,

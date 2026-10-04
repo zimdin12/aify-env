@@ -34,10 +34,16 @@ import { readHostConfig } from "../lib/host-config.mjs";
 import { findEnvEndpoint } from "../lib/serving-endpoint.mjs";
 
 const LF = String.fromCharCode(10);
-// Named, else the default port, else the live `herdr-aify env` daemon on the port the OS picked.
-const ENDPOINT = await findEnvEndpoint();
-
 const say = (text) => process.stderr.write(`${text}${LF}`);
+
+// Named, else the default port, else the live `herdr-aify env` daemon on the port the OS picked; refused
+// when the look was incomplete or found two (serving-endpoint.mjs).
+const FOUND = await findEnvEndpoint();
+if (FOUND.problem) {
+  say(`aify-env attach: ${FOUND.problem}.`);
+  process.exit(69);
+}
+const ENDPOINT = FOUND.endpoint;
 
 async function daemonHealth() {
   // WHERE THE FAST PATH IS, asked rather than computed: the daemon knows whether it has a socket,
