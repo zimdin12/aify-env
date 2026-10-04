@@ -101,6 +101,24 @@ test("production bootstrap preserves fail-closed behavior if the identity produc
   assert.equal(reads, 0, "missing identity must not widen the roster query");
 });
 
+test("THE DAEMON'S PLUGIN HOST offers every started plugin's spawnEnv, asked when a start asks, not captured at boot", async (t) => {
+  // The bug: the host the daemon builds offers no contributors, or a list read once at boot, so a plugin started after
+  // the first never adds to a worker's env. The host is recorded as it is built; a plugin started after boot must count.
+  // On 0.9 the daemon hands the host's parts to startDaemonPlugins, which builds the host (lib/daemon-plugin-bootstrap.mjs;
+  // that link is pinned in tests/daemon-plugin-bootstrap.test.js). What the daemon's own statements hand it is read here.
+  const given = [];
+  const recording = (options) => { given.push(options); return startDaemonPlugins(options); };
+  const facts = { platform: "win32", hostname: "fallback", env: { COMPUTERNAME: "Picker-Windows" }, isWsl: false, exists: () => false };
+  await picker(t, facts, hostIdentityFacts, { startDaemonPlugins: recording });
+  assert.equal(given.length, 1);
+  assert.equal(typeof given[0].spawnEnv, "function", "a function, so it is asked at each start");
+  assert.deepEqual(given[0].spawnEnv(), [], "aify-comms offers none");
+  // The registry the daemon handed startDaemonPlugins, the one its spawnEnv reads.
+  const offered = { service: "later", contribute: async () => ({ env: {} }) };
+  await given[0].registry.add({ name: "later", start() {}, stop() {}, capabilities: { spawnEnv: offered } }, {});
+  assert.deepEqual(given[0].spawnEnv(), [offered], "a plugin started after boot is asked too");
+});
+
 test("THE DAEMON'S DEFINITION STORE AND INSTALLED HARNESSES reach the plugin it starts (P0 C3, C7)", async (t) => {
   // A store standing in for the operator's: it records who read it, and never touches a disk.
   const seen = { lists: 0, installed: null };

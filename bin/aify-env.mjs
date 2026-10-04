@@ -705,6 +705,8 @@ server.listen(port, HOST, async () => {
       registry: servicePlugins, runner, paneOpener,
       credential: async (service) => resolvePluginCredential(service),
       log: (message) => logLine(message),
+      // What started plugins add to a defined worker's env, asked at each start (lib/plugins/aify-comms/spawn-env.mjs).
+      spawnEnv: () => servicePlugins.capabilities("spawnEnv"),
       makeShared: () => ({
         version: VERSION,
         machineId: hostIdentityFacts({

@@ -92,3 +92,15 @@ test("registry following still coalesces an in-flight beat and permits the next 
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(f.registry.names(), ["fixture"]);
 });
+
+test("the host a plugin is started with offers the daemon's spawnEnv, asked when a start asks", async () => {
+  // Piece 4 (aify-dashboard docs/PLAN-SECRETS-PORT-0.9.md, rev 2): the contributors reach a plugin that starts workers
+  // through startDaemonPlugins, as a function, so what is offered is read at each start and not captured at boot.
+  const f = fixture();
+  let offered = [];
+  await startDaemonPlugins({ ...f.io, spawnEnv: () => offered });
+  assert.deepEqual(f.host.spawnEnv(), []);
+  const later = { service: "later", contribute: async () => ({ env: {} }) };
+  offered = [later];
+  assert.deepEqual(f.host.spawnEnv(), [later], "read again at each start");
+});
