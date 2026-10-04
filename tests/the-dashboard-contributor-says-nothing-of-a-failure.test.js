@@ -19,6 +19,7 @@ import { CommsApi } from "../lib/plugins/aify-comms/api.mjs";
 import { workspaceWithinRoots } from "../lib/plugins/aify-comms/claim.mjs";
 import { createHandleBook, runOneControl } from "../lib/plugins/aify-comms/terminal-controls.mjs";
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
+import { secretsContributor } from "../lib/plugins/aify-dashboard/secrets-contributor.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
 
 const ALL = new Set(["claude", "codex", "hermes"]);
@@ -163,6 +164,81 @@ test("RESTART: an old call released after the plugin restarted is refused, and a
   const fresh = await start(() => offers, runner);
   assert.equal(fresh.result.outcome, "started", JSON.stringify(fresh.result));
   assert.equal(runner.starts[0].env.OPENAI_API_KEY, S);
+});
+
+/** A credential resolver held until `release(value)`. */
+function heldKey() {
+  let release;
+  let began;
+  const reached = new Promise((resolve) => { began = resolve; });
+  const fetchKey = () => { began(); return new Promise((resolve) => { release = resolve; }); };
+  return { fetchKey, reached, release: (value) => release(value) };
+}
+
+/** A fake runner, for a contributor offered directly rather than through the plugin. */
+const fakeRunner = () => ({ starts: [], async start(spec) { this.starts.push(spec); return { id: "proc-1", pid: 1 }; }, subscribe() { return () => {}; }, list() { return []; } });
+
+test("STOP while the credential is pending: a key that arrives after stop makes NO request, and starts nothing", async (t) => {
+  // The bug: DashboardApi awaited the credential, then called the transport without checking stop again, so a key
+  // released after stop was sent once, under an aborted signal.
+  const key = heldKey();
+  const { plugin, registry, runner, asked } = await dashboardPlugin(t, valid, { fetchKey: key.fetchKey });
+  const offers = registry.capabilities("spawnEnv");
+  const pending = start(() => offers, runner);
+  await key.reached;
+  await plugin.stop();
+  key.release("fetch-key-for-the-secrets-route-01");
+  refusedQuietly(await pending, runner, said("could not be fetched"));
+  assert.equal(asked.length, 0, "no request to the dashboard after stop");
+});
+
+test("STOP outranks the error class: an empty key or a 404 that arrives after stop is unreachable, not its own reason", async (t) => {
+  // The bug: the catch returned the error's own class before looking at the stop, so a stopped call said
+  // "no credential" or "not found".
+  const key = heldKey();
+  const first = await dashboardPlugin(t, valid, { fetchKey: key.fetchKey });
+  const offers = first.registry.capabilities("spawnEnv");
+  const pending = start(() => offers, first.runner);
+  await key.reached;
+  await first.plugin.stop();
+  key.release("");
+  refusedQuietly(await pending, first.runner, said("could not be fetched"));
+
+  let release;
+  let began;
+  const reached = new Promise((resolve) => { began = resolve; });
+  const second = await dashboardPlugin(t, () => { began(); return new Promise((resolve) => { release = () => resolve(json(404, prose("no_such_secret"))); }); });
+  const late = start(() => second.registry.capabilities("spawnEnv"), second.runner);
+  await reached;
+  await second.plugin.stop();
+  release();
+  refusedQuietly(await late, second.runner, said("could not be fetched"));
+});
+
+test("AN ANSWER'S ACCESSOR is never read: a getter for the value is a malformed answer, and the getter does not run", async () => {
+  let ran = false;
+  const answer = { name: "OPENAI_API_KEY", get value() { ran = true; return S; } };
+  const stop = new AbortController();
+  const offer = secretsContributor({ service: "aify-dashboard", api: () => ({ secretValue: async () => answer }), stopped: () => stop.signal });
+  const runner = fakeRunner();
+  refusedQuietly(await start(() => [offer], runner), runner, said("came back malformed"));
+  assert.equal(ran, false, "the getter was not invoked");
+});
+
+test("THE FINAL CHECK: a stop that lands while the answer is read, after the last await, refuses the start", async () => {
+  // The bug: no check before returning {env}. Reading an exotic answer runs code after the last await; a stop there
+  // must still refuse. A plain answer from DashboardApi runs none, so this is the plan's guard, pinned directly.
+  const stop = new AbortController();
+  const target = { name: "OPENAI_API_KEY", value: S };
+  // Only the answer's own fields: resolving the async call reads `then`, which is before the last await's check.
+  const READ = new Set(["name", "value"]);
+  const answer = new Proxy(target, {
+    get(object, key) { if (READ.has(key)) stop.abort(); return Reflect.get(object, key); },
+    getOwnPropertyDescriptor(object, key) { if (READ.has(key)) stop.abort(); return Reflect.getOwnPropertyDescriptor(object, key); },
+  });
+  const offer = secretsContributor({ service: "aify-dashboard", api: () => ({ secretValue: async () => answer }), stopped: () => stop.signal });
+  const runner = fakeRunner();
+  refusedQuietly(await start(() => [offer], runner), runner, "a plugin: a variable it supplies could not be fetched");
 });
 
 test("an ask whose host signal is already aborted makes no request at all", async (t) => {
