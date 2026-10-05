@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { hostIdentityFacts } from "../lib/advertise.mjs";
-import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
-import { startServicePlugins } from "../lib/plugin-bootstrap.mjs";
+import { ServicePlugins } from "../lib/service-plugins.mjs";
+import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
 import { readServices } from "../lib/services.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
@@ -13,10 +13,10 @@ import { handleRequest } from "../lib/protocol.mjs";
 // Only external IO and timers are replaced. The shared payload, factory, plugin,
 // starter and GET route are production code; the test never supplies machineId.
 const daemon = readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
-const begin = daemon.indexOf("    const host = new PluginHost({");
-const end = daemon.indexOf("    for (const line of bootstrapReport(outcome))", begin);
+const begin = daemon.indexOf("    followServices = await startDaemonPlugins({");
+const end = daemon.indexOf("\n    });", begin);
 assert.ok(begin > 0 && end > begin, "production bootstrap boundaries must remain identifiable");
-const bootstrap = `(async () => { ${daemon.slice(begin, end)} return outcome; })()`;
+const bootstrap = `(async () => { let followServices; ${daemon.slice(begin, end + 8)} return followServices; })()`;
 
 async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
   const expected = hostIdentityFacts(facts).machineId;
@@ -33,8 +33,9 @@ async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
   };
   const runner = { list: () => [], start: () => assert.fail("listing must not spawn"),
     stop: () => assert.fail("listing must not stop a process") };
-  const outcome = await runInNewContext(bootstrap, {
-    PluginHost, PluginProcesses, startServicePlugins, servicePlugins: registry,
+  const reports = [];
+  const follow = await runInNewContext(bootstrap, {
+    startDaemonPlugins, servicePlugins: registry, chr10: "\n",
     runner, VERSION: "test", REGISTRY_FILE: "memory-only-registry", CWD_ROOTS: [],
     // NO DEFINITION STORE: the daemon makes this operator's own outside the evaluated block, and a
     // picker test must never publish or read it.
@@ -49,14 +50,16 @@ async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
     currentAdvertisementBody: () => ({ hostname: facts.hostname, kind: "test" }),
     hostIdentityFacts: identity, hostname: () => facts.hostname,
     hostIsWsl: () => facts.isWsl, existsSync: facts.exists,
-    process: { platform: facts.platform, env: facts.env },
+    process: { platform: facts.platform, env: facts.env, stderr: { write: (line) => reports.push(line) } },
     pluginsForServices: (services, shared) => pluginsForServices(services, {
       ...shared, api, setTimeoutImpl: () => 1, clearTimeoutImpl: () => {},
     }),
     ...context,
   });
-  assert.deepEqual(outcome.failed, []);
-  assert.deepEqual(outcome.started, ["aify-comms"]);
+  assert.equal(typeof follow, "function");
+  assert.deepEqual(registry.report().map((plugin) => plugin.name), ["aify-comms"]);
+  assert.ok(reports.some((line) => /hosting work for: aify-comms/.test(line)));
+  assert.ok(reports.every((line) => !/failed|refused/.test(line)), "production startup reports no failed plugin");
   const answer = await handleRequest({ method: "GET", path: "/agents/startable" }, {
     runner, agents: registry.capability("agents"),
   });

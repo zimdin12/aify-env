@@ -21,8 +21,9 @@ test("the daemon's shared.dedicated is true exactly when an instance context was
 });
 
 test("the property sits in the object handed to every plugin, not somewhere else in the daemon", () => {
-  const begin = daemon.indexOf("const shared = {");
-  const end = daemon.indexOf("};", begin);
-  assert.ok(begin > 0 && end > begin, "the daemon's shared object must remain identifiable");
+  const begin = daemon.indexOf("makeShared: () => ({");
+  const end = daemon.indexOf("}),", begin);
+  assert.ok(begin > 0 && end > begin, "the daemon's shared-context factory must remain identifiable");
   assert.match(daemon.slice(begin, end), /\n\s*dedicated:/);
+  assert.match(daemon, /followServices = await startDaemonPlugins\(\{/);
 });

@@ -77,10 +77,11 @@ import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { readServices, registryIsReadable } from "../lib/services.mjs";
-import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
+import { ServicePlugins } from "../lib/service-plugins.mjs";
+import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
-import { bootstrapReport, followRegistry, followReport, pluginCredential, startServicePlugins } from "../lib/plugin-bootstrap.mjs";
+import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
 import {
   advertiseTo,
   advertisementTargets,
@@ -726,41 +727,32 @@ server.listen(port, HOST, async () => {
   // A DEDICATED INSTANCE STARTS THEM TOO. Was `if (!instanceContext)`, which left it with no `agents`
   // capability, so the picker answered 503 beside a service that was registered and healthy.
   try {
-    const host = new PluginHost({
-      // INSIDE A HERDR, A STARTED WORKER GETS A SPACE. Null when this is not a dedicated
-      // instance, which is every ordinary daemon. See lib/herdr-pane-opener.mjs.
-      processes: new PluginProcesses(runner, { onStarted: paneOpener, prepare: paneOpener?.prepare }),
-      // NOT the environment id: its shape is a service's convention, and the plugin derives it from
-      // what this host advertises.
-      environmentId: "",
+    followServices = await startDaemonPlugins({
+      registry: servicePlugins, runner, paneOpener,
       credential: async (service) => resolvePluginCredential(service),
       log: (message) => logLine(message),
+      makeShared: () => ({
+        version: VERSION,
+        machineId: hostIdentityFacts({
+          platform: process.platform, hostname: hostname(), env: process.env,
+          exists: existsSync, isWsl: hostIsWsl(),
+        }).machineId,
+        // Resolved when asked rather than captured: a registry edit or a rotated key must reach a
+        // running plugin without a restart.
+        advertisement: async () => currentAdvertisementBody(),
+        cwdRoots: async () => CWD_ROOTS,
+        windows: process.platform === "win32",
+        definitions: definitionStore,
+        installedHarnesses: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
+        // A herdr's DEDICATED instance starts plugins too, so a plugin that must run once per host (aify-dashboard's
+        // git watcher) asks this and declines when it is true.
+        dedicated: instanceContext !== null,
+        watchRoots: async () => readGrantedRoots({ definitions: definitionStore }),  // what a plugin may read (lib/watch-roots.mjs)
+      }),
+      readServices: () => readServices(readFileSync(REGISTRY_FILE, "utf8")),
+      build: pluginsForServices,
+      report: (line) => process.stderr.write(`[aify-env] ${line}${chr10}`),
     });
-    const shared = {
-      version: VERSION,
-      machineId: hostIdentityFacts({
-        platform: process.platform, hostname: hostname(), env: process.env,
-        exists: existsSync, isWsl: hostIsWsl(),
-      }).machineId,
-      // Resolved when asked rather than captured: a registry edit or a rotated key must reach a
-      // running plugin without a restart.
-      advertisement: async () => currentAdvertisementBody(),
-      cwdRoots: async () => CWD_ROOTS,
-      windows: process.platform === "win32",
-      definitions: definitionStore,
-      installedHarnesses: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
-      // A herdr's DEDICATED instance starts plugins too, so a plugin that must run once per host (aify-dashboard's
-      // git watcher) asks this and declines when it is true.
-      dedicated: instanceContext !== null,
-      watchRoots: async () => readGrantedRoots({ definitions: definitionStore }),  // what a plugin may read (lib/watch-roots.mjs)
-    };
-    const outcome = await startServicePlugins({ registry: servicePlugins, host, services: readServices(readFileSync(REGISTRY_FILE, "utf8")), build: pluginsForServices, shared });
-    for (const line of bootstrapReport(outcome)) process.stderr.write(`[aify-env] ${line}${chr10}`);
-    // AND FOLLOW THE REGISTRY from now on, on the advertiser's beat (P0 C8, lib/plugin-bootstrap.mjs).
-    let following = null;
-    followServices = (services) => { following ??= followRegistry({ registry: servicePlugins, host, services, build: pluginsForServices, shared })
-      .then((result) => { for (const line of followReport(result)) logLine(line); }, (error) => logLine(`registry follow failed: ${error?.message || error}`))
-      .finally(() => { following = null; }); };
   } catch (error) {
     process.stderr.write(`[aify-env] service plugins not started: ${error?.message || error}
 `);

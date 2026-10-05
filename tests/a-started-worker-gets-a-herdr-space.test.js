@@ -396,7 +396,9 @@ test("THE DAEMON BUILDS ONE, read rather than run, because importing it STARTS a
   const { dirname, join } = await import("node:path");
   const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs"), "utf8");
   assert.match(source, /paneOpenerFor\(\{/, "the daemon never builds a pane opener");
-  assert.match(source, /new PluginProcesses\(runner, \{ onStarted: paneOpener, prepare: paneOpener\?\.prepare \}\)/, "the opener reaches no start, or the worker keeps the daemon's pane identity");
+  const bootstrap = readFileSync(new URL("../lib/daemon-plugin-bootstrap.mjs", import.meta.url), "utf8");
+  assert.match(source, /registry: servicePlugins, runner, paneOpener,/, "the daemon never hands its opener to the plugin assembly");
+  assert.match(bootstrap, /new PluginProcesses\(runner, \{ onStarted: paneOpener, prepare: paneOpener\?\.prepare \}\)/, "the opener reaches no start, or the worker keeps the daemon's pane identity");
   // AND THE EXIT IT CLOSES ON COMES FROM THE RUNNER. An opener built without `watchExit` opens every
   // pane and closes none, which is invisible to every test above -- they inject their own.
   assert.match(source, /watchExit: \(id, on\) => runner\.subscribe\(id, \(\) => \{\}, on\)/, "the opener learns no exit");
