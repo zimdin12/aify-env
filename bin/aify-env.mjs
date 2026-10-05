@@ -79,6 +79,7 @@ import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { readServices, registryIsReadable } from "../lib/services.mjs";
 import { ServicePlugins } from "../lib/service-plugins.mjs";
 import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
+import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
 import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
@@ -579,6 +580,7 @@ let viewOnly = false;
 let stopAdvertising = null;
 //: Set once the service plugins have started: brings them level with a registry that was read.
 let followServices = null;
+let agentState = null;
 server.on("error", async (failure) => {
   if (failure?.code === "EADDRINUSE") {
     if (instanceContext) {
@@ -699,6 +701,9 @@ server.on("error", async (failure) => {
 server.listen(port, HOST, async () => {
   const bound = server.address();
   const support = terminalSupport();
+  try { agentState = bootDaemonAgentState({ aifyHome: join(homedir(), ".aify"), context: instanceContext,
+    url: `http://${HOST}:${bound.port}`, report: logLine }); }
+  catch (error) { process.stderr.write(`[aify-env] agent state boot failed: ${error.message}\n`); process.exit(2); }
   // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
   // reapLeftovers.
   if (instanceContext) {

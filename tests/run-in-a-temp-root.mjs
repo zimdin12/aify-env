@@ -62,7 +62,10 @@ const inherited = { ...process.env };
 for (const name of Object.keys(inherited)) {
   if (/^(AIFY_)?HERDR_/i.test(name) || ['AIFY_AGENT_ID', 'AIFY_AGENT_LEASE', 'CLAUDE_CODE_CHILD_SESSION'].includes(name.toUpperCase())) delete inherited[name];
 }
-const env = { ...inherited, TMPDIR: root, TEMP: root, TMP: root, AIFY_HOST_SECRET_FILE: path.join(root, 'host-secret') };
+// Daemon boot now writes descriptor/generation/turns under homedir(), so tests must own that home too.
+const home = path.join(root, 'home');
+fs.mkdirSync(home);
+const env = { ...inherited, HOME: home, USERPROFILE: home, TMPDIR: root, TEMP: root, TMP: root, AIFY_HOST_SECRET_FILE: path.join(root, 'host-secret') };
 
 const files = fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map((f) => path.join('tests', f));
 
