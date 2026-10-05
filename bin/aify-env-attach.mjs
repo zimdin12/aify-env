@@ -32,6 +32,7 @@ import { InputSender, postJson } from "../lib/input-sender.mjs";
 import { connectInputSocket } from "../lib/input-socket.mjs";
 import { readHostConfig } from "../lib/host-config.mjs";
 import { findEnvEndpoint } from "../lib/serving-endpoint.mjs";
+import { waitForAttachProcesses } from "../lib/attach-startup.mjs";
 
 const LF = String.fromCharCode(10);
 const say = (text) => process.stderr.write(`${text}${LF}`);
@@ -44,21 +45,6 @@ if (FOUND.problem) {
   process.exit(69);
 }
 const ENDPOINT = FOUND.endpoint;
-
-async function daemonHealth() {
-  // WHERE THE FAST PATH IS, asked rather than computed: the daemon knows whether it has a socket,
-  // and a client that guessed an address would connect to whatever happened to hold that name.
-  try {
-    const response = await fetch(`${ENDPOINT}/health`, { signal: AbortSignal.timeout(2000) });
-    return await response.json();
-  } catch { return {}; }
-}
-
-async function listProcesses() {
-  const response = await fetch(`${ENDPOINT}/processes`, { signal: AbortSignal.timeout(5000) });
-  const body = await response.json();
-  return Array.isArray(body?.processes) ? body.processes : [];
-}
 
 async function postQuietly(path, body) {
   // A RESIZE IS BEST-EFFORT AND SILENT: one that failed is corrected by the next. The follower's own
@@ -77,11 +63,13 @@ const wanted = exactId ? args[1] : args.find((arg) => !arg.startsWith("-")) ?? "
 let health = {};
 let processes;
 try {
-  health = await daemonHealth();
-  processes = await listProcesses();
+  ({ health, processes } = await waitForAttachProcesses({
+    endpoint: ENDPOINT,
+    onRetry: () => say(`aify-env attach: waiting for processes at ${ENDPOINT}; retrying.`),
+  }));
 } catch (error) {
-  say(`aify-env attach: no environment answered at ${ENDPOINT} (${error?.message ?? error}).`);
-  say("  Start one with `aify-env`, or point AIFY_ENV_ENDPOINT at the right host.");
+  say(`aify-env attach: could not read processes at ${ENDPOINT} (${error?.message ?? error}).`);
+  say("  It may still be running. Check AIFY_ENV_ENDPOINT and retry attach; nothing was stopped.");
   process.exit(69);
 }
 
