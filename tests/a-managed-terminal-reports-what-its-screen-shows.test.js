@@ -94,7 +94,10 @@ const BLOCKED = `${clear}${title("✳ task")} Bash command\r\n\r\n   ls\r\n\r\n 
 
 async function managedTerminal(runtime) {
   const terminal = fakeTerminal({ cols: 80, rows: 16 });
-  const runner = new Runner({ openTerminal: () => terminal });
+  const runner = new Runner({ openTerminal: () => terminal,
+    managedHost: () => ({ instance: "default", url: "http://127.0.0.1:1",
+      host: { startManaged() {}, endManaged: () => ({ problem: "" }) } }),
+  });
   const processes = new PluginProcesses(runner);
   const handles = createHandleBook();
   const frames = [];

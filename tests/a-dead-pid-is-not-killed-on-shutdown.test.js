@@ -60,16 +60,27 @@ function stopCode() {
   return code;
 }
 
-test("stop() checks liveness BEFORE either kill", () => {
-  const code = stopCode();
-  assert.match(
-    code, /if \(!defaultIsAlive\(pid\)\) return;/,
-    "stop() kills unconditionally again; against a dead ConPTY pid that can hang shutdown for hours",
-  );
-  const guard = code.indexOf("defaultIsAlive(pid)");
-  assert.ok(guard >= 0);
-  assert.ok(guard < code.indexOf("child.kill()"), "the check must precede child.kill()");
-  assert.ok(guard < code.indexOf("killTree(pid)"), "the check must precede killTree()");
+test("stop() checks liveness BEFORE either kill", async () => {
+  async function stopped(alive) {
+    const events = [];
+    const terminal = { pid: DEAD_PID, onData() {}, onExit() {}, write() {},
+      kill() { events.push(["child-kill"]); }, resize() {} };
+    const runner = new Runner({ openTerminal: () => terminal, loadCheckpoint: null,
+      isAlive(pid) { events.push(["alive", pid]); return alive; },
+      async killTree(pid) { events.push(["kill-tree", pid]); },
+    });
+    const handle = await runner.start({ service: "aify-comms", command: "fake", args: [],
+      fileText: '#!/bin/bash\nHARNESS_WRAPPER_VERSION="0.6.0"\n',
+    });
+    await runner.stop(handle.id, { phase: (name) => events.push([name]) });
+    assert.deepEqual(runner.list(), [], "the ordinary registry cleanup still happens");
+    return events;
+  }
+  assert.deepEqual(await stopped(false), [["alive", DEAD_PID]], "a dead pid reaches neither kill");
+  assert.deepEqual(await stopped(true), [
+    ["alive", DEAD_PID], ["console-kill"], ["child-kill"],
+    ["tree-kill"], ["kill-tree", DEAD_PID], ["done"],
+  ], "the engaged guard precedes both reachable kills and their announcements");
 });
 
 test("each blocking call is ANNOUNCED before it is made", () => {

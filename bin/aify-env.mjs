@@ -288,7 +288,10 @@ async function reapLeftovers() {
   clearOwned(OWNED_FILE, { keep: entriesOwnedElsewhere(recorded, { ownerIsAlive: defaultIsAlive }) });
 }
 
-const runner = new Runner({ ownedFile: OWNED_FILE });
+const runner = new Runner({ ownedFile: OWNED_FILE,
+  managedHost: () => agentState ? { ...agentState, url: `http://${HOST}:${server.address().port}` } : null,
+  reportManaged: (problem) => logLine(problem),
+});
 
 // SERVICE PLUGINS. This host runs processes for whoever asked; a plugin is how a SERVICE teaches it
 // to fetch that work. The daemon never names a service -- `pluginsForServices` maps registry entries

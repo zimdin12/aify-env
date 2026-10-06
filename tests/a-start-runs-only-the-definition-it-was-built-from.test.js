@@ -141,6 +141,8 @@ for (const [kind, write] of Object.entries(CONCURRENT)) {
     const release = deferred();
     const seenAtChild = [];
     const runner = new Runner({
+      managedHost: () => ({ instance: "default", url: "http://127.0.0.1:1",
+        host: { startManaged() {}, endManaged: () => ({ problem: "" }) } }),
       openTerminal: () => {
         seenAtChild.push(onDisk(dir)?.agent?.model ?? "absent");
         return { pid: 0, cols: 80, rows: 24, onData: () => {}, onExit: () => {}, write: () => {}, kill: () => {}, resize: () => {} };
