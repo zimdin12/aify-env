@@ -80,6 +80,7 @@ import { readServices, registryIsReadable } from "../lib/services.mjs";
 import { ServicePlugins } from "../lib/service-plugins.mjs";
 import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
+import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
 import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
@@ -460,6 +461,7 @@ const server = createServer(async (request, response) => {
       { method: request.method, path: new URL(request.url, "http://localhost").pathname, body },
       {
         runner,
+        turnEvents: agentState?.turnEvents,
         inputSocket: inputSocketAddress,
         readFile: (path) => readFileSync(path, "utf8"),
         version: VERSION,
@@ -702,7 +704,8 @@ server.listen(port, HOST, async () => {
   const bound = server.address();
   const support = terminalSupport();
   try { agentState = bootDaemonAgentState({ aifyHome: join(homedir(), ".aify"), context: instanceContext,
-    url: `http://${HOST}:${bound.port}`, report: logLine }); }
+    url: `http://${HOST}:${bound.port}`, report: logLine });
+    agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine }); }
   catch (error) { process.stderr.write(`[aify-env] agent state boot failed: ${error.message}\n`); process.exit(2); }
   // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
   // reapLeftovers.
