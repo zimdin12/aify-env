@@ -43,6 +43,7 @@ import { instanceContextArgument } from "../lib/instance-context.mjs";
 import { prepareInstance, publishInstanceReady } from "../lib/instance-bootstrap.mjs";
 import { USAGE, asksForHelp, asksForVersion, refuseUnknownFlag } from "../lib/usage.mjs";
 import { createServer } from "node:http";
+import { createDaemonHttp } from "../lib/daemon-http.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 
 import { hostIsWsl } from "../lib/host-wsl.mjs";
@@ -56,7 +57,6 @@ import { readGrantedRoots } from "../lib/watch-roots.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
 import { daemonShutdownHooks } from "../lib/shutdown-hooks.mjs";
-import { dataFrame, exitFrame, keepStreamAlive, namedFrame } from "../lib/sse-frames.mjs";
 import { startDaemonView } from "../lib/daemon-view.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-processes.mjs";
@@ -73,7 +73,6 @@ import { askIncumbent } from "../lib/incumbent.mjs";
 const incumbent = () => askIncumbent({ host: HOST, port });
 import { homedir, hostname } from "node:os";
 import { PackageBuild } from "../lib/build-identity.mjs";
-import { browserOriginatedRequest } from "../lib/browser-requests.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { readServices, registryIsReadable } from "../lib/services.mjs";
@@ -428,37 +427,9 @@ let inputSocketAddress = "";
 let inputSocketServer = null;
 const HOST_CONFIG = readHostConfig({ env: process.env });
 
-const server = createServer(async (request, response) => {
-  traffic.requests += 1;
-
-  // BEFORE THE BODY IS READ, and before anything is dispatched. A page the operator merely visits can
-  // reach this loopback port; binding 127.0.0.1 keeps the network out but not the browser, which is
-  // already on the machine. See lib/browser-requests.mjs for the request shape that needs no
-  // preflight. Refused here rather than in `handleRequest` because it is a property of the TRANSPORT,
-  // not of any route, and a route added later must inherit it without anyone remembering to ask.
-  const browser = browserOriginatedRequest({ method: request.method, headers: request.headers });
-  if (browser.refuse) {
-    process.stderr.write(`[aify-env] ${browser.reason}${chr10}`);
-    response.writeHead(403, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: browser.reason }));
-    return;
-  }
-
-  let body = null;
-  if (request.method === "POST" || request.method === "PUT") {
-    const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
-    try {
-      body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "null");
-    } catch {
-      body = undefined;
-    }
-  }
-
-  let result;
-  try {
-    result = await handleRequest(
-      { method: request.method, path: new URL(request.url, "http://localhost").pathname, body },
+const server = createServer(createDaemonHttp({
+  runner, traffic,
+  protocolDeps: async () => (
       {
         runner,
         turnEvents: agentState?.turnEvents,
@@ -501,62 +472,9 @@ const server = createServer(async (request, response) => {
         agentServices: servicePlugins.capabilities("agents"),
         definitions: definitionStore,
         traffic,
-      },
-    );
-  } catch (failure) {
-    // An unexpected throw must not leave a caller hanging, and must not leak a stack to it either.
-    process.stderr.write(`[aify-env] unhandled: ${failure.stack ?? failure}\n`);
-    result = { status: 500, body: { error: "internal error" } };
-  }
-
-  // A stream, not an answer. Server-sent events because a console only ever reads: no framing to get
-  // wrong, no upgrade handshake, and it reconnects by itself when a viewer's tab wakes up.
-  if (result.stream) {
-    response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-    // A QUIET PROCESS MUST NOT LET A VIEWER'S FETCH TIME OUT: Node aborts a body after 300s with no bytes.
-    // Idle Claude Code panes died exactly that way on 2026-09-14; the heartbeat's reasons live with it.
-    keepStreamAlive(response);
-    // META FIRST, then the replay -- or, for a PTY, the daemon's checkpointed screen -- then live bytes.
-    // `subscribeScreen` owns that order and why it is exact; `namedFrame` says why a new fact can join
-    // an existing stream safely.
-    const unsubscribe = runner.subscribeScreen(result.stream, {
-      onMeta: (meta) => response.write(namedFrame("meta", meta)),
-      onOutput: (chunk) => {
-        response.write(dataFrame(chunk));
-        traffic.bytesOut += Buffer.byteLength(chunk);
-      },
-      onExit: (code, signal) => {
-        // THEN THE STREAM ENDS. A console told the process is gone has nothing left to wait for, and
-        // leaving it open makes a dead agent look like a thinking one -- which is the failure this
-        // event exists to prevent. The frame's own rules live in `lib/sse-frames.mjs`.
-        response.write(exitFrame(code, signal));
-        response.end();
-      },
-      // A RESIZE IS A NEW `meta`, not a new frame type; a consumer takes only its geometry.
-      onResize: ({ cols, rows }) => {
-        response.write(namedFrame("meta", { ...(runner.streamMeta?.(result.stream) ?? {}), cols, rows }));
-      },
-    });
-    if (!unsubscribe) {
-      // Raced: the process went between the route check and here.
-      response.end();
-      return;
-    }
-    // A viewer closing its tab must release the subscription, or every visit leaks one.
-    request.on("close", () => unsubscribe());
-    return;
-  }
-
-  if (result.body === null) {
-    response.writeHead(result.status);
-    response.end();
-    return;
-  }
-  const payload = JSON.stringify(result.body);
-  traffic.bytesOut += Buffer.byteLength(payload);
-  response.writeHead(result.status, { "content-type": "application/json" });
-  response.end(payload);
-});
+      }
+  ),
+}));
 
 // A PORT ALREADY IN USE IS AN ORDINARY CONDITION, so it gets an ordinary message.
 //
