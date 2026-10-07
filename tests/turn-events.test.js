@@ -111,7 +111,19 @@ test("ONLY AN OPEN TURN IS BUSY: a closed one keeps its last event, and that nev
   assert.equal(turnIsBusy(open, { nowUs, renewable: false }), true, "CONTROL: open for 60 s is busy, its times in microseconds");
   const old = { ...open, startedAtUs: nowUs - 1_801_000_000 };
   assert.equal(turnIsBusy(old, { nowUs, renewable: false }), false, "past the strict window");
-  assert.equal(turnIsBusy(old, { nowUs, renewable: true }), true, "renewed by its last event, 10 s ago");
+  assert.equal(turnIsBusy(old, { nowUs, renewable: true }), true, "verified lifetime holds the accepted open turn");
+});
+
+test("P-1 VERIFIED OPEN TURNS HOLD without fresh hooks or a wall-clock cap", () => {
+  const startedAtUs = 1_790_950_000_500_000;
+  const turn = { open: true, startedAtUs, awaitingInput: false, lastEventAtUs: startedAtUs };
+  for (const elapsedUs of [1_800_001_000, 3_600_000_000, 43_200_000_000, 2_592_000_000_000]) {
+    const nowUs = startedAtUs + elapsedUs;
+    assert.equal(turnIsBusy(turn, { nowUs, renewable: true }), true, `verified hold after ${elapsedUs} us`);
+    assert.equal(turnIsBusy(turn, { nowUs, renewable: false }), false, "unverified fallback still expires");
+    assert.equal(turnIsBusy({ ...turn, open: false }, { nowUs, renewable: true }), false, "closed turns cannot hold");
+  }
+  assert.equal(turnIsBusy(undefined, { nowUs: startedAtUs, renewable: true }), false, "verification alone cannot invent a turn");
 });
 
 test("A STORED RECORD WITHOUT A USABLE LAST EVENT orders nothing, rather than taking any event as the first", () => {

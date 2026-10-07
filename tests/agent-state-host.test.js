@@ -87,6 +87,121 @@ test("A RETAINED TURN IS STRICT: busy until 1800 s from its original start, neve
   assert.equal(past.current("lead", RESIDENT).busy, false, "past it, though its last event is recent");
 });
 
+test("P-1 RESIDENT AND MANAGED verified quiet turns hold until an admitted end or lifetime exit", (t) => {
+  for (const mode of ["resident", "managed"]) {
+    const home = homeWith(mode === "resident" ? [record(L1, 41)] : []);
+    t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+    let now = NOW;
+    const answers = { 41: running(WRITTEN - 5) };
+    const h = host(home, answers, () => now);
+    const given = { ...RESIDENT, mode };
+    h.boot();
+    if (mode === "managed") h.startManaged({ agentId: "lead", lifetime: L1, instance: "default", pid: 41, handle: "fixture" });
+    assert.equal(h.current("lead", given).process.verified, "yes", `${mode}: selected lifetime is verified`);
+    const startedAtUs = NOW - 10;
+    assert.equal(h.applyEvent({ agentId: "lead", lifetime: L1, kind: "turn-start", firedAtUs: startedAtUs }).applied, true);
+    for (const elapsedUs of [1_800_001_000, 3_600_000_000, 43_200_000_000, 2_592_000_000_000]) {
+      now = startedAtUs + elapsedUs;
+      h.refresh();
+      const row = h.current("lead", { ...given, screen: { state: "idle", fresh: true } });
+      assert.equal(row.busy, true, `${mode}: quiet work after ${elapsedUs} us`);
+      assert.deepEqual(word(row), ["working", "turn-open"], "an idle screen is not an admitted turn end");
+      assert.deepEqual(row.turn.busyIf, { strict: false, verifiedRenewal: true });
+      assert.equal(row.turn.startedAtUs, startedAtUs);
+      assert.equal(row.turn.lastEventAtUs, startedAtUs, "no renewal or synthetic hook");
+    }
+    assert.equal(h.applyEvent({ agentId: "lead", lifetime: L1, kind: "turn-end", firedAtUs: now }).applied, true);
+    const ended = h.current("lead", given);
+    assert.equal(ended.busy, false);
+    assert.deepEqual(word(ended), ["idle", "at-prompt"]);
+    assert.deepEqual(ended.turn.busyIf, { strict: false, verifiedRenewal: false });
+    assert.equal(h.applyEvent({ agentId: "lead", lifetime: L1, kind: "turn-start", firedAtUs: now + 1 }).applied, true);
+    now += 43_200_000_000;
+    assert.equal(h.current("lead", given).busy, true);
+    if (mode === "managed") h.endManaged(L1);
+    else { answers[41] = { alive: false, createdAtUs: null, commandLine: null }; h.refresh(); }
+    const exited = h.current("lead", given);
+    assert.equal(exited.busy, false, "lifetime exit ends the held turn");
+    assert.equal(exited.turn, null);
+    assert.deepEqual(word(exited), mode === "managed" ? ["available", "startable"] : ["offline", "absent"]);
+  }
+});
+
+test("P-1 RESTART keeps an old blocked turn without changing its event anchors", (t) => {
+  const home = homeWith([record(L1, 41)]);
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let now = NOW;
+  const answers = { 41: running(WRITTEN - 5) };
+  const first = host(home, answers, () => now);
+  first.boot();
+  assert.equal(first.applyEvent({ agentId: "lead", lifetime: L1, kind: "turn-start", firedAtUs: NOW - 10 }).applied, true);
+  assert.equal(first.applyEvent({ agentId: "lead", lifetime: L1, kind: "blocked", firedAtUs: NOW - 5 }).applied, true);
+  const stored = fs.readFileSync(turnsFile(home, "default"));
+  now += 43_200_000_000;
+  const restarted = host(home, answers, () => now);
+  restarted.boot();
+  const row = restarted.current("lead", RESIDENT);
+  assert.equal(row.process.verified, "yes");
+  assert.equal(row.busy, true, "verified restart does not age out quiet work");
+  assert.deepEqual(word(row), ["blocked", "turn-open"]);
+  assert.deepEqual(row.turn.busyIf, { strict: false, verifiedRenewal: true });
+  assert.equal(row.turn.startedAtUs, NOW - 10);
+  assert.equal(row.turn.lastEventAtUs, NOW - 5);
+  assert.deepEqual(fs.readFileSync(turnsFile(home, "default")), stored, "restart must not manufacture a renewal");
+});
+
+test("P-1 CURRENT VERIFICATION loss selects strict fallback, then recovery restores the same open turn", (t) => {
+  const home = homeWith([record(L1, 41)]);
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let now = NOW;
+  const answers = { 41: running(WRITTEN - 5) };
+  const h = host(home, answers, () => now);
+  h.boot();
+  assert.equal(h.applyEvent({ agentId: "lead", lifetime: L1, kind: "turn-start", firedAtUs: NOW - 10 }).applied, true);
+  now += 43_200_000_000;
+  assert.equal(h.current("lead", RESIDENT).process.verified, "yes");
+  assert.equal(h.current("lead", RESIDENT).busy, true);
+  answers[41] = { alive: null, createdAtUs: null, commandLine: null };
+  h.refresh();
+  const unknown = h.current("lead", RESIDENT);
+  assert.deepEqual(word(unknown), ["unknown", "identity-unknown"]);
+  assert.equal(unknown.process.verified, "unknown");
+  assert.equal(unknown.busy, false);
+  assert.equal(unknown.turn.open, true, "unanswered identity retains the accepted turn");
+  assert.deepEqual(unknown.turn.busyIf, { strict: false, verifiedRenewal: false });
+  assert.equal(unknown.turn.startedAtUs, NOW - 10);
+  answers[41] = running(WRITTEN - 5);
+  h.refresh();
+  const recovered = h.current("lead", RESIDENT);
+  assert.equal(recovered.busy, true, "recovery must not require a new start or renewal");
+  assert.deepEqual(word(recovered), ["working", "turn-open"]);
+  assert.equal(recovered.turn.startedAtUs, NOW - 10);
+  assert.equal(recovered.turn.lastEventAtUs, NOW - 10);
+});
+
+test("P-1 ENUMERATION UNCERTAINTY cannot verify a retained managed current entry", (t) => {
+  const home = homeWith([]);
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let now = NOW;
+  const h = host(home, {}, () => now);
+  const given = { ...RESIDENT, mode: "managed" };
+  h.boot();
+  h.startManaged({ agentId: "lead", lifetime: L1, instance: "default", pid: 41, handle: "fixture" });
+  assert.equal(h.applyEvent({ agentId: "lead", lifetime: L1, kind: "turn-start", firedAtUs: NOW - 10 }).applied, true);
+  now += 43_200_000_000;
+  assert.equal(h.current("lead", given).busy, true);
+  const dir = path.join(home, "residents");
+  fs.rmSync(dir, { recursive: true });
+  fs.writeFileSync(dir, "blocked-directory");
+  h.refresh();
+  const row = h.current("lead", given);
+  assert.equal(row.lifetime, L1, "managed current entry is still retained");
+  assert.equal(row.process.verified, "unknown", "entry presence is not current verification");
+  assert.equal(row.busy, false, "unanswered process facts cannot select the verified hold");
+  assert.deepEqual(word(row), ["unknown", "identity-unknown"]);
+  assert.deepEqual(row.turn.busyIf, { strict: false, verifiedRenewal: false });
+});
+
 test("AN UNREADABLE TURNS FILE RESTORES NOTHING: every adopted agent's turn is unknown, never idle (turns-file)", () => {
   const home = homeWith([record(L1, 41)]);
   fs.mkdirSync(path.join(home, "env"), { recursive: true });

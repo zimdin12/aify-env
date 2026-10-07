@@ -21,8 +21,8 @@ async function fixture(t, declared = true) {
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const dir = path.join(home, "residents"); fs.mkdirSync(dir);
   fs.writeFileSync(path.join(dir, `lead.${L}.json`), JSON.stringify({ agentId: "lead", lifetime: L, instance: "default", harness: "claude", pid: 41, launcher: "C:/fixture/claude-aify", writtenAtUs: AT - 100 }));
-  let probes = 0, failProbe = false;
-  const host = new AgentStateHost({ aifyHome: home, instance: "default", nowUs: () => AT + 100,
+  let probes = 0, failProbe = false, now = AT + 100;
+  const host = new AgentStateHost({ aifyHome: home, instance: "default", nowUs: () => now,
     probe: (pids) => { probes++; if (failProbe) throw new Error("secret-probe"); return new Map(pids.map((pid) => [pid, { alive: true, createdAtUs: AT - 200, commandLine: "bash C:/fixture/claude-aify" }])); } });
   host.boot();
   const definitions = new DefinitionStore({ dir: path.join(home, "defs") });
@@ -34,8 +34,29 @@ async function fixture(t, declared = true) {
     assert.deepEqual(result.body.inputs, marker);
     return result;
   };
-  return { home, dir, host, definitions, deps, get, probes: () => probes, fail: () => { failProbe = true; } };
+  return { home, dir, host, definitions, deps, get, probes: () => probes, fail: () => { failProbe = true; }, setNow: (value) => { now = value; } };
 }
+
+test("P-1 STATE READ publishes quiet verified work after hours and the admitted end", async (t) => {
+  const f = await fixture(t);
+  const start = await handleRequest({ method: "POST", path: "/agents/lead/turn-event", body: { instance: "default", lifetime: L, kind: "turn-start", firedAtUs: AT + 1 } }, f.deps);
+  assert.equal(start.body.applied, true);
+  f.setNow(AT + 43_200_000_000);
+  const result = await f.get();
+  assert.equal(result.status, 200);
+  const row = result.body.agents.find((a) => a.agentId === "lead");
+  assert.equal(row.process.verified, "yes");
+  assert.equal(row.busy, true, "HTTP projection must retain the selected no-age hold");
+  assert.deepEqual([row.state, row.stateCause], ["working", "turn-open"]);
+  assert.deepEqual(row.turn.busyIf, { strict: false, verifiedRenewal: true });
+  assert.equal(row.turn.startedAtUs, AT + 1);
+  assert.equal(row.turn.lastEventAtUs, AT + 1);
+  const end = await handleRequest({ method: "POST", path: "/agents/lead/turn-event", body: { instance: "default", lifetime: L, kind: "turn-end", firedAtUs: AT + 43_200_000_000 } }, f.deps);
+  assert.equal(end.body.applied, true);
+  const ended = (await f.get()).body.agents.find((a) => a.agentId === "lead");
+  assert.equal(ended.busy, false);
+  assert.deepEqual([ended.state, ended.stateCause], ["idle", "at-prompt"]);
+});
 
 test("read cannot hide held adoption, admitted work, closed turn or managed and undeclared IDs", async (t) => {
   const f = await fixture(t); const before = f.probes();
