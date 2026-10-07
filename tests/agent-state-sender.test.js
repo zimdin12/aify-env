@@ -8,6 +8,10 @@ import { AgentStateHost } from "../lib/agent-state-host.mjs";
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { credentialForTarget } from "../lib/credential-resolve.mjs";
 import { CredentialAclCache } from "../lib/credential-acl-cache.mjs";
+import { readServices } from "../lib/services.mjs";
+import { advertisementTargets } from "../lib/advertise.mjs";
+import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
+import { CREDENTIAL_OK, CREDENTIAL_ABSENT } from "../lib/credential-store.mjs";
 
 let AgentStateSender;
 try { ({ AgentStateSender } = await import("../lib/agent-state-sender.mjs")); }
@@ -312,4 +316,61 @@ test("named state ref ignores ordinary environment keys, rotates fresh bytes, an
   await sender.tick(); await until(() => calls.length >= 3); await flush();
   assert.equal(calls[2].options.headers["x-aify-agent-state-key"], "ordinary-secret-key", "fallback only with absent state ref");
   assert.doesNotMatch(reports.join(" "), /secret|state\.key|ordinary\.key/);
+});
+
+// Pin the real registry -> advertised/plugin resolver -> sender path, not a fabricated credential result.
+const credentialRows = [
+  { name: "ordinary env-only", env: "ordinary-secret", state: CREDENTIAL_OK, source: "env", key: "ordinary-secret" },
+  { name: "ordinary store-only", file: "ordinary-secret\n", state: CREDENTIAL_OK, source: "file", key: "ordinary-secret" },
+  { name: "ordinary matching env and store", env: "ordinary-secret", file: "ordinary-secret\n", state: CREDENTIAL_OK, source: "env", key: "ordinary-secret" },
+  { name: "ordinary conflicting env and store", env: "other-secret", file: "ordinary-secret\n", state: "CREDENTIAL_CONFLICT" },
+  { name: "ordinary missing store with env", env: "ordinary-secret", file: null, state: "CREDENTIAL_MISSING" },
+  { name: "ordinary invalid store with env", env: "ordinary-secret", file: "invalid-secret", state: "CREDENTIAL_INVALID" },
+  { name: "ordinary insecure store with env", env: "ordinary-secret", file: "ordinary-secret\n", insecure: true, state: "CREDENTIAL_INSECURE" },
+  { name: "ordinary unreadable store with env", env: "ordinary-secret", file: "ordinary-secret\n", unreadable: true, state: "CREDENTIAL_UNREADABLE" },
+  { name: "ordinary invalid env", env: " invalid-secret", state: "CREDENTIAL_INVALID" },
+  { name: "ordinary absent", state: CREDENTIAL_ABSENT },
+  { name: "dedicated valid ignores ordinary key", env: "ordinary-secret", dedicated: "state-secret\n", state: CREDENTIAL_OK, key: "state-secret" },
+  { name: "dedicated missing never falls back", env: "ordinary-secret", dedicated: null, state: "CREDENTIAL_MISSING" },
+  { name: "dedicated invalid never falls back", env: "ordinary-secret", dedicated: "invalid-secret", state: "CREDENTIAL_INVALID" },
+  { name: "dedicated insecure never falls back", env: "ordinary-secret", dedicated: "state-secret\n", insecure: true, state: "CREDENTIAL_INSECURE" },
+  { name: "dedicated unreadable never falls back", env: "ordinary-secret", dedicated: "state-secret\n", unreadable: true, state: "CREDENTIAL_UNREADABLE" },
+];
+for (const row of credentialRows) test(`composed credential: ${row.name}`, async (t) => {
+  let opts;
+  const f = await fixture(t, { credentialOptions: () => opts });
+  const root = path.join(f.home, "credentials"), named = Object.hasOwn(row, "dedicated");
+  fs.mkdirSync(root);
+  const ref = named ? "state.key" : "ordinary.key", bytes = named ? row.dedicated : row.file;
+  const prepare = () => { if (typeof bytes === "string") fs.writeFileSync(path.join(root, ref), bytes); };
+  prepare();
+  const acl = new CredentialAclCache({ ttlMs: 0, read: async (file) => {
+    // Real file-read failure after custody inspection, without native ACL/process side effects.
+    if (row.unreadable) fs.rmSync(file);
+    return `${file} fixture-owner:(F)\n${row.insecure ? "BUILTIN\\Users:(R)\n" : ""}Successfully processed 1 files; Failed processing 0 files`;
+  } });
+  opts = { root, env: row.env === undefined ? {} : { ORDINARY_KEY: row.env }, platform: "win32", owner: "fixture-owner", acl };
+  const service = target({ keyEnv: ["ORDINARY_KEY"],
+    ...(!named && Object.hasOwn(row, "file") ? { credentialRef: ref } : {}),
+    agentState: { path: "/state", ...(named ? { credentialRef: ref } : {}) } });
+  const text = JSON.stringify({ version: 1, services: { x: service } });
+  const entry = readServices(text)[0], advertised = advertisementTargets([entry])[0];
+  const ordinary = await credentialForTarget(advertised, opts);
+  assert.equal(ordinary.state, named ? CREDENTIAL_OK : row.state);
+  assert.equal(ordinary.source, named ? "env" : row.source ?? "");
+  assert.equal(ordinary.value, named ? row.env : row.key ?? "");
+  prepare(); assert.equal(await pluginCredential(entry, (target) => credentialForTarget(target, opts)), ordinary.value);
+  prepare();
+  f.services({ x: service }); await f.sender.tick();
+  await until(() => f.calls.length > 0 || f.reports.length > 0); await flush();
+  const sends = row.state === CREDENTIAL_OK || row.state === CREDENTIAL_ABSENT;
+  assert.equal(f.calls.length, sends ? 1 : 0, f.reports.join(" "));
+  if (sends) {
+    assert.equal(f.calls[0].options.headers["x-aify-agent-state-key"], row.key);
+    assert.equal(Object.hasOwn(f.calls[0].options.headers, "x-aify-agent-state-key"), row.state === CREDENTIAL_OK);
+    assert.equal(f.calls[0].url, "http://fixture.invalid/state");
+    assert.equal(f.calls[0].body.kind, "snapshot");
+    assert.deepEqual(f.reports, []);
+  } else assert.deepEqual(f.reports, [`agent state "x": ${row.state}`]);
+  assert.doesNotMatch(f.reports.join(" "), /secret|ordinary\.key|state\.key/);
 });
