@@ -79,6 +79,7 @@ import { readServices, registryIsReadable } from "../lib/services.mjs";
 import { ServicePlugins } from "../lib/service-plugins.mjs";
 import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
+import { AgentStateSender } from "../lib/agent-state-sender.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
@@ -390,7 +391,7 @@ let stopDashboard = () => {};
 // The record on disk still covers the hard kill that runs no handler at all. Both halves are needed.
 const shutdown = createShutdown(daemonShutdownHooks({
   runner,
-  stopView: () => stopDashboard(),
+  stopView: () => { stopAgentStateSending(); stopDashboard(); },
   inputSocket: () => inputSocketServer,
   servicePlugins,
   closeHttpServer: () => server.close(),
@@ -506,6 +507,15 @@ let stopAdvertising = null;
 //: Set once the service plugins have started: brings them level with a registry that was read.
 let followServices = null;
 let agentState = null;
+let agentStateSender = null, stateEvaluationTimer = null, stateSendingStopped = false;
+function evaluateAgentState() {
+  if (!viewOnly && !stateSendingStopped) void agentStateSender?.tick().catch(() => logLine("agent state: evaluation-failed"));
+}
+function stopAgentStateSending() {
+  stateSendingStopped = true;
+  if (stateEvaluationTimer) { clearInterval(stateEvaluationTimer); stateEvaluationTimer = null; }
+  agentStateSender?.stop();
+}
 server.on("error", async (failure) => {
   if (failure?.code === "EADDRINUSE") {
     if (instanceContext) {
@@ -586,6 +596,7 @@ server.on("error", async (failure) => {
       // yet (the flag stops it arming) or may already have (the clear stops it continuing). One
       // without the other is a race that presents as "sometimes it keeps advertising".
       viewOnly = true;
+      stopAgentStateSending();
       if (stopAdvertising) { stopAdvertising(); stopAdvertising = null; }
       process.argv = [
         process.argv[0],
@@ -636,6 +647,21 @@ server.listen(port, HOST, async () => {
     try { publishInstanceReady(instanceContext, { pid: process.pid, envInstance: runner.instance(), port: bound.port, build: BUILD }); }
     catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }
   } else await reapLeftovers();
+
+  // Only after serving and successful durable boot/readiness. Sweep cadence is configurable;
+  // this fixed beat evaluates boot-anchored quiet epochs even when the sweep is much slower.
+  if (!viewOnly && !stateSendingStopped) {
+    agentStateSender = new AgentStateSender({
+      identity: { machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
+        exists: existsSync, isWsl: hostIsWsl() }).machineId, instance: agentState.instance, generation: agentState.generation },
+      stateHost: agentState.host, definitions: definitionStore,
+      observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
+      readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"), credentialOptions: credentialReading, report: logLine,
+    });
+    evaluateAgentState();
+    stateEvaluationTimer = setInterval(evaluateAgentState, 60_000);
+    stateEvaluationTimer.unref();
+  }
 
   // KEYSTROKES OVER A LOCAL SOCKET, when this host wants one. lib/input-socket-start.mjs owns the
   // platform branches and the rule that failing to listen is not failing to serve.
@@ -742,6 +768,7 @@ server.listen(port, HOST, async () => {
 const SWEEP_MS = Number(process.env.AIFY_SWEEP_MS || 30_000);
 const sweepTimer = setInterval(() => {
   unknown = reaper.sweep().unknown;
+  evaluateAgentState();
 }, SWEEP_MS);
 sweepTimer.unref();
 

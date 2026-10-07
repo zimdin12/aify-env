@@ -99,3 +99,32 @@ test("THE SAME BODY HAS THE SAME DIGEST, and a body is a copy the caller cannot 
     assert.throws(() => new AgentStatePublisher({ ...identity, ...bad }), TypeError, JSON.stringify(bad));
   }
 });
+
+test("G6 nullable lifetime is a row, never a fabricated removal, and inputs stay on every envelope kind", () => {
+  const publisher = new AgentStatePublisher(identity);
+  const inputs = { operatorStop: "not-tracked" };
+  const nullable = { complete: true, agents: [agent("ready", { lifetime: null })], inputs };
+  const snapshot = publisher.snapshot(nullable);
+  assert.equal(snapshot.body.kind, "snapshot", "explicit null is admissible");
+  assert.deepEqual(snapshot.body.inputs, inputs);
+  const changed = publisher.changes({ ...nullable, agents: [agent("ready", { lifetime: null, state: "offline" })] }, snapshot.view);
+  assert.equal(changed.body.kind, "changes");
+  assert.deepEqual(changed.body.inputs, inputs);
+  assert.deepEqual(changed.body.removed, []);
+  const gone = publisher.changes({ complete: true, agents: [], inputs }, changed.view);
+  assert.equal(gone, null, "forgetting a null lifetime cannot invent a removal");
+  const recreated = publisher.changes({ complete: true, agents: [agent("ready")], inputs }, changed.view);
+  assert.deepEqual(recreated.body.removed, [], "null to real token is creation, not null removal");
+  const ended = publisher.changes(nullable, recreated.view);
+  assert.deepEqual(ended.body.removed, [{ agentId: "ready", lifetime: "ready-l1" }]);
+  const unavailable = publisher.snapshot({ complete: false, inputs });
+  assert.deepEqual(unavailable.body.inputs, inputs);
+  for (const body of [snapshot.body, changed.body, unavailable.body]) {
+    assert.equal(typeof body.inputs, "object");
+    assert.ok(Object.values(body.inputs).every((v) => typeof v === "string"));
+    assert.ok((body.agents ?? []).every((row) => !Object.hasOwn(row, "inputs")));
+  }
+  for (const lifetime of [undefined, "", 42, false, {}]) {
+    assert.equal(publisher.snapshot({ ...nullable, agents: [agent("ready", { lifetime })] }).body.kind, "unavailable");
+  }
+});

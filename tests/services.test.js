@@ -36,6 +36,17 @@ test("services are read with their endpoints, sorted", () => {
   assert.equal(services[0].endpoint, "http://127.0.0.2:1");
 });
 
+test("agentState is carried literally, including malformed opt-ins that must not become ordinary fallback", () => {
+  for (const option of [{ path: "/api/v1/agent-state" }, { path: "/api/v1/agent-state", credentialRef: "state.key" },
+    { path: "//other.invalid/path" }, { path: "/state", credentialRef: "" }, null, false, "bad"]) {
+    const [service] = readServices(JSON.stringify({ services: { x: { endpoint: "http://fixture.invalid/mcp/sse", agentState: option } } }));
+    assert.deepEqual(service.agentState, option, "not normalized or discarded");
+    assert.equal(Object.hasOwn(service, "agentState"), true);
+  }
+  const [ordinary] = readServices(JSON.stringify({ services: { x: { endpoint: "http://fixture.invalid/api/v1" } } }));
+  assert.equal(Object.hasOwn(ordinary, "agentState"), false, "absence is not an opt-in");
+});
+
 test("an ABSENT registry means no services, not an error", () => {
   // A host with nothing registered is a legitimate state, and it must stay distinguishable from a
   // corrupt file — they have opposite remedies.
