@@ -436,6 +436,8 @@ const server = createServer(createDaemonHttp({
       {
         runner,
         turnEvents: agentState?.turnEvents,
+        stateHost: agentState?.host ?? null,
+        observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
         inputSocket: inputSocketAddress,
         readFile: (path) => readFileSync(path, "utf8"),
         version: VERSION,
