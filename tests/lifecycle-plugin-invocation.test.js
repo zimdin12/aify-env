@@ -55,7 +55,7 @@ async function fixture(t, mode = 'healthy') {
     async start(spec) {
       birthAttempts++;
       assert.equal(fs.existsSync(lock), true, 'fake process birth is inside real DefinitionStore admission');
-      assert.deepEqual(spec, { ...prepared.spec, agentId: 'a', id: 't', cols: 0, rows: 0, space: false });
+      assert.deepEqual(spec, { ...prepared.spec, agentId: 'a', definition: launch.definition, id: 't', cols: 0, rows: 0, space: false });
       events.push('birth'); stateHost.startManaged(record); liveHandles = [{ id: 'h' }]; return { id: 'h', pid: 424242 };
     },
     subscribe(handle, onOutput) {

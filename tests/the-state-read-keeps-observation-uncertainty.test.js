@@ -171,3 +171,15 @@ test("an unreadable operator-stop map makes the whole read unavailable, never a 
     assert.deepEqual(result.body, { agents: [], complete: false, problems: ["operator-stop-unavailable"], inputs: { operatorStop: "unavailable" } });
   }
 });
+
+test("C1: a record names its agent's defined name and role, and where its lifetime was launched from", async (t) => {
+  const f = await fixture(t);
+  const lead = (await f.get()).body.agents.find((a) => a.agentId === "lead");
+  assert.deepEqual([lead.name, lead.role], ["Fixture", "coder"], "from the current definition");
+  assert.deepEqual(lead.launch, { cwd: null, definition: null }, "a resident record names no folder or binding yet");
+  f.host.startManaged({ agentId: "worker", lifetime: "22222222-2222-4222-8222-222222222222", instance: "default", pid: 7,
+    handle: "h7", cwd: "C:/work", definition: { storeId: "s", incarnation: 1, revision: 3 } });
+  const worker = (await f.get({ observedHarnesses: () => new Set(["claude"]) })).body.agents.find((a) => a.agentId === "worker");
+  assert.deepEqual(worker.launch, { cwd: "C:/work", definition: { storeId: "s", incarnation: 1, revision: 3 } });
+  assert.deepEqual([worker.name, worker.role], [null, null], "undefined here, so no name is invented");
+});
