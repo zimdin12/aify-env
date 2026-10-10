@@ -68,12 +68,35 @@ test('survivor is unknown, not stopped, even after list release', async (t) => {
   assert.equal(f.calls[0][1].pid, 42); assert.equal(f.calls.length, 1); assert.equal(f.journal.open().length, 1);
   assert.equal(f.journal.stopFacts().size, 0);
 });
-for (const action of ['delete', 'spawn']) test(`D9a refuses deferred managed ${action} before effects`, async (t) => {
-  const f = fixture(t); const request = req({ action });
+test('delete ends the matched lifetime first, then removes the definition under the same request id', async (t) => {
+  const f = fixture(t); const request = req({ action: 'delete' });
   const answer = await f.execute(request);
-  assert.equal(answer.status, 'refused'); assert.equal(answer.outcome, 'action-unavailable-in-d9a');
-  assert.deepEqual(f.calls, []); assert.equal(f.journal.stopFacts().size, 0);
-  assert.deepEqual(await f.execute(request), answer);
+  assert.deepEqual(f.calls.map(([kind]) => kind), ['stop', 'remove'], 'never a removal under a running worker');
+  assert.deepEqual(f.calls[1][1], { id: 'r1', agentId: 'a', storeId: 's', expectedIncarnation: 1, expectedRevision: 1,
+    patch: { remove: true } });
+  assert.equal(answer.status, 'done'); assert.equal(answer.outcome, 'delete');
+  assert.equal(answer.resultIncarnation, 1); assert.equal(answer.resultRevision, 1);
+  assert.equal(f.journal.stopFacts().get('s:1:a'), true);
+  assert.deepEqual(await f.execute(request), answer); assert.equal(f.calls.length, 2, 'a replay repeats nothing');
+});
+test('delete whose worker survives removes nothing and stays unknown', async (t) => {
+  const f = fixture(t); f.deps.stop = async () => false;
+  assert.equal((await f.execute(req({ action: 'delete' }))).outcome, 'execution-unknown');
+  assert.deepEqual(f.calls, []);
+});
+test('delete refused by the store after its stop says so, and the agent stays stopped', async (t) => {
+  const f = fixture(t);
+  f.deps.definitions.applyRequest = async () => ({ status: 'refused', outcome: 'changed on the host since you asked' });
+  const answer = await f.execute(req({ action: 'delete' }));
+  assert.equal(answer.status, 'refused');
+  assert.equal(answer.outcome, 'stopped; the definition was not removed: changed on the host since you asked');
+  assert.equal(f.journal.stopFacts().get('s:1:a'), true);
+});
+test('spawn starts the existing definition like start', async (t) => {
+  const f = fixture(t); f.setRaw({ current: null, conflict: false, unknown: false });
+  const answer = await f.execute(req({ action: 'spawn', expectedLifetime: null }));
+  assert.deepEqual(f.calls.map(([kind]) => kind), ['locked', 'start']);
+  assert.equal(answer.status, 'done'); assert.equal(answer.outcome, 'spawn'); assert.equal(answer.resultLifetime, 'new');
 });
 for (const action of ['start', 'spawn', 'restart']) test(`${action} refuses resident relaunch explicitly`, async (t) => {
   const f = fixture(t); f.setReading({ id: 'a', incarnation: 1, revision: 1, problems: [], agent: { mode: 'resident' } });
@@ -131,4 +154,21 @@ test('explicit expected absence requires own typed complete raw fields', async t
   assert.equal(answer.outcome, 'identity-unknown');
   assert.deepEqual(f.calls, []);
   assert.equal(f.journal.stopFacts().size, 0);
+});
+test('delete against the real definition store removes the file once; a replay changes nothing', async (t) => {
+  const { DefinitionStore } = await import('../lib/agent-definitions.mjs');
+  const f = fixture(t);
+  const store = new DefinitionStore({ dir: fs.mkdtempSync(path.join(process.env.TMPDIR, 'd9-defs-')) });
+  await store.set('a', { name: 'A', role: 'coder', harness: 'hermes', mode: 'managed', workspace: 'C:/work',
+    model: '', effort: '', instructions: '', env: {}, herdrSpace: true }, { installed: new Set(['hermes']) });
+  const { storeId, definitions: [held] } = await store.list();
+  f.deps.definitions = store;
+  const request = req({ action: 'delete', storeId, expectedIncarnation: held.incarnation, expectedRevision: held.revision });
+  const answer = await new AgentLifecycle(f.deps).execute(request);
+  assert.equal(answer.status, 'done', answer.outcome);
+  assert.deepEqual([answer.resultIncarnation, answer.resultRevision], [held.incarnation, held.revision]);
+  assert.deepEqual((await store.list()).definitions, []);
+  assert.deepEqual(await store.applyRequest({ id: 'r1', agentId: 'a', storeId, expectedIncarnation: held.incarnation,
+    expectedRevision: held.revision, patch: { remove: true } }, { installed: new Set(['hermes']) }),
+  { status: 'done', outcome: 'already applied', resultIncarnation: held.incarnation, resultRevision: held.revision });
 });
