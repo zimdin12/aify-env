@@ -10,7 +10,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  HARNESS_RUNTIME, isRemoval, mergePatch, requestDecision, startRefusal, trashedPair,
+  HARNESS_RUNTIME, isCreation, isRemoval, mergePatch, requestDecision, startRefusal, trashedPair,
 } from "../lib/agent-definition-requests.mjs";
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
 
@@ -120,6 +120,38 @@ test("APPLY a removal: the trash file names the request, and applying it again i
   assert.equal(fs.readdirSync(path.join(dir, ".trash")).filter((name) => name.startsWith("a.1.1.req-1.")).length, 1);
   assert.deepEqual(await store.applyRequest(asked, { installed: ALL }),
     { status: "done", outcome: "already applied", resultIncarnation: 1, resultRevision: 1 });
+});
+
+test("A CREATION (lifetime 0 revision 0, D8) applies only where no file names the id", () => {
+  const decide = (cur) => requestDecision({ request: request({ expectedIncarnation: 0, expectedRevision: 0, patch: agent() }),
+    storeId: "s1", current: cur, trashed: null });
+  assert.equal(isCreation(request({ expectedIncarnation: 0, expectedRevision: 0 })), true);
+  assert.equal(isCreation(request({ expectedIncarnation: 0, expectedRevision: 1 })), false, "both counters say so, not one");
+  assert.deepEqual(decide(undefined), { verdict: "apply" });
+  assert.deepEqual(decide(current()), { verdict: "refused", reason: "a already exists on this host" });
+  assert.equal(decide({ id: "a", problems: ["entry: not-adopted"] }).verdict, "refused", "a hand-written file is not overwritten");
+  assert.deepEqual(decide(current({ appliedRequest: "req-1" })), { verdict: "done", incarnation: 1, revision: 2 },
+    "the creation applied already is done, not refused as existing");
+});
+
+test("APPLY a creation: the file is the whole agent at a new lifetime, revision 1; applying it again writes nothing", async () => {
+  const dir = tempDir();
+  const store = storeIn(dir);
+  await store.set("other", agent(), { installed: ALL });
+  const { storeId } = await store.list();
+  const asked = request({ storeId, agentId: "b", expectedIncarnation: 0, expectedRevision: 0, patch: agent({ name: "New" }) });
+  assert.deepEqual(await store.applyRequest(asked, { installed: ALL }),
+    { status: "done", outcome: "", resultIncarnation: 2, resultRevision: 1 });
+  const file = readJson(path.join(dir, "b.json"));
+  assert.deepEqual([file.incarnation, file.revision, file.appliedRequest, file.agent],
+    [2, 1, "req-1", { ...agent({ name: "New" }), id: "b" }]);
+  const ledgerRevision = readJson(path.join(dir, ".collection.json")).revision;
+  assert.deepEqual(await store.applyRequest(asked, { installed: ALL }),
+    { status: "done", outcome: "already applied", resultIncarnation: 2, resultRevision: 1 });
+  assert.equal(readJson(path.join(dir, ".collection.json")).revision, ledgerRevision, "the repeat wrote nothing");
+  const again = await store.applyRequest({ ...asked, id: "req-2" }, { installed: ALL });
+  assert.deepEqual(again, { status: "refused", outcome: "b already exists on this host" }, "a second creation of the id");
+  assert.equal(readJson(path.join(dir, "b.json")).appliedRequest, "req-1", "and it wrote nothing");
 });
 
 test("APPLY refuses, writing nothing: another store, a host edit since, an invalid result, an uninstalled harness", async () => {
