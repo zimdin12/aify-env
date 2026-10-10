@@ -10,6 +10,8 @@ import path from "node:path";
 import test from "node:test";
 
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
+import { LifecycleJournal } from "../lib/agent-lifecycle.mjs";
+import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
 import { PluginHost, PluginProcesses } from "../lib/service-plugins.mjs";
 import { createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
 
@@ -56,6 +58,7 @@ test("GIVEN THE STORE, the plugin publishes it and refuses a start built from an
     async reportControl(id, patch) { controlReports.push({ id, ...patch }); },
     async terminalOutput() { return {}; },
     async claimDefinitionRequests() { return { requests: [] }; },
+    async claimLifecycleRequests() { return { requests: [] }; },
     async pushDefinitions(environmentId, body) { pushes.push({ environmentId, ...body }); return { ok: true, refused: [] }; },
   };
   const starts = [];
@@ -64,10 +67,16 @@ test("GIVEN THE STORE, the plugin publishes it and refuses a start built from an
     list() { return []; }, history() { return {}; }, instance() { return "i"; } };
   const host = new PluginHost({ processes: new PluginProcesses(runner), environmentId: "", credential: async () => "",
     log: () => {} });
+  // THE DAEMON'S LIFECYCLE PORT, as bin wires it: automatic starts reach the store through admitColdStart.
+  const aifyHome = fs.mkdtempSync(path.join(os.tmpdir(), "aify-plugin-home-"));
+  new LifecycleJournal({ file: path.join(aifyHome, "agent-lifecycle.json") }).initialize({ priorBoot: false });
+  const cold = () => ({ current: null, conflict: false, unknown: false });
+  const agents = { ...createAgentLifecyclePorts({ aifyHome, machineId: "win32:test-host",
+    stateHost: { rawIdentity: cold }, runner, definitions: store }), rawIdentity: cold };
   const plugin = createCommsPlugin({
     endpoint: "http://127.0.0.1:1", machineId: "win32:test-host", windows: true, api,
     advertisement: async () => ({ hostname: "test-host", kind: "win32" }), cwdRoots: async () => [root],
-    readFile: () => LAUNCHER_TEXT, definitions: store, installedHarnesses: async () => ALL,
+    readFile: () => LAUNCHER_TEXT, definitions: store, agents, installedHarnesses: async () => ALL,
     // Timers that never fire: each loop runs its first pass and then waits for ever.
     setTimeoutImpl: () => 0, clearTimeoutImpl: () => {},
   });

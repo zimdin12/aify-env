@@ -49,7 +49,12 @@ function control(store, { api, processes }, buildSpec = fakeSpec) {
     control: { id: "ctl-1", terminalId: "term-1", action: "start" }, api, processes, handles: createHandleBook(),
     cwdRoots: ["C:/work"], windows: true, withinRoots: workspaceWithinRoots, buildSpec,
     resolveCandidates: () => ["C:/bin/claude-aify"], baseEnv: {},
-    admitStart: (launch, produce) => store.admitStart(launch, produce),
+    // The admitter owns completion (D9a): the store fences the birth, then the attachment completes.
+    admitStart: async (launch, produce, complete) => {
+      const admitted = await store.admitStart(launch, produce);
+      if (admitted.produced) await complete(admitted.produced);
+      return admitted;
+    },
   });
 }
 

@@ -40,6 +40,7 @@ async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
     // NO DEFINITION STORE: the daemon makes this operator's own outside the evaluated block, and a
     // picker test must never publish or read it.
     definitionStore: null,
+    agentState: null,
     readFileSync: () => JSON.stringify({ version: 1, services: { "aify-comms": { endpoint: "http://example.invalid" } } }),
     readServices, resolvePluginCredential: async () => "test-only", logLine: () => {},
     // NO HERDR TO OPEN A SPACE IN, which is what an ordinary daemon has. What the opener does when

@@ -345,7 +345,7 @@ witness("THE DAEMON FOLLOWS ONLY A REGISTRY THAT PARSES: its own statement, run"
 witness("THE DEFINITION SYNC runs while the plugin claims, stops while it is held, and turns again on resume", async () => {
   // A store that is always complete and empty: what is pushed is witnessed elsewhere; this counts passes.
   const definitions = {
-    async list() { return { storeId: "s", definitions: [] }; },
+    async list() { return { storeId: "s", definitions: [], unreadable: [], conflict: null, enumerationFailed: null }; },
     async snapshot() { return { complete: true, storeId: "s", revision: 1, snapshotDigest: "d", entries: [] }; },
     async admitStart(launch, produce) { return { produced: await produce() }; },
   };
@@ -369,7 +369,7 @@ witness("A HELD PLUGIN'S SYNC BEGINS NO SETUP, so the final detach waits on noth
   // and only the sync's interval once held: the heartbeat and the control loop read the advertisement
   // too, so parking it under running timers would park them as well and say nothing about the sync.
   const definitions = {
-    async list() { return { storeId: "s", definitions: [] }; },
+    async list() { return { storeId: "s", definitions: [], unreadable: [], conflict: null, enumerationFailed: null }; },
     async snapshot() { return { complete: true, storeId: "s", revision: 1, snapshotDigest: "d", entries: [] }; },
     async admitStart(launch, produce) { return { produced: await produce() }; },
   };

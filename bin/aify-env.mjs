@@ -79,6 +79,7 @@ import { readServices, registryIsReadable } from "../lib/services.mjs";
 import { ServicePlugins } from "../lib/service-plugins.mjs";
 import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
+import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
 import { AgentStateSender } from "../lib/agent-state-sender.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
@@ -438,6 +439,7 @@ const server = createServer(createDaemonHttp({
         runner,
         turnEvents: agentState?.turnEvents,
         stateHost: agentState?.host ?? null,
+        lifecycle: agentState?.lifecycle ?? null,
         observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
         inputSocket: inputSocketAddress,
         readFile: (path) => readFileSync(path, "utf8"),
@@ -639,7 +641,16 @@ server.listen(port, HOST, async () => {
   const support = terminalSupport();
   try { agentState = bootDaemonAgentState({ aifyHome: join(homedir(), ".aify"), context: instanceContext,
     url: `http://${HOST}:${bound.port}`, report: logLine });
-    agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine }); }
+    agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine });
+    agentState.lifecycle = {
+      ...createAgentLifecyclePorts({ aifyHome: join(homedir(), ".aify"),
+        machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(),
+          env: process.env, exists: existsSync, isWsl: hostIsWsl() }).machineId,
+        stateHost: agentState.host, runner, definitions: definitionStore,
+        installed: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) }),
+      rawIdentity: (id) => agentState.host.rawIdentity(id),
+    };
+  }
   catch (error) { process.stderr.write(`[aify-env] agent state boot failed: ${error.message}\n`); process.exit(2); }
   // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
   // reapLeftovers.
@@ -655,6 +666,7 @@ server.listen(port, HOST, async () => {
       identity: { machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
         exists: existsSync, isWsl: hostIsWsl() }).machineId, instance: agentState.instance, generation: agentState.generation },
       stateHost: agentState.host, definitions: definitionStore,
+      lifecycle: agentState.lifecycle,
       observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
       readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"), credentialOptions: credentialReading, report: logLine,
     });
@@ -700,6 +712,7 @@ server.listen(port, HOST, async () => {
         cwdRoots: async () => CWD_ROOTS,
         windows: process.platform === "win32",
         definitions: definitionStore,
+        agents: agentState?.lifecycle ?? null,
         installedHarnesses: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
         // A herdr's DEDICATED instance starts plugins too, so a plugin that must run once per host (aify-dashboard's
         // git watcher) asks this and declines when it is true.

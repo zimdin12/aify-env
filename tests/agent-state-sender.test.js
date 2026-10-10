@@ -19,7 +19,7 @@ catch (e) { if (e.code !== "ERR_MODULE_NOT_FOUND") throw e; }
 const L = "7f3c9e2a-0000-4000-8000-000000000001";
 const M = "7f3c9e2a-0000-4000-8000-000000000002";
 const AT = 1_790_950_000_600_000;
-const inputs = { operatorStop: "not-tracked" };
+const inputs = { operatorStop: "tracked" };
 const def = (mode) => ({ name: "Fixture", role: "coder", harness: "claude", mode, workspace: "C:/secret-workspace",
   model: "", effort: "", instructions: "secret-instructions", env: { SECRET: "secret-env" }, herdrSpace: true });
 const target = (over = {}) => ({ endpoint: "http://fixture.invalid/mcp/sse", agentState: { path: "/api/v1/agent-state" }, ...over });
@@ -60,7 +60,7 @@ async function fixture(t, over = {}) {
   }
   const calls = [], reports = [], timers = new Map(); let nextTimer = 0;
   const sender = new AgentStateSender({ identity: { machineId: "win32:fixture", instance: "default", generation: 10, incarnationId: "fixture-boot" },
-    stateHost: host, definitions,
+    stateHost: host, definitions, lifecycle: { stopFacts: () => new Map() },
     observedHarnesses: async () => { observations++; if (harnessHold) await harnessHold.promise; if (harnessFailure) throw new Error("secret-harness"); return new Set(["claude"]); },
     readRegistry: () => { if (registryFailure) throw new Error("secret-registry"); return typeof services === "string" ? services : JSON.stringify({ version: 1, services }); },
     credentialOptions: () => ({ root: path.join(home, "credentials"), env: {} }),
@@ -296,7 +296,7 @@ test("named state ref ignores ordinary environment keys, rotates fresh bytes, an
   const calls = [], reports = [];
   let services = { x: target({ keyEnv: ["ORDINARY_KEY"], credentialRef: "ordinary.key", agentState: { path: "/state", credentialRef: "state.key" } }) };
   const sender = new AgentStateSender({ identity: { machineId: "win32:fixture", instance: "default", generation: 10, incarnationId: "credentials" },
-    stateHost: f.host, definitions: f.definitions, observedHarnesses: () => new Set(["claude"]),
+    stateHost: f.host, definitions: f.definitions, lifecycle: { stopFacts: () => new Map() }, observedHarnesses: () => new Set(["claude"]),
     readRegistry: () => JSON.stringify({ services }), credentialOptions: () => opts,
     fetchImpl: async (url, options) => { calls.push({ url, options, body: JSON.parse(options.body) }); return response(503); },
     report: (s) => reports.push(s) }); t.after(() => sender.stop());

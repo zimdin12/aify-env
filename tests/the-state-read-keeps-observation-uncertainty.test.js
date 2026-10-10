@@ -14,7 +14,7 @@ import { DefinitionStore } from "../lib/agent-definitions.mjs";
 const L = "7f3c9e2a-0000-4000-8000-000000000001";
 const M = "7f3c9e2a-0000-4000-8000-000000000002";
 const AT = 1_790_950_000_600_000;
-const marker = { operatorStop: "not-tracked" };
+const marker = { operatorStop: "tracked" };
 const agent = (mode = "resident") => ({ name: "Fixture", role: "coder", harness: "claude", mode, workspace: "C:/secret-workspace", model: "", effort: "", instructions: "secret-instructions", env: { SECRET: "secret-value" }, herdrSpace: true });
 async function fixture(t, declared = true) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "g6-read-"));
@@ -27,7 +27,9 @@ async function fixture(t, declared = true) {
   host.boot();
   const definitions = new DefinitionStore({ dir: path.join(home, "defs") });
   if (declared) await definitions.set("lead", agent(), { installed: new Set(["claude"]) });
-  const deps = { stateHost: host, definitions, observedHarnesses: () => new Set(["claude"]), turnEvents: new AgentTurnEvents({ host, instance: "default" }) };
+  // No stops recorded: the stop map is read, so the input is tracked (D9a). An unreadable map is the last test here.
+  const deps = { stateHost: host, definitions, observedHarnesses: () => new Set(["claude"]), turnEvents: new AgentTurnEvents({ host, instance: "default" }),
+    lifecycle: { stopFacts: () => new Map() } };
   const get = async (over = {}) => {
     const result = await handleRequest({ method: "GET", path: "/agents/state" }, { ...deps, ...over });
     assert.notEqual(result.status, 404, "missing GET /agents/state route");
@@ -159,4 +161,13 @@ test("HTTP resolves boot host lazily and inherits wrong verb and browser refusal
   owner = f.host; r = await send(); assert.equal(r.status, 200); assert.deepEqual(r.body.inputs, marker);
   assert.equal((await send("POST")).status, 405);
   assert.equal((await send("GET", { origin: "https://fixture.invalid" })).status, 403);
+});
+
+test("an unreadable operator-stop map makes the whole read unavailable, never a read with every stop forgotten", async (t) => {
+  const f = await fixture(t);
+  for (const lifecycle of [null, { stopFacts: () => { throw new Error("lifecycle journal missing"); } }, { stopFacts: () => ({}) }]) {
+    const result = await handleRequest({ method: "GET", path: "/agents/state" }, { ...f.deps, lifecycle });
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.body, { agents: [], complete: false, problems: ["operator-stop-unavailable"], inputs: { operatorStop: "unavailable" } });
+  }
 });
