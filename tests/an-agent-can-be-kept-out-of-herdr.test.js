@@ -15,7 +15,7 @@ import { startDashboard } from "../lib/dashboard.mjs";
 import { routeKey } from "../lib/keys.mjs";
 import { AgentStarter } from "../lib/plugins/aify-comms/agent-starter.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
-import { startableAgents } from "../lib/startable-agents.mjs";
+import { definitionsById, startableAgents } from "../lib/startable-agents.mjs";
 
 class FakeInput extends EventEmitter {
   setRawMode() { return this; }
@@ -93,7 +93,7 @@ test("the startable row carries the service's setting; only an explicit false hi
   const rows = startableAgents({ agents: {
     kept: { status: "available", sessionMode: "managed", machineId: "here", herdrSpace: false },
     shown: { status: "available", sessionMode: "managed", machineId: "here" },
-  } }, { machineId: "here" });
+  } }, { machineId: "here", definitions: definitionsById({ definitions: ["kept", "shown"].map((id) => ({ id, problems: [], agent: { id, mode: "managed" } })) }) });
   assert.deepEqual(Object.fromEntries(rows.map((r) => [r.id, r.herdrSpace])), { kept: false, shown: true });
 });
 

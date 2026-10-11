@@ -3,9 +3,8 @@
 //
 // Its mode is the definition's, not the roster's `sessionMode`, which reads resident until a managed
 // worker registers; it is this host's because it is defined here; and it starts through the service's
-// agent-level start, which builds the spawn from the definition even for an agent that never ran. An
-// agent this host does not define keeps the rules it had: the roster's mode and machine, and a
-// session restart.
+// agent-level start, which builds the spawn from the definition even for an agent that never ran. Since
+// D8 an agent no host defines is not started at all (`startable-agents.test.js` holds that refusal).
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -37,7 +36,7 @@ test("A DEFINITION DECIDES: its mode over the roster's, its validity, and the ro
   assert.equal(startabilityOf(rosterAgent({ status: "online" }), { machineId: MINE, definition: managed }).startable, false,
     "a live worker is not started twice");
   assert.equal(startabilityOf(rosterAgent({ sessionMode: "resident" }), { machineId: MINE }).startable, false,
-    "control: without a definition the roster's mode still decides");
+    "control: the same row without its definition is not started (D8)");
 });
 
 test("AN AGENT ANOTHER MACHINE DEFINES is not started here, whatever its row remembers", () => {
@@ -51,9 +50,8 @@ test("AN AGENT ANOTHER MACHINE DEFINES is not started here, whatever its row rem
   // A withdrawn definition is not started anywhere (C6): the service refuses it, so the menu does not offer it.
   assert.deepEqual(startabilityOf(rosterAgent({ definition: { state: "withdrawn", ownerMachineId: null } }), { machineId: MINE }),
     { startable: false, reason: "its definition was withdrawn: it is not started" });
-  assert.equal(startabilityOf(rosterAgent({ definition: { state: "", ownerMachineId: null } }), { machineId: MINE }).startable, true,
-    "control: an agent no host ever defined is started the ordinary way");
-  assert.equal(startabilityOf(rosterAgent(), { machineId: MINE }).startable, true, "control: a row with no definition field");
+  assert.equal(startabilityOf(rosterAgent({ definition: { state: "defined", ownerMachineId: MINE } }), { machineId: MINE, definition: reading("a") }).startable,
+    true, "control: the same row, owned and defined here, is started");
 });
 
 test("THE ACCEPTED OWNER OVERRULES THIS HOST'S OWN DEFINITION (review of 0.8.2): custody moved, the old copy starts nothing", () => {
@@ -73,13 +71,16 @@ test("THE LIST offers defined agents by their definitions and says which are not
     elsewhere: rosterAgent({ machineId: "win32:host-b" }),
   } };
   const definitions = definitionsById(listed(reading("defined"), reading("busy"), reading("pending")));
-  assert.deepEqual(startableAgents(roster, { machineId: MINE, definitions }).map((row) => row.id), ["defined", "plain"]);
+  // `plain` is managed, on this host and without a worker, and no host defines it: not offered since D8.
+  const undefinedRefusal = startabilityOf(roster.agents.plain, { machineId: MINE }).reason;
+  assert.deepEqual(startableAgents(roster, { machineId: MINE, definitions }).map((row) => row.id), ["defined"]);
   assert.deepEqual(notOffered(roster, { machineId: MINE, definitions }), [
     { count: 1, why: "a live worker is running" },
     { count: 1, why: "defined here, not yet published to the service" },
+    { count: 1, why: undefinedRefusal },
   ]);
-  assert.deepEqual(startableAgents(roster, { machineId: MINE }).map((row) => row.id), ["plain"],
-    "control: without its definition the resident row is not offered");
+  assert.deepEqual(startableAgents(roster, { machineId: MINE }).map((row) => row.id), [],
+    "control: without its definitions nothing is offered");
 });
 
 function fakeApi({ roster, startAnswer = { ok: true, spawnRequested: true } }) {
@@ -88,36 +89,34 @@ function fakeApi({ roster, startAnswer = { ok: true, spawnRequested: true } }) {
     calls,
     agents: async () => roster,
     startAgent: async (id) => { calls.push(["startAgent", id]); return startAnswer; },
-    sessionsFor: async (id) => { calls.push(["sessionsFor", id]); return { sessions: [{ id: `sess-${id}`, status: "stopped", lastSeen: "1" }] }; },
-    controlSession: async (id, action, options) => { calls.push(["controlSession", id, action, options]); return { ok: true }; },
   };
 }
 const store = (...readings) => ({ list: async () => listed(...readings) });
 
-test("A DEFINED AGENT STARTS through the agent-level start; an undefined one through its session", async () => {
+test("A DEFINED AGENT STARTS through the agent-level start; an undefined one is not started at all", async () => {
   const roster = { agents: { defined: rosterAgent({ sessionMode: "resident" }), plain: rosterAgent() } };
   const api = fakeApi({ roster });
   const starter = new AgentStarter({ api, machineId: MINE, definitions: store(reading("defined")) });
   assert.deepEqual(await starter.start("defined"), { started: true, agentId: "defined", sessionId: "", problem: "" });
-  assert.deepEqual(await starter.start("plain"), { started: true, agentId: "plain", sessionId: "sess-plain", problem: "" });
-  assert.deepEqual(api.calls, [
-    ["startAgent", "defined"],
-    ["sessionsFor", "plain"], ["controlSession", "sess-plain", "restart", { onlyIfNoLiveSession: true }],
-  ]);
+  assert.equal((await starter.start("plain")).started, false, "an agent no host defines was started");
+  assert.deepEqual(api.calls, [["startAgent", "defined"]], "something was sent for the undefined agent");
 });
 
 test("THE STARTER'S LIST offers what this host defines, by its definition", async () => {
   const roster = { agents: { defined: rosterAgent({ sessionMode: "resident" }), plain: rosterAgent() } };
   const starter = new AgentStarter({ api: fakeApi({ roster }), machineId: MINE, definitions: store(reading("defined")) });
   const offer = await starter.list();
-  assert.deepEqual([offer.problem, offer.agents.map((row) => row.id)], ["", ["defined", "plain"]]);
+  assert.deepEqual([offer.problem, offer.agents.map((row) => row.id)], ["", ["defined"]]);
 });
 
-test("A DEFINED START the service answers alreadyRunning is not a start, and an unreadable store is said", async () => {
+test("A DEFINED START the service refuses is not a start, and an unreadable store is said", async () => {
   const roster = { agents: { defined: rosterAgent() } };
-  const running = new AgentStarter({ api: fakeApi({ roster, startAnswer: { ok: true, alreadyRunning: true } }),
+  const refused = new AgentStarter({ api: fakeApi({ roster, startAnswer: { ok: false, error: "no fresh agent state" } }),
     machineId: MINE, definitions: store(reading("defined")) });
-  assert.equal((await running.start("defined")).problem, "cannot start defined: it already has a live worker");
+  assert.equal((await refused.start("defined")).problem, "aify-comms refused the start: no fresh agent state");
+  const queued = new AgentStarter({ api: fakeApi({ roster, startAnswer: { ok: true, queued: true, alreadyQueued: true } }),
+    machineId: MINE, definitions: store(reading("defined")) });
+  assert.equal((await queued.start("defined")).started, true, "a start already waiting is that start, not a refusal");
   const broken = new AgentStarter({ api: fakeApi({ roster }), machineId: MINE,
     definitions: { list: async () => { throw new Error("the store is locked"); } } });
   assert.equal((await broken.start("defined")).problem, "this host's agent definitions could not be read: the store is locked");

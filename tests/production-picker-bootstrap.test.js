@@ -20,7 +20,10 @@ const bootstrap = `(async () => { let followServices; ${daemon.slice(begin, end 
 
 async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
   const expected = hostIdentityFacts(facts).machineId;
-  const agent = (machineId) => ({ machineId, sessionMode: "managed", status: "available" });
+  // SINCE D8 only a defined agent is offered, and a defined agent is this host's when the service names
+  // this host as its owner: that comparison is where the identity the bootstrap supplies is read.
+  const agent = (machineId, owner) => ({ machineId, sessionMode: "managed", status: "available",
+    ...(owner === undefined ? {} : { definition: { state: "defined", ownerMachineId: owner } }) });
   const registry = new ServicePlugins();
   t.after(() => registry.stopAll());
   let reads = 0;
@@ -28,7 +31,7 @@ async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
     heartbeat: async () => ({}), claim: async () => ({}),
     agents: async () => {
       reads++;
-      return { agents: { local: agent(expected), remote: agent(`${expected}-other`), unknown: agent("") } };
+      return { agents: { local: agent(expected, expected), remote: agent(`${expected}-other`, `${expected}-other`), unknown: agent("") } };
     },
   };
   const runner = { list: () => [], start: () => assert.fail("listing must not spawn"),
@@ -67,12 +70,22 @@ async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
   return { answer, reads };
 }
 
+//: This host's store holds both: `remote` as a stale copy, so only the owner the service names keeps it out.
+const definesLocalAndRemote = () => ({
+  definitionStore: {
+    async list() { return { storeId: "s1", definitions: ["local", "remote"].map((id) => ({ id, problems: [], agent: { id, mode: "managed" } })) }; },
+    async snapshot() { return { complete: false, incomplete: {} }; },
+  },
+  installedHarnesses: () => [],
+  aifyLauncherFilesOnPath: () => [],
+});
+
 for (const facts of [
   { platform: "win32", hostname: "fallback", env: { COMPUTERNAME: "Picker-Windows" }, isWsl: false },
   { platform: "linux", hostname: "Picker-WSL", env: {}, isWsl: true },
 ]) {
   test(`production bootstrap supplies canonical ${facts.platform}/${facts.isWsl} identity to picker`, async (t) => {
-    const { answer, reads } = await picker(t, { ...facts, exists: () => false });
+    const { answer, reads } = await picker(t, { ...facts, exists: () => false }, hostIdentityFacts, definesLocalAndRemote());
     assert.equal(answer.status, 200);
     assert.equal(answer.body.problem, "", "bootstrap lost machine identity before the picker");
     assert.equal(reads, 1, "the real starter must reach the roster");

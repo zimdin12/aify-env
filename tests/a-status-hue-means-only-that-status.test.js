@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AGENT_STATUS_HUES, hueOf } from "../lib/agent-status-palette.mjs";
-import { startableAgents } from "../lib/startable-agents.mjs";
+import { definitionsById, startableAgents } from "../lib/startable-agents.mjs";
 import { renderDashboard } from "../lib/tui.mjs";
 
 const ESC = String.fromCharCode(27);
@@ -27,11 +27,13 @@ const render = (view) => renderDashboard(SNAPSHOT, {
   columns: 120, color: true, keys: { enabled: true, canQuit: true },
   view: { rows: SNAPSHOT.processes, selected: 0, query: "", ...view },
 }).join("\n");
+//: Since D8 only an agent this host defines is offered, so the fixture defines both.
+const managedHere = (...ids) => definitionsById({ definitions: ids.map((id) => ({ id, problems: [], agent: { id, mode: "managed" } })) });
 const START = {
   agents: startableAgents({ agents: {
     alpha: { status: "available", sessionMode: "managed", machineId: "here" },
     bravo: { status: "stopped", sessionMode: "managed", machineId: "here" },
-  } }, { machineId: "here" }),
+  } }, { machineId: "here", definitions: managedHere("alpha", "bravo") }),
   at: 0, problem: "", asked: true,
 };
 

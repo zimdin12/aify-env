@@ -558,6 +558,12 @@ test("BEFORE START THE CAPABILITY SAYS THE PLUGIN IS NOT RUNNING, rather than th
   assert.match(started.problem, /not running/);
 });
 
+/** A definition store that defines these agents as managed: since D8 only a defined agent is offered. */
+function definesAgents(...ids) {
+  return { list: async () => ({ storeId: "s1", unreadable: [], definitions: ids.map((id) => ({ id, problems: [],
+    agent: { id, name: id, role: "coder", harness: "claude", mode: "managed" } })) }) };
+}
+
 test("AFTER START IT REACHES THE REAL SERVICE CALLS, not a stub that answers politely", async () => {
   // The failure this rules out is a capability that was declared, wired to nothing, and reported an
   // empty list forever -- which looks exactly like a host with no startable agents.
@@ -568,9 +574,8 @@ test("AFTER START IT REACHES THE REAL SERVICE CALLS, not a stub that answers pol
       asked.push("agents");
       return { agents: { "ef-tester": { sessionMode: "managed", machineId: "win32:box", status: "available" } } };
     },
-    async sessionsFor(id) { asked.push(`sessionsFor:${id}`); return { sessions: [] }; },
   };
-  const { plugin } = makePlugin(api, { machineId: "win32:box" });
+  const { plugin } = makePlugin(api, { machineId: "win32:box", definitions: definesAgents("ef-tester") });
   const { host } = makeHost();
   await plugin.start(host);
   const listed = await plugin.capabilities.agents.list();
@@ -580,20 +585,22 @@ test("AFTER START IT REACHES THE REAL SERVICE CALLS, not a stub that answers pol
 });
 
 test("THE CAPABILITY IS SCOPED TO THIS HOST'S MACHINE, which is the only scope it can honour", async () => {
-  // A restart is routed by the service to the agent's OWN environment, so an agent bound elsewhere
-  // would come up on a machine the operator is not looking at. Passing the wrong machine id here --
-  // or none -- is how the menu would quietly list the whole fleet.
+  // A start is routed by the service to the machine whose definition stands, so an agent defined
+  // elsewhere would come up on a machine the operator is not looking at. Passing the wrong machine id
+  // here -- or none -- is how the menu would offer another host's agents.
   const api = {
     ...fakeApi(),
     async agents() {
       return { agents: {
-        mine: { sessionMode: "managed", machineId: "win32:box", status: "available" },
-        theirs: { sessionMode: "managed", machineId: "linux:laputa", status: "available" },
+        mine: { sessionMode: "managed", machineId: "win32:box", status: "available",
+          definition: { state: "defined", ownerMachineId: "win32:box" } },
+        theirs: { sessionMode: "managed", machineId: "linux:laputa", status: "available",
+          definition: { state: "defined", ownerMachineId: "linux:laputa" } },
       } };
     },
-    async sessionsFor() { return { sessions: [] }; },
   };
-  const { plugin } = makePlugin(api, { machineId: "win32:box" });
+  // This host holds a stale copy of `theirs` too: the accepted owner still decides.
+  const { plugin } = makePlugin(api, { machineId: "win32:box", definitions: definesAgents("mine", "theirs") });
   const { host } = makeHost();
   await plugin.start(host);
   assert.deepEqual((await plugin.capabilities.agents.list()).agents.map((a) => a.id), ["mine"]);

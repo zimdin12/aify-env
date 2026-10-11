@@ -183,89 +183,18 @@ test("an advertisement's own metadata survives the bridge fields", () => {
     });
 });
 
-// ── the three READ/CONTROL calls behind "start an available agent" ────────────────────────────────
+// ── the calls behind "start an available agent" ───────────────────────────────────────────────────
 
-test("the roster and the session listing are plain reads, with no body", async () => {
+test("the roster is a plain read, and an agent id is encoded into its start's path", async () => {
   const fetchImpl = fakeFetch({ json: { agents: {} } });
   await api(fetchImpl).agents();
-  await api(fetchImpl).sessionsFor("ef tester/1");
+  await api(fetchImpl).startAgent("ef tester/1");
   assert.deepEqual(fetchImpl.calls.map((c) => [c.options.method, c.url]), [
     ["GET", "http://127.0.0.1:8800/api/v1/agents"],
-    // ENCODED, so an id carrying a space or a slash cannot address another route or split the query.
-    ["GET", "http://127.0.0.1:8800/api/v1/sessions?agentId=ef%20tester%2F1"],
+    // ENCODED, so an id carrying a space or a slash cannot address another route.
+    ["POST", "http://127.0.0.1:8800/api/v1/agents/ef%20tester%2F1/control"],
   ]);
-  for (const call of fetchImpl.calls) assert.equal(call.options.body, undefined);
-});
-
-test("A SESSION CONTROL CARRIES NO BRIEF, AND THAT IS THE MOST EXPENSIVE LINE IN THIS FILE", async () => {
-  // `/sessions/:id/control` stores `body` as the spawn request's `initial_message`, and the service
-  // turns a non-empty one into a real `type=request` MESSAGE plus a dispatch run addressed to the
-  // agent that just came up. A polite receipt therefore reaches a freshly-started agent as an
-  // instruction owing a reply, and the obvious reply is to restart itself.
-  //
-  // MEASURED ON THIS FLEET: all 21 self-issued spawn requests were preceded, 45 to 75 seconds
-  // earlier, by exactly one dashboard `Restart <agent>` message of type=request. That is the whole
-  // of the operator's "agents exited even though I never stopped them".
-  const fetchImpl = fakeFetch({ json: { ok: true } });
-  await api(fetchImpl).controlSession("s1/2");
-  const [call] = fetchImpl.calls;
-  assert.equal(call.options.method, "POST");
-  assert.equal(call.url, "http://127.0.0.1:8800/api/v1/sessions/s1%2F2/control");
-  const sent = JSON.parse(call.options.body);
-  // THE WHOLE FIELD SET, listed rather than spot-checked, because what this test exists to stop
-  // is a field ARRIVING -- `body` above all. `only_if_no_live_session` joined it deliberately in
-  // v0.6.3: it carries the caller's precondition to the authority so a start cannot become a stop
-  // of a worker that appeared in between.
-  assert.deepEqual(Object.keys(sent).sort(),
-    ["action", "from_agent", "only_if_no_live_session"],
-    `the control carried a field beyond the action, the actor and the precondition: ${call.options.body}`);
-  assert.equal(sent.only_if_no_live_session, false,
-    "an unconditional control must say so explicitly, not by omission");
-  assert.equal(sent.action, "restart");
-  // THE ACTOR IS THIS TIER, BY NAME. Never a person, and never read from an environment variable:
-  // a control attributed to whichever agent happened to be in `AIFY_AGENT_ID` puts somebody else's
-  // name on a restart they did not ask for.
-  assert.equal(sent.from_agent, "aify-env");
-});
-
-test("THE PRECONDITION TRAVELS when the caller states one", async () => {
-  // `AgentStarter` picks a session BECAUSE the listing showed no live one, and that reading is a
-  // round trip old by the time this request lands. The flag is how the authority gets to
-  // re-evaluate the belief against the rows it is about to act on; a client-side re-read only
-  // shortens the window. Review traced the race and asked for exactly this shape.
-  const fetchImpl = fakeFetch({ json: { ok: true } });
-  await api(fetchImpl).controlSession("s1", "restart", { onlyIfNoLiveSession: true });
-  assert.equal(JSON.parse(fetchImpl.calls[0].options.body).only_if_no_live_session, true);
-});
-
-test("AND ANYTHING BUT A LITERAL TRUE IS UNCONDITIONAL, because a truthy value is not a claim", async () => {
-  // A guard that passes on a missing input is decoration, and so is one that fires on a stray
-  // string. The route stops a restart; "yes" arriving from a config file must not turn one off.
-  const fetchImpl = fakeFetch({ json: { ok: true } });
-  await api(fetchImpl).controlSession("s1", "restart", { onlyIfNoLiveSession: "yes" });
-  assert.equal(JSON.parse(fetchImpl.calls[0].options.body).only_if_no_live_session, false);
-});
-
-test("the control's action travels, so a future verb cannot silently become a restart", async () => {
-  const fetchImpl = fakeFetch({ json: { ok: true } });
-  await api(fetchImpl).controlSession("s1", "recreate");
-  assert.equal(JSON.parse(fetchImpl.calls[0].options.body).action, "recreate");
-});
-
-test("a refused control raises a CommsApiError carrying the status, like every other call here", async () => {
-  // The caller has to tell "the service said no" from "the service was not there": one means a
-  // person must change something, the other means retry.
-  const refused = fakeFetch({ status: 409, text: "environment offline" });
-  await assert.rejects(() => api(refused).controlSession("s1"), (error) => {
-    assert.ok(error instanceof CommsApiError);
-    assert.equal(error.status, 409);
-    return true;
-  });
-  const unreachable = fakeFetch({ throws: "ECONNREFUSED" });
-  await assert.rejects(() => api(unreachable).controlSession("s1"), (error) => {
-    assert.equal(error.status, 0, "an unreachable service was reported with a refusal's status");
-    return true;
-  });
+  assert.equal(fetchImpl.calls[0].options.body, undefined);
 });
 
 // THE DEFINITION CALLS (P0 C3, C4, C7): the method, the path and the body each one sends. The service
@@ -288,6 +217,9 @@ test("the definition calls send what the service's routes take", async () => {
     ["POST", `${base}/definition-requests/claim`, { bridgeId: IDENTITY.bridgeId, machineId: "win32:host-a" }],
     ["POST", `${base}/definition-requests/req-1/result`,
       { status: "done", outcome: "", resultIncarnation: 1, resultRevision: 2, bridgeId: IDENTITY.bridgeId, machineId: "win32:host-a" }],
+    // THE WHOLE BODY, so a brief cannot arrive beside it: a control's body once became the new worker's
+    // first message, and 21 self-issued spawn requests on this fleet followed one. The actor is this tier
+    // by name, never whatever agent id sits in the environment.
     ["POST", "/agents/lead/control", { action: "start", from_agent: "aify-env" }],
   ]);
 });
