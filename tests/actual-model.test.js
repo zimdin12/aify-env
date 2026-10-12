@@ -40,6 +40,19 @@ test("A CLAUDE SESSION is read by its handle, from the tail of a transcript long
   assert.deepEqual(claudeActual({ workspace: "C:/w", handle: "", env }), { unknown: "no session handle" });
 });
 
+test("A CLAUDE SESSION STARTED ELSEWHERE than the workspace it registered from is found by its own id", () => {
+  // OBSERVED 2026-10-12: llama-manager registered from C:/Docker/aify-llamacpp, its transcript is under the router's folder.
+  const config = fs.mkdtempSync(path.join(os.tmpdir(), "actual-claude-elsewhere-"));
+  const folder = path.join(config, "projects", claudeProjectSlug("C:/Docker/aify-llamacpp-router"));
+  fs.mkdirSync(folder, { recursive: true });
+  fs.mkdirSync(path.join(config, "projects", "C--other"), { recursive: true });
+  fs.writeFileSync(path.join(folder, "s-9.jsonl"), answer("claude-opus-5-5", "t"));
+  const env = { CLAUDE_CONFIG_DIR: config };
+  assert.deepEqual(claudeActual({ workspace: "C:/Docker/aify-llamacpp", handle: "s-9", env }), { model: "claude-opus-5-5", at: "t" });
+  assert.match(claudeActual({ workspace: "C:/Docker/aify-llamacpp", handle: "s-8", env }).unknown,
+    /no transcript at .*C--Docker-aify-llamacpp[\\/]s-8\.jsonl/, "a missing session must name where it was expected");
+});
+
 test("A HERMES SESSION is its newest own turn, not a side task's model and not another session's", async () => {
   const { DatabaseSync } = await import("node:sqlite");
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "actual-hermes-")), "state.db");

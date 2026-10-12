@@ -383,9 +383,10 @@ test("state is reported so silence can be explained", async () => {
   // refuses every start, and without them that reads as a healthy host that is simply idle.
   // `definitions` joined with P0 C3/C4: what the definition sync last did, null with no store.
   // `lifecycle` joined with D9a: what the lifecycle queue last did, null with no lifecycle port.
+  // `modelReads` joined with 0.9.1 3B: the reads answered and the last error, null until started.
   assert.deepEqual(Object.keys(before).sort(), [
     "claimedTotal", "claimer", "controlsHandled", "definitions", "heldWorkers", "lastClaim", "lastControl",
-    "lastHeartbeat", "lastHeartbeatError", "lifecycle", "phase",
+    "lastHeartbeat", "lastHeartbeatError", "lifecycle", "modelReads", "phase",
   ]);
   assert.equal(before.definitions, null, "no store was given, so there is no sync to report");
   assert.equal(before.claimer, null);
