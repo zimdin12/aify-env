@@ -154,6 +154,7 @@ aify-env agents list
 aify-env agents show <id>
 aify-env agents set <id> role=reviewer model=gpt-5.5 effort=high
 aify-env agents set --harness claude model=opus --yes   # many at once (--all, --ids a,b); a dry run without --yes
+aify-env agents models            # each agent's set model beside the one its session last answered with
 aify-env agents import            # what it would define from the agents your services know; --write does it
 ```
 

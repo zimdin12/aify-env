@@ -15,6 +15,7 @@ import { installedHarnesses } from "../lib/advertise.mjs";
 import { DefinitionRefused, DefinitionStore, DefinitionStoreError } from "../lib/agent-definitions.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { DECISION, definitionCheck, importPlan, parsePrefer, planLines } from "../lib/agent-import.mjs";
+import { actualModel } from "../lib/actual-model.mjs";
 import { importableAgents } from "../lib/client-actions.mjs";
 import { findEnvEndpoint } from "../lib/serving-endpoint.mjs";
 
@@ -31,6 +32,7 @@ const USAGE = [
   "                                               instructions herdrSpace env.<NAME>; -env.<NAME> unsets",
   "  aify-env agents set --all | --harness <h> | --ids a,b  model=X [effort=Y] [--yes]",
   "                                               many agents' model and effort; a dry run unless --yes",
+  "  aify-env agents models                      the model each agent is set to, and the one its session runs",
   "  aify-env agents remove <id>",
   "  aify-env agents import [--write] [--prefer <service>[:<id>]] ...",
   "                                               define the agents the services know on this machine; a dry run unless --write",
@@ -52,7 +54,7 @@ const BULK_KEYS = new Set(["model", "effort"]);
 export function parseAgentsArgs(argv) {
   const [verb = "", ...rest] = Array.isArray(argv) ? argv.map(String) : [];
   const fail = (problem) => ({ verb, problem });
-  if (verb === "list" || verb === "unlock") return rest.length ? fail(`${verb} takes no arguments`) : { verb, problem: "" };
+  if (verb === "list" || verb === "unlock" || verb === "models") return rest.length ? fail(`${verb} takes no arguments`) : { verb, problem: "" };
   if (verb === "recover") {
     const choice = { "--as-committed": "committed", "--as-not-committed": "not-committed" }[rest[0]];
     return rest.length === 1 && choice ? { verb, choice, problem: "" } : fail("recover needs --as-committed or --as-not-committed");
@@ -150,8 +152,10 @@ function conflictLines(conflict) {
 }
 
 /** Run one parsed intent against a store. Returns the lines to print and the exit code. */
-export async function runAgents(intent, { store, installed, unlock = () => DefinitionStore.unlock(), importable = null }) {
+export async function runAgents(intent, { store, installed, unlock = () => DefinitionStore.unlock(), importable = null,
+  actual = actualModel }) {
   if (intent.verb === "import") return importAgents(intent, { store, installed, importable });
+  if (intent.verb === "models") return agentModels({ store, importable, actual });
   if (intent.verb === "unlock") {
     const removed = unlock();
     return { code: EXIT_OK, lines: [removed ? `removed the lock left by process ${removed.pid ?? "unknown"}, which is not running` : "the store is not locked"] };
@@ -186,6 +190,36 @@ export async function runAgents(intent, { store, installed, unlock = () => Defin
   }
   const removed = await store.remove(intent.id);
   return { code: EXIT_OK, lines: [`${removed.id} removed to .trash/${removed.trashName}`] };
+}
+
+/**
+ * `aify-env agents models`: each defined agent's model as set, and the one its current session last ran, read from
+ * the harness's record of the session the services name. Read-only. Nothing is compared: an alias such as `opus`
+ * resolves to an id only the harness knows, and a session it cannot read is UNKNOWN with the reason.
+ */
+async function agentModels({ store, importable, actual }) {
+  const listed = await store.list();
+  const report = await importable();
+  const lines = [];
+  if (report.problem) lines.push(`no service could name the sessions: ${report.problem}`);
+  for (const service of report.services ?? []) if (service.problem) lines.push(`${service.service || "a service"} did not answer: ${service.problem}`);
+  const handles = new Map();
+  for (const service of report.services ?? []) {
+    for (const record of service.agents ?? []) {
+      if (record.sessionHandle) handles.set(record.id, new Set([...(handles.get(record.id) ?? []), record.sessionHandle]));
+    }
+  }
+  for (const entry of listed.definitions) {
+    if (entry.problems?.length) { lines.push(`${entry.id}  INVALID  ${entry.problems.join("; ")}`); continue; }
+    const { harness, workspace, model } = entry.agent;
+    const sessions = [...(handles.get(entry.id) ?? [])];
+    const runs = sessions.length > 1 ? { unknown: `the services name different sessions: ${sessions.join(", ")}` }
+      : await actual({ harness, workspace, handle: sessions[0] ?? "" });
+    lines.push(`${entry.id}  ${harness}  set: ${model || "(harness default)"}  runs: `
+      + (runs.model ? `${runs.model} (last answered ${runs.at || "at an unknown time"})` : `UNKNOWN, ${runs.unknown}`));
+  }
+  if (!listed.definitions.length) lines.push("no agents are defined on this host");
+  return { code: EXIT_OK, lines };
 }
 
 /**

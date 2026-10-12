@@ -128,3 +128,33 @@ test("SET MANY writes each agent only as it was read: one changed in between is 
   assert.equal(code, 65);
   assert.ok(lines.includes("not written: a (changed on the host since you asked)"), lines.join("\n"));
 });
+
+test("MODELS: each agent's set model beside the one its session runs, by the session the services name", async () => {
+  const { runAgents } = await import("../bin/aify-env-agents.mjs");
+  assert.deepEqual(parseAgentsArgs(["models"]), { verb: "models", problem: "" });
+  assert.match(parseAgentsArgs(["models", "x"]).problem, /no arguments/);
+  const definition = (id, harness, model) => ({ id, incarnation: 1, revision: 1, agent: { harness, workspace: "C:/w", model } });
+  const store = { list: async () => ({ definitions: [definition("a", "claude", ""), definition("b", "hermes", "gpt-6"),
+    definition("c", "claude", "opus"), definition("d", "claude", "")], recovered: [], unreadable: [] }) };
+  const importable = async () => ({ problem: "", services: [
+    { service: "aify-comms", agents: [{ id: "a", sessionHandle: "s-a" }, { id: "b", sessionHandle: "h-b" }, { id: "c", sessionHandle: "s-c" }] },
+    { service: "other", agents: [{ id: "c", sessionHandle: "s-other" }] },
+    { service: "quiet", agents: [], problem: "refused" },
+  ] });
+  const asked = [];
+  const actual = async (query) => {
+    asked.push(query);
+    return query.handle ? { model: `ran-${query.handle}`, at: "t" } : { unknown: "no session handle" };
+  };
+  const { code, lines } = await runAgents(parseAgentsArgs(["models"]), { store, importable, actual });
+  assert.equal(code, 0);
+  assert.deepEqual(lines, [
+    "quiet did not answer: refused",
+    "a  claude  set: (harness default)  runs: ran-s-a (last answered t)",
+    "b  hermes  set: gpt-6  runs: ran-h-b (last answered t)",
+    "c  claude  set: opus  runs: UNKNOWN, the services name different sessions: s-c, s-other",
+    "d  claude  set: (harness default)  runs: UNKNOWN, no session handle",
+  ]);
+  assert.deepEqual(asked.map((q) => [q.harness, q.workspace, q.handle]),
+    [["claude", "C:/w", "s-a"], ["hermes", "C:/w", "h-b"], ["claude", "C:/w", ""]], "a disputed session is not read");
+});

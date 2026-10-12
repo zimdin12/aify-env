@@ -88,7 +88,7 @@ test("THE LINES say each decision, every value to be written, and what was not r
 test("THE ROSTER, read as records: this machine only, harness from runtime, aify-comms' names mapped", () => {
   const roster = { agents: {
     lead: { machineId: "WIN32:Host", runtime: "claude-code", name: "Lead", role: "coder", sessionMode: "managed", cwd: "C:/w",
-      model: "opus", instructions: "be brief", herdrSpace: false, runtimeConfig: { effort: "high" } },
+      model: "opus", instructions: "be brief", herdrSpace: false, runtimeConfig: { effort: "high" }, sessionHandle: "s-lead" },
     thinker: { machineId: "win32:host", runtime: "codex", sessionMode: "resident", runtimeConfig: { thinking: "xhigh" } },
     elsewhere: { machineId: "win32:other", runtime: "codex" },
     nowhere: { runtime: "codex" },
@@ -96,7 +96,8 @@ test("THE ROSTER, read as records: this machine only, harness from runtime, aify
   const records = importRecords(roster, "win32:host");
   assert.deepEqual(records.map((r) => r.id), ["lead", "thinker"]);
   assert.deepEqual(records[0], { id: "lead", unreported: ["env"], agent: { name: "Lead", role: "coder", harness: "claude",
-    mode: "managed", workspace: "C:/w", model: "opus", effort: "high", instructions: "be brief", env: {}, herdrSpace: false } });
+    mode: "managed", workspace: "C:/w", model: "opus", effort: "high", instructions: "be brief", env: {}, herdrSpace: false },
+    sessionHandle: "s-lead" });
   assert.equal(records[1].agent.effort, "xhigh", "thinking when there is no effort, as the service's launch reads it");
   assert.deepEqual(records[1].unreported, ["name", "role", "workspace", "model", "instructions", "env", "herdrSpace"],
     "every field the row does not carry is said, not assumed");
@@ -108,6 +109,13 @@ test("EVERY HARNESS maps back from its runtime, and any other runtime is not imp
     assert.equal(importRecord("a", { runtime }).agent.harness, harness, runtime);
   }
   assert.deepEqual(importRecord("a", { runtime: "generic" }), { id: "a", notImportable: "its runtime generic has no harness" });
+});
+
+test("THE SESSION HANDLE travels beside the definition, never inside it (aify-env agents models, 0.9.1)", () => {
+  const record = importRecord("a", { runtime: "claude-code", sessionHandle: "s-1" });
+  assert.equal(record.sessionHandle, "s-1");
+  assert.equal("sessionHandle" in record.agent, false, "a handle is a session's, not the agent's desired state");
+  assert.equal(importRecord("a", { runtime: "claude-code" }).sessionHandle, "", "control: a row with none names none");
 });
 
 test("WITHDRAWN on the service is carried on the record, so the doctor does not say it runs as before", () => {
