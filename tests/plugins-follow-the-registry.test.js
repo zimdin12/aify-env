@@ -91,11 +91,12 @@ function fakeRunner() {
 const live = [];
 after(() => Promise.all(live.map((plugin) => plugin.stop().catch(() => {}))));
 
-async function startedPlugin({ endpoint = "http://old.invalid", cwdRoots = null, definitions = null,
+async function startedPlugin({ endpoint = "http://old.invalid", cwdRoots = null, definitions = null, agentId = "a",
   advertisement = async () => ({ hostname: "h", kind: "test" }),
   setTimeoutImpl = (fn, ms) => setTimeout(fn, Math.min(ms, 5)), clearTimeoutImpl = clearTimeout } = {}) {
   const { root, launcher } = workspace();
-  const launch = { terminalId: "term-1", agentId: "a", runtime: "claude-code", command: launcher, argv: [launcher], cwd: root, env: { AIFY_AGENT_ID: "a" } };
+  const launch = { terminalId: "term-1", agentId, runtime: "claude-code", command: launcher, argv: [launcher], cwd: root,
+    env: agentId ? { AIFY_AGENT_ID: agentId } : {} };
   const api = fakeApi(launch);
   const runner = fakeRunner();
   const plugin = createCommsPlugin({
@@ -349,7 +350,8 @@ witness("THE DEFINITION SYNC runs while the plugin claims, stops while it is hel
     async snapshot() { return { complete: true, storeId: "s", revision: 1, snapshotDigest: "d", entries: [] }; },
     async admitStart(launch, produce) { return { produced: await produce() }; },
   };
-  const { plugin, api, runner } = await startedPlugin({ definitions });
+  // A terminal for no agent: with no definitions on this host, a named agent is not born here (D8, F2 of the 0.9 review).
+  const { plugin, api, runner } = await startedPlugin({ definitions, agentId: "" });
   await holdOneWorker(api, runner);
   const running = api.definitionClaims;
   await until(() => api.definitionClaims > running + 1, "sync passes while running");
@@ -382,7 +384,7 @@ witness("A HELD PLUGIN'S SYNC BEGINS NO SETUP, so the final detach waits on noth
     if (park) await new Promise((resolve) => parked.push(resolve));
     return { hostname: "h", kind: "test" };
   };
-  const { plugin, api, runner } = await startedPlugin({ definitions, advertisement,
+  const { plugin, api, runner } = await startedPlugin({ definitions, agentId: "", advertisement,
     setTimeoutImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeoutImpl: () => {} });
   await until(() => api.definitionClaims === 1 && timers.some((t) => t.ms === REQUEST_POLL_MS), "the first sync pass");
   await holdOneWorker(api, runner);
