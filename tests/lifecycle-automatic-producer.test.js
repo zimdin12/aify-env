@@ -116,12 +116,12 @@ test('completed explicit start invalidates an earlier cold automatic preflight b
   assert.deepEqual([...f.journal.stopFacts()], [...f.before, [`${f.launch.definition.storeId}:${f.launch.definition.incarnation}:a`, false]]);
 });
 
-test('known undefined automatic control preserves legacy birth without lifecycle admission', async t => {
+test('a named agent no definition here names is not born, by a complete reading (D8; 0.9 review F2)', async t => {
   const f = await fixture(t, { defined: false });
-  assert.equal(f.calls.births.length, 1);
+  assert.equal(f.calls.births.length, 0);
   assert.deepEqual(f.calls.admissions, []);
   assert.ok(f.calls.lists > 0, 'undefined must be established by a complete reading');
-  assert.equal(f.calls.reports[0][1].status, 'completed');
+  assert.equal(f.calls.reports[0][1].status, 'failed');
 });
 
 for (const missing of ['admitColdStart', 'rawIdentity']) test(`defined automatic control refuses missing ${missing}`, async t => {
@@ -176,4 +176,3 @@ test('real plugin failed control acknowledgement retains automatic unknown', asy
   assert.equal(f.journal.open().length, 1);
   assert.equal(f.calls.reports.filter(args => args[1].status === 'completed').length, 1);
 });
-
