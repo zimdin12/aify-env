@@ -40,6 +40,20 @@ test("A CLAUDE SESSION is read by its handle, from the tail of a transcript long
   assert.deepEqual(claudeActual({ workspace: "C:/w", handle: "", env }), { unknown: "no session handle" });
 });
 
+test("A HANDLE THAT IS NOT A SESSION ID reads nothing, so it cannot reach a file outside Claude's projects (review ENV-2)", () => {
+  const config = fs.mkdtempSync(path.join(os.tmpdir(), "actual-claude-escape-"));
+  const folder = path.join(config, "projects", claudeProjectSlug("C:/w"));
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(config, "outside.jsonl"), answer("from-outside", "t"));
+  const env = { CLAUDE_CONFIG_DIR: config };
+  for (const handle of ["../../outside", "..\\..\\outside", path.join(config, "outside"), "a/b", "."]) {
+    assert.match(claudeActual({ workspace: "C:/w", handle, env }).unknown, /is not a Claude session id/, handle);
+  }
+  // A regular file only: a directory (or a FIFO, which would block the read) under a session id's name is not one.
+  fs.mkdirSync(path.join(folder, "s-dir.jsonl"));
+  assert.match(claudeActual({ workspace: "C:/w", handle: "s-dir", env }).unknown, /ENOTFILE/);
+});
+
 test("A CLAUDE SESSION STARTED ELSEWHERE than the workspace it registered from is found by its own id", () => {
   // OBSERVED 2026-10-12: llama-manager registered from C:/Docker/aify-llamacpp, its transcript is under the router's folder.
   const config = fs.mkdtempSync(path.join(os.tmpdir(), "actual-claude-elsewhere-"));

@@ -11,6 +11,7 @@ import test from "node:test";
 
 import {
   CLIENT_ACTIONS,
+  importableAgents,
   listStartableAgents,
   performClientAction,
   startKnownAgent,
@@ -214,4 +215,16 @@ test("WHAT THE HOST REFUSED REACHES A CLIENT TOO", async () => {
   assert.deepEqual((await listStartableAgents({ endpoint: "http://x", fetchImpl: old.impl })).skipped, []);
   const dead = { impl: async () => { throw new Error("no daemon"); } };
   assert.deepEqual((await listStartableAgents({ endpoint: "http://x", fetchImpl: dead.impl })).skipped, []);
+});
+
+test("A DAEMON THAT ANSWERS AND THEN STALLS MID-BODY ends within the deadline, with the reason (review ENV-4)", async () => {
+  let signal;
+  const stalled = async (_url, init) => {
+    signal = init.signal;
+    return { ok: true, status: 200, json: () => new Promise(() => {}) };
+  };
+  const report = await importableAgents({ endpoint: "http://127.0.0.1:1", fetchImpl: stalled, deadlineMs: 50 });
+  assert.match(report.problem, /did not finish answering within 0.05 s/);
+  assert.deepEqual(report.services, []);
+  assert.equal(signal?.aborted, true, "the stalled request was not cancelled");
 });

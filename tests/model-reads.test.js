@@ -56,6 +56,38 @@ test("NOTHING TO READ is answered by the reader itself, uncached: no handle, or 
   assert.deepEqual(asked, ["claude", "codex", "codex"]);
 });
 
+test("A FAILED READ IS NOT KEPT: an unchanged file is read again once the failure clears (review ENV-5)", async () => {
+  let reads = 0;
+  const reader = new ModelReader({ stat: () => ({ size: 1, mtimeMs: 1 }), hermesFile: "/h/state.db",
+    read: async () => (++reads === 1 ? { unknown: "database is locked" } : { model: "m" }) });
+  const asked = { harness: "hermes", workspace: "/w", handle: "h" };
+  assert.deepEqual(await reader.read(asked), { unknown: "database is locked" });
+  assert.deepEqual(await reader.read(asked), { model: "m" });
+  assert.deepEqual(await reader.read(asked), { model: "m" });
+  assert.equal(reads, 2, "an answer is still kept against its unchanged file");
+});
+
+test("A PLUGIN THAT DETACHES while its model-read claim is held answers nothing that claim returns (review ENV-1)", async () => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const answers = [];
+  let claims = 0;
+  const plugin = createCommsPlugin({ api: { async heartbeat() { return {}; }, async claim() { return {}; },
+    async claimControls() { return { controls: [] }; },
+    async claimModelReads() { claims += 1; return claims === 1 ? held : new Promise(() => {}); },
+    async answerModelRead(...args) { answers.push(args); return { ok: true }; } }, machineId: "m1",
+  advertisement: () => ({ kind: "test", hostname: "host" }), cwdRoots: () => [],
+  setTimeoutImpl: () => ({}), clearTimeoutImpl: () => {} });
+  await plugin.start({ processes: { list: () => [] }, log: () => {} });
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+  assert.equal(claims, 1, "the claim was never held");
+  const detaching = plugin.detach();
+  release({ reads: [{ readId: "r1", agents: [{ agentId: "a", runtime: "codex", workspace: "/w", sessionHandle: "t" }] }] });
+  assert.deepEqual(await detaching, { detached: true, held: 0 });
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+  assert.deepEqual(answers, [], "a detached plugin answered a read");
+});
+
 function api({ reads = [], failure = null } = {}) {
   const calls = { claims: [], answers: [] };
   return {
