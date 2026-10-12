@@ -67,3 +67,64 @@ test("THE COMMAND end to end: set, list, show, remove, and a refusal that exits 
   assert.equal(run("show", "coder-1").status, 65);
   assert.equal(run("bogus").status, 64);
 });
+
+// ── many agents at once (0.9.1): a configured model reaches each agent's next start ──────────────
+
+test("SET MANY: one selector, model and effort only, a dry run unless --yes", () => {
+  assert.deepEqual(parseAgentsArgs(["set", "--harness", "claude", "model=opus", "--yes"]),
+    { verb: "set", select: { harness: "claude" }, changes: [{ key: "model", value: "opus" }], write: true, problem: "" });
+  assert.deepEqual(parseAgentsArgs(["set", "--ids", "a,b", "effort=high"]).select, { ids: ["a", "b"] });
+  assert.equal(parseAgentsArgs(["set", "--all", "model="]).write, false);
+  for (const [argv, why] of [
+    [["set", "--all"], /at least one/], [["set", "--all", "name=x"], /model and effort only/],
+    [["set", "--all", "--ids", "a", "model=x"], /one of --all/], [["set", "--ids", "model=x"], /--ids needs a value/],
+    [["set", "--yes", "model=x"], /needs an id, or one of/],
+  ]) assert.match(parseAgentsArgs(argv).problem, why, JSON.stringify(argv));
+});
+
+test("SET MANY end to end: before and after, nothing written without --yes, then each written once", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "aify-agents-many-"));
+  const bin = path.join(root, "bin");
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "claude-aify"), LAUNCHER);
+  const env = { ...process.env, PATH: bin, AIFY_AGENT_DEFINITIONS_DIR: path.join(root, "defs") };
+  const run = (...args) => spawnSync(process.execPath, [COMMAND, ...args], { env, encoding: "utf8" });
+  for (const id of ["a", "b"]) {
+    assert.equal(run("set", id, "name=N", "role=coder", "harness=claude", "mode=managed", "workspace=C:/w").status, 0);
+  }
+  const model = (id) => JSON.parse(run("show", id).stdout).agent.model;
+
+  const dry = run("set", "--harness", "claude", "model=opus");
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /DRY RUN.*2 change/);
+  assert.match(dry.stdout, /^a {2}model: \(harness default\) -> opus$/m);
+  assert.deepEqual([model("a"), model("b")], ["", ""], "a dry run writes nothing");
+
+  const wrote = run("set", "--harness", "claude", "model=opus", "--yes");
+  assert.equal(wrote.status, 0, wrote.stderr);
+  assert.match(wrote.stdout, /written: a revision 2[\s\S]*written: b revision 2/);
+  assert.deepEqual([model("a"), model("b")], ["opus", "opus"]);
+  assert.match(run("set", "--all", "model=opus", "--yes").stdout, /^a {2}unchanged$/m, "an unchanged agent is not rewritten");
+  assert.match(run("show", "a").stdout, /"revision": 2/);
+
+  const named = run("set", "--ids", "a,nope", "effort=high", "--yes");
+  assert.equal(named.status, 65, "a named agent that is not defined fails the command");
+  assert.match(named.stdout, /nope {2}skipped: not defined on this host/);
+  assert.equal(JSON.parse(run("show", "a").stdout).agent.effort, "high", "the defined one is still written");
+});
+
+test("SET MANY writes each agent only as it was read: one changed in between is not overwritten", async () => {
+  const { runAgents } = await import("../bin/aify-env-agents.mjs");
+  const { DefinitionRefused } = await import("../lib/agent-definitions.mjs");
+  const asked = [];
+  const store = {
+    list: async () => ({ definitions: [{ id: "a", incarnation: 3, revision: 7, agent: { harness: "claude", model: "" } }],
+      recovered: [], unreadable: [] }),
+    set: async (id, agent, { expect }) => { asked.push({ id, model: agent.model, expect }); throw new DefinitionRefused("changed on the host since you asked"); },
+  };
+  const intent = parseAgentsArgs(["set", "--all", "model=opus", "--yes"]);
+  const { code, lines } = await runAgents(intent, { store, installed: new Set(["claude"]) });
+  assert.deepEqual(asked, [{ id: "a", model: "opus", expect: { incarnation: 3, revision: 7 } }]);
+  assert.equal(code, 65);
+  assert.ok(lines.includes("not written: a (changed on the host since you asked)"), lines.join("\n"));
+});

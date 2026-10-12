@@ -153,8 +153,11 @@ and extra environment. It holds nothing live; sessions, messages and status stay
 aify-env agents list
 aify-env agents show <id>
 aify-env agents set <id> role=reviewer model=gpt-5.5 effort=high
+aify-env agents set --harness claude model=opus --yes   # many at once (--all, --ids a,b); a dry run without --yes
 aify-env agents import            # what it would define from the agents your services know; --write does it
 ```
+
+A changed model reaches each agent at its next start, including a Claude session that resumes (0.9.1).
 
 - **One writer.** Only the store behind `aify-env agents` writes those files, under a lock, with every
   write recoverable after a crash. `agents unlock` clears a lock whose writer is gone; `agents recover`

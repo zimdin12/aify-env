@@ -29,6 +29,8 @@ const USAGE = [
   "  aify-env agents show <id>",
   "  aify-env agents set <id> key=value ...     keys: name role harness mode workspace model effort",
   "                                               instructions herdrSpace env.<NAME>; -env.<NAME> unsets",
+  "  aify-env agents set --all | --harness <h> | --ids a,b  model=X [effort=Y] [--yes]",
+  "                                               many agents' model and effort; a dry run unless --yes",
   "  aify-env agents remove <id>",
   "  aify-env agents import [--write] [--prefer <service>[:<id>]] ...",
   "                                               define the agents the services know on this machine; a dry run unless --write",
@@ -40,6 +42,8 @@ const USAGE = [
 //: What a new definition starts with when `set` does not say. Everything else must be given.
 const NEW_DEFINITION = Object.freeze({ model: "", effort: "", instructions: "", env: {}, herdrSpace: true });
 const TEXT_KEYS = new Set(["name", "role", "harness", "mode", "workspace", "model", "effort", "instructions"]);
+//: What `set` changes on many agents at once: the runtime choice, never an identity or a workspace.
+const BULK_KEYS = new Set(["model", "effort"]);
 
 /**
  * Parse argv into an intent. PURE, so the rules are testable without a store.
@@ -67,6 +71,7 @@ export function parseAgentsArgs(argv) {
     return { verb, write, prefer, problem: "" };
   }
   if (verb !== "set") return fail(verb ? `unknown verb '${verb}'` : "no verb given");
+  if (String(rest[0] ?? "").startsWith("--")) return parseBulkSet(rest);
   const [id, ...pairs] = rest;
   if (!id) return fail("set needs an id");
   if (pairs.length === 0) return fail("set needs at least one key=value");
@@ -85,6 +90,32 @@ export function parseAgentsArgs(argv) {
     else return fail(`unknown key '${key}'`);
   }
   return { verb, id, changes, problem: "" };
+}
+
+/** `set --all | --harness <h> | --ids a,b model=X [effort=Y] [--yes]`. PURE, like `parseAgentsArgs`. */
+function parseBulkSet(rest) {
+  const fail = (problem) => ({ verb: "set", problem });
+  let select = null;
+  let write = false;
+  const changes = [];
+  for (let at = 0; at < rest.length; at += 1) {
+    const arg = rest[at];
+    if (arg === "--yes") write = true;
+    else if (arg === "--all" || arg === "--harness" || arg === "--ids") {
+      if (select) return fail("set takes one of --all, --harness <h>, --ids a,b");
+      const value = arg === "--all" ? "" : String(rest[(at += 1)] ?? "");
+      if (arg !== "--all" && (!value || value.startsWith("--") || value.includes("="))) return fail(`${arg} needs a value`);
+      select = arg === "--all" ? { all: true } : arg === "--harness" ? { harness: value } : { ids: value.split(",").filter(Boolean) };
+    } else {
+      const eq = arg.indexOf("=");
+      if (eq < 1) return fail(`'${arg}' is not key=value`);
+      if (!BULK_KEYS.has(arg.slice(0, eq))) return fail(`many agents at once take model and effort only, not '${arg.slice(0, eq)}'`);
+      changes.push({ key: arg.slice(0, eq), value: arg.slice(eq + 1) });
+    }
+  }
+  if (!select) return fail("set needs an id, or one of --all, --harness <h>, --ids a,b");
+  if (changes.length === 0) return fail("set needs at least one key=value");
+  return { verb: "set", select, changes, write, problem: "" };
 }
 
 /**
@@ -143,6 +174,7 @@ export async function runAgents(intent, { store, installed, unlock = () => Defin
     if (!entry) return { code: EXIT_FAILED, lines: [...lines, `${intent.id} is not defined`] };
     return { code: EXIT_OK, lines: [...lines, JSON.stringify(entry, null, 2)] };
   }
+  if (intent.verb === "set" && intent.select) return setMany(intent, { store, installed });
   if (intent.verb === "set") {
     // Read and write are two lock holds, so the write is conditional on what was read: the pair seen,
     // or null for "not defined". A change that lands in between is refused, never overwritten.
@@ -154,6 +186,50 @@ export async function runAgents(intent, { store, installed, unlock = () => Defin
   }
   const removed = await store.remove(intent.id);
   return { code: EXIT_OK, lines: [`${removed.id} removed to .trash/${removed.trashName}`] };
+}
+
+/**
+ * `aify-env agents set --all | --harness | --ids`: each chosen agent's before and after, and with `--yes` each write
+ * conditional on the definition it was planned from, so one changed in between is not overwritten. A running agent
+ * keeps its model until its next start, which reads the definition.
+ */
+async function setMany(intent, { store, installed }) {
+  const listed = await store.list();
+  if (listed.conflict) return { code: EXIT_FAILED, lines: conflictLines(listed.conflict) };
+  const { select } = intent;
+  const byId = new Map(listed.definitions.map((entry) => [entry.id, entry]));
+  const chosen = select.ids
+    ? select.ids.map((id) => byId.get(id) ?? { id, problems: ["not defined on this host"] })
+    : listed.definitions.filter((entry) => select.all || entry.agent?.harness === select.harness);
+  if (!chosen.length) return { code: EXIT_FAILED, lines: [`no agent defined on this host has harness ${select.harness}`] };
+  const lines = [];
+  const plan = [];
+  let skipped = 0;
+  for (const entry of chosen) {
+    if (entry.problems?.length) {
+      skipped += 1;
+      lines.push(`${entry.id}  skipped: ${entry.problems.join("; ")}`);
+      continue;
+    }
+    const after = applyChanges(entry.agent, intent.changes);
+    const moved = [...BULK_KEYS].filter((key) => (entry.agent[key] ?? "") !== after[key]);
+    const shown = (value) => value || "(harness default)";
+    lines.push(`${entry.id}  ${moved.length ? moved.map((key) => `${key}: ${shown(entry.agent[key])} -> ${shown(after[key])}`).join("  ") : "unchanged"}`);
+    if (moved.length) plan.push({ entry, after });
+  }
+  if (!intent.write) return { code: EXIT_OK, lines: [`DRY RUN: nothing is written; --yes writes the ${plan.length} change(s) below.`, ...lines] };
+  for (const { entry, after } of plan) {
+    try {
+      const result = await store.set(entry.id, after, { installed, expect: { incarnation: entry.incarnation, revision: entry.revision } });
+      lines.push(`written: ${result.id} revision ${result.revision}`);
+    } catch (error) {
+      if (!(error instanceof DefinitionRefused)) throw error;
+      skipped += 1;
+      lines.push(`not written: ${entry.id} (${error.message})`);
+    }
+  }
+  lines.push("Each agent runs the new value from its next start.");
+  return { code: skipped ? EXIT_FAILED : EXIT_OK, lines };
 }
 
 /**
