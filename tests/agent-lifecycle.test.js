@@ -114,6 +114,14 @@ test('restart retains stop after failed start and never renews moved revision', 
   const f = fixture(t); f.deps.definitions.admitStart = async () => ({ refused: 'revision-moved' });
   const result = await f.execute(req({ action: 'restart' }));
   assert.equal(result.status, 'refused'); assert.equal(f.journal.stopFacts().get('s:1:a'), true);
+  assert.equal(result.outcome, 'stopped; not restarted: revision-moved', 'the refusal says the stop happened');
+  assert.deepEqual(f.calls.map(c => c[0]), ['stop']);
+});
+test('a restart whose launch cannot be built after its stop says it stopped; a start says only why', async (t) => {
+  const f = fixture(t);
+  f.deps.buildSpec = async () => { throw Error('the service did not prepare the launch'); };
+  const result = await f.execute(req({ action: 'restart' }));
+  assert.deepEqual([result.status, result.outcome], ['refused', 'stopped; not restarted: the service did not prepare the launch']);
   assert.deepEqual(f.calls.map(c => c[0]), ['stop']);
 });
 test('running matched start is no-op without second worker', async (t) => {
