@@ -23,9 +23,9 @@ npm install
 ```
 
 **Start it from the folder that contains your workspaces.** It starts work only in that folder and below
-(`C:\` covers the whole machine on Windows), and refuses every other start. Started too narrowly, it names
-each managed agent it cannot start in a warning at startup and in `aify-env doctor` (`agents-outside-roots`);
-aify-comms shows those agents `misconfigured`.
+(`C:\` covers the whole `C:` drive on Windows; another drive or a network share needs its own start), and
+refuses every other start. Started too narrowly, it names each managed agent it cannot start in a warning at
+startup and in `aify-env doctor` (`agents-outside-roots`); aify-comms shows those agents `misconfigured`.
 
 `node-pty` is the dependency that matters most, and it is the one that can fail: it is a native module,
 so a host without build tools gets a working install with NO TERMINALS. That is not a broken state and
