@@ -190,3 +190,24 @@ test("A PROBE IN THE WRITE'S OWN MILLISECOND, OR ONE THAT STARTED BEFORE IT AND 
   assert.deepEqual(late.cache.answers([41], { writtenAtMs: new Map([[41, startedAt - 1]]) }).get(41), RUNNING,
     "the control: a snapshot started after the write is reused");
 });
+
+test("A PROBE SLOWER THAN THE WINDOW DOES NOT ASK AGAIN AS IT LANDS: retries are paced from landing", async () => {
+  // Whole-diff review of 0.9.2: pacing from the probe's start made a slow probe land already due, and the caller's
+  // onUpdate (judge again with fresh answers) started the next at once, without any new ask.
+  const io = fakeOs();
+  io.cache.answers([41]);
+  io.cache.serve();
+  io.serving = true;
+  io.cache.onUpdate = () => io.cache.answers([41]);
+  io.clock.ms += PROBE_REUSE_MS + 1;
+  io.cache.answers([41]);
+  assert.equal(io.pending.length, 1);
+  io.clock.ms += PROBE_REUSE_MS + 1; // the probe takes longer than the window
+  io.answerNext(new Map([[41, RUNNING]]));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(io.pending.length, 0, "the landing probe queued another one");
+  io.clock.ms += PROBE_REUSE_MS + 1;
+  io.cache.answers([41]);
+  assert.equal(io.pending.length, 1, "CONTROL: a window after landing, an ask probes again");
+  io.answerNext(new Map([[41, RUNNING]]));
+});
