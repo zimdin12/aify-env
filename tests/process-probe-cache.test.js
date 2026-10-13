@@ -105,6 +105,29 @@ test("THE BACKGROUND PROBE READS THE SAME TABLE THE BLOCKING ONE DOES", async ()
   assert.deepEqual(failed.get(11), UNANSWERED);
 });
 
+test("A KEPT ANSWER SIGNAL 0 CONTRADICTS IS NOT REUSED: a reused pid, or one signal 0 cannot read, is unanswered", async () => {
+  // Review of 3e58c72: boot saw pid 41 gone, a new lifetime started on reused 41 a moment later, and the kept GONE made
+  // the host delete the new lifetime's record and report the agent cold.
+  const io = fakeOs({ state: "gone" });
+  io.cache.serve();
+  io.serving = true;
+  const landed = io.cache.refresh([41]);
+  io.answerNext(new Map([[41, { alive: false, createdAtUs: null, commandLine: null }]]));
+  await landed;
+  assert.equal(io.cache.answers([41]).get(41).alive, false, "the setup: the kept answer is GONE");
+  assert.equal(io.pending.length, 0, "the setup: inside the window");
+  io.os.state = "alive";
+  assert.deepEqual(io.cache.answers([41]).get(41), UNANSWERED, "a kept GONE was reused for a pid that is alive again");
+  const kept = fakeOs();
+  kept.cache.answers([41]);
+  kept.cache.serve();
+  kept.serving = true;
+  kept.os.state = "unknown";
+  assert.deepEqual(kept.cache.answers([41]).get(41), UNANSWERED, "a kept alive answer outlived signal 0 going unknown");
+  kept.os.state = "alive";
+  assert.deepEqual(kept.cache.answers([41]).get(41), RUNNING, "the control: an answer signal 0 agrees with is reused");
+});
+
 test("AN EXIT INSIDE THE WINDOW IS SEEN AT ONCE: a reused answer carries creation and command line, never life", () => {
   const io = fakeOs();
   io.cache.answers([41]);
