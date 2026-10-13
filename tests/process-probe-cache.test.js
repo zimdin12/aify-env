@@ -137,3 +137,29 @@ test("AN EXIT INSIDE THE WINDOW IS SEEN AT ONCE: a reused answer carries creatio
   assert.deepEqual(io.cache.answers([41]).get(41), { alive: false, createdAtUs: null, commandLine: null },
     "a process that exited a moment ago was still reported alive from the reused answer");
 });
+
+test("AN ANSWER PROBED BEFORE A RECORD WAS WRITTEN IS NOT REUSED FOR IT: a reused pid never inherits the old birth", () => {
+  // Review of 50e4839: L1 on pid 41 was probed alive, exited, and L2 took pid 41 a millisecond later. Signal 0 said
+  // alive, the kept L1 answer pinned L2 to L1's birth, and the next fresh probe called L2 reused and deleted it.
+  const io = fakeOs();
+  io.cache.answers([41]);
+  io.cache.serve();
+  io.serving = true;
+  const probedAt = io.clock.ms;
+  io.clock.ms += 1;
+  assert.deepEqual(io.cache.answers([41], { writtenAtMs: new Map([[41, probedAt + 1]]) }).get(41), UNANSWERED,
+    "an answer older than the record was reused for it");
+  assert.equal(io.pending.length, 1, "the new record's pid is asked about at once");
+  assert.deepEqual(io.cache.answers([41], { writtenAtMs: new Map([[41, probedAt - 1]]) }).get(41), RUNNING,
+    "the control: an answer probed after the record was written is reused");
+});
+
+test("THE STATE HOST TELLS THE PROBE WHEN EACH RECORD WAS WRITTEN, and the daemon passes that to the cache", () => {
+  const asked = [];
+  const host = new AgentStateHost({ aifyHome: homeWith41(), instance: "default", nowUs: () => WRITTEN + 60_000_000,
+    probe: (pids, options) => { asked.push(options?.writtenAtMs?.get(41)); return new Map(pids.map((pid) => [pid, RUNNING])); } });
+  host.boot();
+  assert.deepEqual(asked, [Math.floor(WRITTEN / 1000)]);
+  const wiring = fs.readFileSync(new URL("../lib/daemon-agent-state.mjs", import.meta.url), "utf8");
+  assert.match(wiring, /\(pids, options\) => cache\.answers\(pids, options\)/);
+});
