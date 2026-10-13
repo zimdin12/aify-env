@@ -333,7 +333,8 @@ function currentAdvertisementBody() {
   });
   // The plugin is a second heartbeat writer, and with `"advertise": false` the only one: the body,
   // machine id and currency pair included, is `pluginHeartbeatBody`'s (lib/advertise.mjs).
-  return pluginHeartbeatBody({ hostname: hostname(), kind, machineId, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk() });
+  return pluginHeartbeatBody({ hostname: hostname(), kind, machineId, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk(),
+    launchRoots: CWD_ROOTS });
 }
 
 /** How this daemon reads a stored key: fresh bytes every time, one icacls per change of the file
@@ -899,6 +900,7 @@ async function advertiseOnce() {
     // WHAT IS ON DISK NOW, beside what this process loaded at boot. Cached, so a beat every
     // 30 seconds does not re-hash the package continuously.
     codeOnDisk: PACKAGE_BUILD.onDisk(),
+    launchRoots: CWD_ROOTS,
   });
 
   // WHAT CHANGED, said once rather than every beat. The fingerprint covers exactly the fields a
