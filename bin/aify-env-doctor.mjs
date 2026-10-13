@@ -22,6 +22,7 @@ import { EXIT, summarise } from "../lib/health.mjs";
 // THE COLLECTION LIVES IN A MODULE so something other than a terminal can have it -- the TUI asks
 // for exactly this (A3) and could not call a script. What stays here is the DISPLAY, which is the
 // seam this file's own header has always named.
+import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { collectEnvironmentChecks } from "../lib/environment-report.mjs";
 import { discoverServingEndpoint, readyReceipts } from "../lib/serving-endpoint.mjs";
 import { credentialRoot, listCredentialStore } from "../lib/credential-fs.mjs";
@@ -78,6 +79,7 @@ const checks = await collectEnvironmentChecks({
   readRegistry,
   terminalSupport,
   readCredentialStore: () => listCredentialStore(credentialRoot()),
+  listDefinitions: () => new DefinitionStore().list(),
 });
 
 const result = summarise(checks);

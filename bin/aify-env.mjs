@@ -75,6 +75,7 @@ import { homedir, hostname } from "node:os";
 import { PackageBuild } from "../lib/build-identity.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
+import { outsideRootsWarning } from "../lib/definition-checks.mjs";
 import { readServices, registryIsReadable } from "../lib/services.mjs";
 import { ServicePlugins } from "../lib/service-plugins.mjs";
 import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
@@ -446,6 +447,7 @@ const server = createServer(createDaemonHttp({
         version: VERSION,
         build: BUILD,
         codeOnDisk: PACKAGE_BUILD.onDisk(),
+        cwdRoots: CWD_ROOTS,
         unknown,
         terminals: terminalSupport(),
         advertising: advertisingHealthNow().advertising,
@@ -776,6 +778,10 @@ server.listen(port, HOST, async () => {
   // AFTER the first frame -- `startDaemonView` resolves once a screen is visible -- so nothing
   // written before that is held back from a terminal that was not yet being repainted.
   dashboardOwnsScreen = view.ownsScreen;
+  // THE AGENTS THIS ENVIRONMENT CANNOT START, said where it was started rather than at their first refused spawn.
+  definitionStore.list()
+    .then((listed) => outsideRootsWarning(listed.definitions, CWD_ROOTS, { windows: process.platform === "win32" }))
+    .then((warning) => { if (warning) logLine(warning); }, () => {});
 });
 
 const SWEEP_MS = Number(process.env.AIFY_SWEEP_MS || 30_000);
