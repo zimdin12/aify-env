@@ -33,6 +33,7 @@ import { connectInputSocket } from "../lib/input-socket.mjs";
 import { readHostConfig } from "../lib/host-config.mjs";
 import { findEnvEndpoint } from "../lib/serving-endpoint.mjs";
 import { waitForAttachProcesses } from "../lib/attach-startup.mjs";
+import { openConsoleOutput } from "../lib/console-output.mjs";
 
 const LF = String.fromCharCode(10);
 const say = (text) => process.stderr.write(`${text}${LF}`);
@@ -97,10 +98,14 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 // It keeps no history on purpose: a terminal already holds its own scrollback, and buffering here
 // would only be a second copy that can disagree with the screen. It does clear the visible screen
 // before the first chunk, so the replay is not painted over what this terminal showed before.
+// ON WINDOWS THE CONSOLE KEEPS A LINE FEED'S COLUMN, or a herdr pane's rows land one column left
+// (lib/console-output.mjs). Handed back from the exit handler too, so no way out leaves it changed.
+const output = await openConsoleOutput({ log: (line) => say(`aify-env attach: ${line}.`) });
+process.on("exit", () => output.restore());
 const follower = new OutputFollower({
   endpoint: ENDPOINT,
   id: target.id,
-  buffer: passthrough((text) => process.stdout.write(text)),
+  buffer: passthrough((text) => output.write(text)),
 });
 
 let restored = false;
@@ -113,7 +118,8 @@ function restore() {
   // AND THE AGENT'S TERMINAL MODES ARE TURNED OFF (v0.7 scan, F10): the alternate screen, a hidden
   // cursor, mouse tracking, bracketed paste. See `LOCAL_SCREEN_LEAVE`. And only the keyboard-protocol
   // levels this stream pushed are popped, never one of the operator's own (v0.7.1 review, W14).
-  try { process.stdout.write(follower.buffer.leave()); } catch { /* not a tty any more */ }
+  try { output.write(follower.buffer.leave()); } catch { /* not a tty any more */ }
+  output.restore();
   process.stdin.pause();
   try { follower.stop(); } catch { /* already closed */ }
   try { socket?.close(); } catch { /* already closed */ }
