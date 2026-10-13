@@ -7,14 +7,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { COALESCE_MS, FLUSH_AT_CHARS, createOutputSender } from "../lib/plugins/aify-comms/output-sender.mjs";
+import { COALESCE_MS, FLUSH_AT_CHARS, MAX_PENDING_CHARS, createOutputSender } from "../lib/plugins/aify-comms/output-sender.mjs";
 
-function rig() {
+function rig({ hold = () => null } = {}) {
   const clock = { ms: 10_000 };
   const timers = [];
   const posts = [];
   const sender = createOutputSender({
-    post: async (terminalId, body) => { posts.push({ terminalId, output: body.output }); },
+    // `hold` may return a promise the post then waits on: a service slow to answer that one.
+    post: async (terminalId, body) => { posts.push({ terminalId, output: body.output }); await hold(body.output); },
     now: () => clock.ms,
     setTimer: (fn, ms) => { const timer = { fn, at: clock.ms + ms, live: true }; timers.push(timer); return timer; },
     clearTimer: (timer) => { if (timer) timer.live = false; },
@@ -75,4 +76,39 @@ test("A BURST PAST THE CAP GOES AT ONCE rather than at the end of its window", a
   await settle();
   assert.equal(posts.length, 2);
   assert.equal(posts[1].output.length, FLUSH_AT_CHARS);
+});
+
+test("A TERMINAL FORGOTTEN WHILE A POST IS HELD STILL POSTS ITS TAIL, late rather than never", async () => {
+  // Review of 179e63e: the exit's drain timed out behind a held first post, the caller forgot the terminal and posted
+  // its marker, and when the first post settled the queued tail was found under no terminal and never posted.
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const { sender, posts, settle, advance } = rig({ hold: (output) => (output === "FIRST" ? held : null) });
+  sender.send("t1", "FIRST");
+  await settle();
+  sender.send("t1", "FINAL-TAIL");
+  assert.equal(await sender.drained("t1", 0), false, "the setup: the drain gives up behind the held post");
+  sender.forget("t1");
+  release();
+  await settle();
+  await advance(COALESCE_MS);
+  assert.deepEqual(posts.map((p) => p.output), ["FIRST", "FINAL-TAIL"]);
+});
+
+test("A BURST WHILE A WINDOW IS ARMED GOES AT ONCE, and what was pending before it is posted, not dropped", async () => {
+  // Review of 179e63e: an armed timer returned before the cap check, so a burst waited out the window, and a burst
+  // past MAX_PENDING_CHARS dropped the small chunk queued before it.
+  // FLUSH_AT_CHARS - 1 lands B exactly on the cap: only the cap check, not the pre-flush, sends it at once.
+  for (const size of [FLUSH_AT_CHARS - 1, FLUSH_AT_CHARS, MAX_PENDING_CHARS]) {
+    const { sender, posts, settle } = rig();
+    sender.send("t1", "A");
+    await settle();
+    sender.send("t1", "B");
+    await settle();
+    assert.equal(posts.length, 1, "the setup: B waits in an armed window");
+    sender.send("t1", "y".repeat(size));
+    await settle();
+    await settle();
+    assert.equal(posts.map((p) => p.output).join(""), `AB${"y".repeat(size)}`, `a ${size}-character burst`);
+  }
 });
