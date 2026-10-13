@@ -39,6 +39,7 @@
 
 import { postAdvertisement } from "../lib/post-advertisement.mjs";
 import { DEFAULT_PORT, portFromArgs } from "../lib/port-argument.mjs";
+import { anotherServesAt } from "../lib/serving-endpoint.mjs";
 import { instanceContextArgument } from "../lib/instance-context.mjs";
 import { prepareInstance, publishInstanceReady } from "../lib/instance-bootstrap.mjs";
 import { USAGE, asksForHelp, asksForVersion, refuseUnknownFlag } from "../lib/usage.mjs";
@@ -718,8 +719,8 @@ server.listen(port, HOST, async () => {
         agents: agentState?.lifecycle ?? null,
         installedHarnesses: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
         // A herdr's DEDICATED instance starts plugins too, so a plugin that must run once per host (aify-dashboard's
-        // git watcher) asks this and declines when it is true.
-        dedicated: instanceContext !== null,
+        // git watcher) asks this and defers while an ordinary aify-env answers at the default address.
+        servedElsewhere: instanceContext === null ? async () => false : () => anotherServesAt(`http://127.0.0.1:${DEFAULT_PORT}`),
         watchRoots: async () => readGrantedRoots({ definitions: definitionStore }),  // what a plugin may read (lib/watch-roots.mjs)
       }),
       readServices: () => readServices(readFileSync(REGISTRY_FILE, "utf8")),

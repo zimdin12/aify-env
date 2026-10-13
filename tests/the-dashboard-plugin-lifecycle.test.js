@@ -36,15 +36,33 @@ test("the factory map builds it for an aify-dashboard entry", () => {
   assert.equal(plugins[0].endpoint, entry.endpoint);
 });
 
-test("on a herdr's dedicated instance it starts nothing and says why", async () => {
-  // The bug: two daemons on one host both reporting a folder, each undoing the other's head.
+test("while another aify-env serves the host it reports nothing and says why, and it resumes when that one stops", async () => {
+  // The bug it prevents: two daemons on one host both reporting a folder, each undoing the other's head. The bug it
+  // fixes: a host whose only aify-env is herdr-aify's dedicated one had no git facts at all (2026-10-13).
   const recorded = recordingFetch();
-  const plugin = createDashboardPlugin({ ...entry, service: entry, machineId: "win32:h", dedicated: true }, { fetch: recorded.fetch });
+  let other = true;
+  const plugin = createDashboardPlugin({ ...entry, service: entry, machineId: "win32:h", servedElsewhere: async () => other },
+    { fetch: recorded.fetch, tickMs: 5 });
   await plugin.start(host);
   await settle();
   assert.deepEqual(recorded.calls, []);
   assert.deepEqual(plugin.state(), { phase: "declined", declined: DEDICATED_DECLINE, problems: [] });
+  other = false;
+  await settle();
+  assert.ok(recorded.calls.length > 0, "the next tick after the other one stopped fetched its watch list");
+  assert.notEqual(plugin.state().phase, "declined");
   await plugin.stop();
+});
+
+test("a question about the other aify-env that throws is no answer, so this instance keeps reporting", async () => {
+  // The dashboard refuses a second reporter itself; failing closed here would lose the facts this plugin exists for.
+  const recorded = recordingFetch();
+  const plugin = createDashboardPlugin({ ...entry, service: entry, machineId: "win32:h",
+    servedElsewhere: async () => { throw new Error("no answer"); } }, { fetch: recorded.fetch });
+  await plugin.start(host);
+  await settle();
+  await plugin.stop();
+  assert.equal(recorded.calls.length, 1);
 });
 
 test("an aify-env that offers no watchRoots grants nothing, and the state says so", async () => {

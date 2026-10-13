@@ -154,3 +154,13 @@ test("CONTROLS: no invocations folder, a folder with no ready file, and a gone p
   assert.deepEqual(await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl: nobodyAnswers, state: everyoneAlive,
     io: ioWith({ statSync: failing("ENOTDIR", "ready.json") }) }), { endpoint: DEFAULT, problem: "" }, "ENOTDIR is not ready");
 });
+
+test("anotherServesAt: only an identified aify-env other than the asker counts", async () => {
+  const { anotherServesAt } = await import("../lib/serving-endpoint.mjs");
+  const answering = (body) => async () => new Response(JSON.stringify(body), { status: 200 });
+  const at = "http://127.0.0.1:8802";
+  assert.equal(await anotherServesAt(at, { selfPid: 1, fetchImpl: answering({ pid: 2, instance: "i" }) }), true);
+  assert.equal(await anotherServesAt(at, { selfPid: 2, fetchImpl: answering({ pid: 2, instance: "i" }) }), false, "itself");
+  assert.equal(await anotherServesAt(at, { selfPid: 1, fetchImpl: answering({ ok: true }) }), false, "not an aify-env");
+  assert.equal(await anotherServesAt(at, { selfPid: 1, fetchImpl: async () => { throw new Error("refused"); } }), false, "nothing");
+});

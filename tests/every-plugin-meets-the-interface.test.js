@@ -11,7 +11,7 @@ import { pluginsForServices, servicesWithPlugins } from "../lib/plugins/index.mj
 import { pluginProblem } from "../lib/service-plugins.mjs";
 
 const stubContext = {
-  version: "test", machineId: "win32:conformance", dedicated: false, windows: true,
+  version: "test", machineId: "win32:conformance", servedElsewhere: async () => false, windows: true,
   advertisement: async () => ({}), cwdRoots: async () => [], watchRoots: async () => ({ roots: [], problems: [] }),
   definitions: { list: async () => ({ definitions: [] }), snapshot: async () => ({ complete: false, incomplete: {} }) },
   installedHarnesses: async () => new Set(),

@@ -17,7 +17,7 @@ function fixture() {
   let host;
   let seenShared;
   const shared = {
-    machineId: "linux:fixture", dedicated: true, definitions: { marker: "same-store" },
+    machineId: "linux:fixture", servedElsewhere: async () => false, definitions: { marker: "same-store" },
     advertisement: async () => advertisement,
   };
   const paneOpener = async (record) => events.push(["pane", record]);
