@@ -89,6 +89,26 @@ test("NO koffi, or a console that refuses, is today's output exactly, said once"
   assert.deepEqual(refused.state, { mode: ORIGINAL_MODE, cp: ORIGINAL_CP }, "a half-set console was left half set");
 });
 
+test("A CODE PAGE THAT CANNOT BE READ (0) LEAVES THE CONSOLE ALONE: nothing is changed it could not give back", async () => {
+  const { api, calls, state } = fakeConsole();
+  api.getConsoleOutputCP = () => 0;
+  const output = await open({ loadApi: async () => api });
+  assert.equal(output.raw, false);
+  assert.deepEqual(calls.filter(([name]) => name.startsWith("set")), [], "the console was changed");
+  assert.deepEqual(state, { mode: ORIGINAL_MODE, cp: ORIGINAL_CP });
+});
+
+test("A HAND-BACK THE CONSOLE REFUSES STAYS OWED, and the next restore (the exit handler's) gives it back", async () => {
+  // Review of 3fcd5c9: the mode was set, UTF-8 refused, the rollback refused once, and the plain fallback's no-op
+  // restore dropped the obligation, leaving the console in our mode.
+  const { api, state } = fakeConsole({ setModeAnswers: [true, false], setCpAnswers: [false] });
+  const output = await open({ loadApi: async () => api });
+  assert.equal(output.raw, false);
+  assert.notEqual(state.mode, ORIGINAL_MODE, "the setup: the rollback was refused");
+  output.restore();
+  assert.deepEqual(state, { mode: ORIGINAL_MODE, cp: ORIGINAL_CP });
+});
+
 test("NOT WINDOWS, OR NOT A TERMINAL, makes no console call", async () => {
   for (const over of [{ platform: "linux" }, { isTTY: false }]) {
     let loaded = false;
