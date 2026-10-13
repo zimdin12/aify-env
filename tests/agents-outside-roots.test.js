@@ -73,3 +73,17 @@ test("/health CARRIES THE FOLDERS this daemon was started in, and null when it d
   assert.deepEqual((await health({ cwdRoots: ROOTS })).cwdRoots, ROOTS);
   assert.equal((await health({})).cwdRoots, null);
 });
+
+test("A PARTLY READ LISTING IS UNANSWERED, never a pass: the unread entry may be the one outside", () => {
+  // 0.9.2 review: an incomplete enumeration, an unreadable entry or a conflict read as "every managed agent can start".
+  const inside = [managed("lead", "C:/Docker/aify-comms/x")];
+  for (const gap of [{ unreadable: ["broken"] }, { conflict: { intent: "x" } }, { enumerationFailed: true }]) {
+    const row = agentsOutsideRootsCheck({ answered: true, roots: ["C:\\"], listed: { definitions: inside, ...gap }, windows: true });
+    assert.equal(row.state, STATE.UNANSWERED, JSON.stringify(gap));
+  }
+  const found = agentsOutsideRootsCheck({ answered: true, roots: ["C:/Docker/aify-comms"], windows: true,
+    listed: { definitions: [managed("dash", "C:/Docker/aify-dashboard")], unreadable: ["broken"] } });
+  assert.equal(found.state, STATE.FAILED, "what was found still fails");
+  assert.equal(agentsOutsideRootsCheck({ answered: true, roots: ["C:\\"], listed: { definitions: inside, unreadable: [] },
+    windows: true }).state, STATE.PASSED, "CONTROL: a complete listing still passes");
+});
