@@ -3,10 +3,10 @@
 The environment tier: **one process on a host that owns the processes and terminals**, so more than
 one service can start agents on that machine without two spawners fighting over the same PTYs.
 
-Nothing here knows what a message is, what a dispatch is, or whether an agent is thinking. It knows
-which agents this host defines, which processes it started, and whether they are alive. **Alive is not working** — status belongs to
-whatever service owns agent semantics, and deriving it in two places is how two answers start
-disagreeing.
+Nothing here knows what a message is or what a dispatch is. It knows which agents this host defines, which
+processes it started, and whether they are alive. Since 0.9 it also derives what each agent is doing
+(`lib/agent-state.mjs`) and publishes it as a SHADOW: the service's status still governs, and the two are
+compared (`agent-state-shadow` in `aify-comms doctor`) before this one may.
 
 **One of three repos.** [aify-comms](https://github.com/zimdin12/aify-comms) owns messaging, dispatch
 and sessions; [aify-wrapper](https://github.com/zimdin12/aify-wrapper) owns the launchers this will
@@ -21,6 +21,11 @@ git clone https://github.com/zimdin12/aify-env
 cd aify-env
 npm install
 ```
+
+**Start it from the folder that contains your workspaces.** It starts work only in that folder and below
+(`C:\` covers the whole machine on Windows), and refuses every other start. Started too narrowly, it names
+each managed agent it cannot start in a warning at startup and in `aify-env doctor` (`agents-outside-roots`);
+aify-comms shows those agents `misconfigured`.
 
 `node-pty` is the dependency that matters most, and it is the one that can fail: it is a native module,
 so a host without build tools gets a working install with NO TERMINALS. That is not a broken state and
@@ -345,9 +350,7 @@ gone stale in the way a cache does: silently, while looking authoritative.
 
 What `--help` does not say, and belongs here:
 
-- **`aify-env doctor --strict` is the one to reach for in a script.** It exits non-zero when anything
-  failed OR went UNANSWERED, and `--json` gives
-  `{summary, counts, exitCode, checks:[{id, state, detail, fix}]}`.
+- **`aify-env doctor --json`** gives `{summary, counts, exitCode, checks:[{id, state, detail, fix}]}`.
 - **`aify-env tui --once` renders one frame and exits** -- what a test or a status line wants.
 - **`aify-env --port 0` asks the OS for a free port**, which is how the suite runs without touching a
   live environment.
@@ -360,9 +363,6 @@ is the whole reason this tool has a third state instead of two.
 Over the wire (`docs/PROTOCOL.md`): start, stop, list, health, **output** as server-sent events with a
 bounded replay for consumers that attach late, **input**, and **resize** — which refuses when there is
 no terminal rather than silently doing nothing.
-
-Not built, and not by accident: nothing here says what an agent is DOING. It knows which agents are
-defined, which processes it started, and whether they are alive. Alive is not working.
 
 The plan it is built against lives in the aify-comms repo at
 `docs/superpowers/plans/2026-08-20-aify-env.md`, with the architecture and its evidence in
