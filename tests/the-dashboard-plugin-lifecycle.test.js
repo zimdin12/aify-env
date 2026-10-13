@@ -54,6 +54,21 @@ test("while another aify-env serves the host it reports nothing and says why, an
   await plugin.stop();
 });
 
+test("stopping while the other-aify-env question is held aborts it, so stop does not wait on it", async () => {
+  // Whole-diff review of 0.9.2: the question had only its own timeout, and the host stops plugins serially inside a
+  // shared budget the comms plugin needs.
+  let signalSeen = null;
+  const plugin = createDashboardPlugin({ ...entry, service: entry, machineId: "win32:h",
+    servedElsewhere: ({ signal }) => { signalSeen = signal; return new Promise((resolve) => signal.addEventListener("abort", () => resolve(false))); } },
+  { fetch: recordingFetch().fetch });
+  await plugin.start(host);
+  await settle();
+  assert.ok(signalSeen, "the question was given the plugin's stop signal");
+  const stopped = await Promise.race([plugin.stop().then(() => "stopped"), new Promise((resolve) => setTimeout(() => resolve("held"), 500))]);
+  assert.equal(stopped, "stopped");
+  assert.equal(signalSeen.aborted, true);
+});
+
 test("a question about the other aify-env that throws is no answer, so this instance keeps reporting", async () => {
   // The dashboard refuses a second reporter itself; failing closed here would lose the facts this plugin exists for.
   const recorded = recordingFetch();

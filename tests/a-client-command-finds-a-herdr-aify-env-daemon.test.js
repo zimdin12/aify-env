@@ -164,3 +164,21 @@ test("anotherServesAt: only an identified aify-env other than the asker counts",
   assert.equal(await anotherServesAt(at, { selfPid: 1, fetchImpl: answering({ ok: true }) }), false, "not an aify-env");
   assert.equal(await anotherServesAt(at, { selfPid: 1, fetchImpl: async () => { throw new Error("refused"); } }), false, "nothing");
 });
+
+test("anotherServesAt: a redirect is no answer, and the caller's stop ends a held question", async () => {
+  const { anotherServesAt } = await import("../lib/serving-endpoint.mjs");
+  const at = "http://127.0.0.1:8802";
+  const seen = [];
+  const redirecting = async (url, init) => {
+    seen.push(init.redirect);
+    return init.redirect === "manual" ? new Response(null, { status: 302, headers: { location: "http://127.0.0.1:49999/health" } })
+      : new Response(JSON.stringify({ pid: 2, instance: "elsewhere" }), { status: 200 });
+  };
+  assert.equal(await anotherServesAt(at, { selfPid: 1, fetchImpl: redirecting }), false, "a redirect was followed");
+  assert.deepEqual(seen, ["manual"]);
+  const stop = new AbortController();
+  const held = (url, init) => new Promise((resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)));
+  const asked = anotherServesAt(at, { selfPid: 1, fetchImpl: held, timeoutMs: 60_000, signal: stop.signal });
+  stop.abort();
+  assert.equal(await asked, false, "the stop did not end the held question");
+});

@@ -720,7 +720,7 @@ server.listen(port, HOST, async () => {
         installedHarnesses: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
         // A herdr's DEDICATED instance starts plugins too, so a plugin that must run once per host (aify-dashboard's
         // git watcher) asks this and defers while an ordinary aify-env answers at the default address.
-        servedElsewhere: instanceContext === null ? async () => false : () => anotherServesAt(`http://127.0.0.1:${DEFAULT_PORT}`),
+        servedElsewhere: instanceContext === null ? async () => false : ({ signal } = {}) => anotherServesAt(`http://127.0.0.1:${DEFAULT_PORT}`, { signal }),
         watchRoots: async () => readGrantedRoots({ definitions: definitionStore }),  // what a plugin may read (lib/watch-roots.mjs)
       }),
       readServices: () => readServices(readFileSync(REGISTRY_FILE, "utf8")),

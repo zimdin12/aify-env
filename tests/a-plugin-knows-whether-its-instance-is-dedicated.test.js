@@ -16,10 +16,11 @@ test("only a dedicated instance asks, and it asks the ordinary daemon's default 
   assert.equal(lines.length, 1, "the shared object's servedElsewhere property must remain identifiable");
   const expression = lines[0].replace(/^\s*servedElsewhere:/, "").replace(/,\s*$/, "");
   const asked = [];
-  const anotherServesAt = async (endpoint) => { asked.push(endpoint); return true; };
+  const anotherServesAt = async (endpoint, options) => { asked.push([endpoint, options?.signal]); return true; };
   const evaluate = (instanceContext) => vm.runInNewContext(expression, { instanceContext, anotherServesAt, DEFAULT_PORT: 8802 });
-  assert.equal(await evaluate({ root: "/tmp/herdr-instance" })(), true, "a dedicated instance takes the answer");
-  assert.deepEqual(asked, ["http://127.0.0.1:8802"]);
+  const stop = new AbortController();
+  assert.equal(await evaluate({ root: "/tmp/herdr-instance" })({ signal: stop.signal }), true, "a dedicated instance takes the answer");
+  assert.deepEqual(asked, [["http://127.0.0.1:8802", stop.signal]], "it asks the default address, with the plugin's stop");
   assert.equal(await evaluate(null)(), false, "CONTROL: the ordinary daemon, whose context is null, never defers");
   assert.equal(asked.length, 1, "and never asks");
 });
