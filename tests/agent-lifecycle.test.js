@@ -172,3 +172,15 @@ test('delete against the real definition store removes the file once; a replay c
     expectedRevision: held.revision, patch: { remove: true } }, { installed: new Set(['hermes']) }),
   { status: 'done', outcome: 'already applied', resultIncarnation: held.incarnation, resultRevision: held.revision });
 });
+test('a builder that throws before any effect refuses with its reason; a throw after the start stays unknown', async (t) => {
+  // A workspace outside this host's roots was reported execution-unknown, and its prepared terminal read as starting.
+  const f = fixture(t); f.setRaw({ current: null, conflict: false, unknown: false });
+  f.deps.buildSpec = async () => { throw Error('Workspace "C:/x" is outside this environment\'s advertised roots'); };
+  const refused = await f.execute(req({ action: 'start', expectedLifetime: null }));
+  assert.equal(refused.status, 'refused');
+  assert.match(refused.outcome, /outside this environment's advertised roots/);
+  assert.deepEqual(f.calls.filter(([kind]) => kind === 'start'), [], 'nothing was started');
+  const g = fixture(t); g.setRaw({ current: null, conflict: false, unknown: false });
+  g.deps.start = async () => { throw Error('runner failed after spawning'); };
+  assert.equal((await g.execute(req({ id: 'r9', action: 'start', expectedLifetime: null }))).outcome, 'execution-unknown');
+});
