@@ -163,3 +163,30 @@ test("THE STATE HOST TELLS THE PROBE WHEN EACH RECORD WAS WRITTEN, and the daemo
   const wiring = fs.readFileSync(new URL("../lib/daemon-agent-state.mjs", import.meta.url), "utf8");
   assert.match(wiring, /\(pids, options\) => cache\.answers\(pids, options\)/);
 });
+
+test("A PROBE IN THE WRITE'S OWN MILLISECOND, OR ONE THAT STARTED BEFORE IT AND LANDED AFTER, IS NOT REUSED FOR IT", async () => {
+  // Review of 3900ae2: the write is known only to the millisecond, so an equal stamp may predate it; and an answer was
+  // stamped when it landed, so a snapshot taken before the write but delivered after it read as newer.
+  const io = fakeOs();
+  io.cache.answers([41]);
+  io.cache.serve();
+  io.serving = true;
+  const probedAt = io.clock.ms;
+  assert.deepEqual(io.cache.answers([41], { writtenAtMs: new Map([[41, probedAt]]) }).get(41), UNANSWERED,
+    "an answer from the write's own millisecond was reused");
+  io.answerNext(new Map([[41, RUNNING]]));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const late = fakeOs();
+  late.cache.serve();
+  late.serving = true;
+  const landed = late.cache.refresh([41]);
+  const startedAt = late.clock.ms;
+  late.clock.ms += 5;
+  late.answerNext(new Map([[41, RUNNING]])); // L1's snapshot, delivered after L2's write at startedAt + 2
+  await landed;
+  assert.deepEqual(late.cache.answers([41], { writtenAtMs: new Map([[41, startedAt + 2]]) }).get(41), UNANSWERED,
+    "a snapshot taken before the write was reused because it landed after it");
+  assert.deepEqual(late.cache.answers([41], { writtenAtMs: new Map([[41, startedAt - 1]]) }).get(41), RUNNING,
+    "the control: a snapshot started after the write is reused");
+});
