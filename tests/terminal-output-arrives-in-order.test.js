@@ -31,10 +31,13 @@ function controllablePost() {
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+//: These cases are about order, bounds and failure, so the window between posts is collapsed to the next turn of the
+//: loop; tests/output-posts-once-per-window.test.js is about the window.
+const NO_WINDOW = { setTimer: (fn) => setImmediate(fn), clearTimer: (handle) => clearImmediate(handle) };
 
 test("THE CHUNKS ARRIVE IN ORDER even when the first POST is slow", async () => {
   const { post, calls, gates } = controllablePost();
-  const sender = createOutputSender({ post, status: "attached" });
+  const sender = createOutputSender({ ...NO_WINDOW, post, status: "attached" });
 
   sender.send("t1", "one");
   await settle();
@@ -63,7 +66,7 @@ test("a failed POST does not stop the next chunk", async () => {
   // because the service blinked would turn a transient outage into a dead console.
   const { post, calls, gates } = controllablePost();
   const logs = [];
-  const sender = createOutputSender({ post, log: (m) => logs.push(String(m)) });
+  const sender = createOutputSender({ ...NO_WINDOW, post, log: (m) => logs.push(String(m)) });
 
   sender.send("t1", "first");
   await settle();
@@ -81,7 +84,7 @@ test("TWO TERMINALS DO NOT BLOCK EACH OTHER", async () => {
   // Ordering is a per-STREAM property. Serialising globally would let one slow console stall every
   // other agent on the host, which is a worse failure than the one being fixed.
   const { post, calls, gates } = controllablePost();
-  const sender = createOutputSender({ post });
+  const sender = createOutputSender({ ...NO_WINDOW, post });
 
   sender.send("t1", "a");
   await settle();
@@ -102,7 +105,7 @@ test("PENDING OUTPUT IS BOUNDED, and the OLDEST is what goes", async () => {
   // reads the recent screen.
   const { post, calls, gates } = controllablePost();
   const logs = [];
-  const sender = createOutputSender({ post, log: (m) => logs.push(String(m)) });
+  const sender = createOutputSender({ ...NO_WINDOW, post, log: (m) => logs.push(String(m)) });
 
   sender.send("t1", "first");           // goes out immediately, holds the stream open
   await settle();
@@ -123,7 +126,7 @@ test("PENDING OUTPUT IS BOUNDED, and the OLDEST is what goes", async () => {
 
 test("a forgotten terminal stops holding memory", async () => {
   const { post, gates } = controllablePost();
-  const sender = createOutputSender({ post });
+  const sender = createOutputSender({ ...NO_WINDOW, post });
   sender.send("t1", "hello");
   await settle();
   gates[0].resolve({});
@@ -138,7 +141,7 @@ test("A BURST OF CHUNKS BECOMES TWO POSTS, however big the burst is", async () =
   // that is SINGLE-WORKER BY DESIGN: the post count follows how fast the service answers, not how
   // fast the agent talks. A sender that queued one job per chunk would pass every other test here.
   const { post, calls, gates } = controllablePost();
-  const sender = createOutputSender({ post, status: "attached" });
+  const sender = createOutputSender({ ...NO_WINDOW, post, status: "attached" });
 
   const BURST = 500;
   sender.send("t1", "first");
@@ -169,7 +172,7 @@ test("AND A SERVICE THAT ANSWERS INSTANTLY DOES NOT COALESCE", async () => {
   // NEGATIVE CONTROL for the ratio. A sender that ALWAYS batched would satisfy the test above while
   // adding latency to every chunk on an idle console. The count has to follow the service's speed.
   const calls = [];
-  const sender = createOutputSender({
+  const sender = createOutputSender({ ...NO_WINDOW,
     post: (terminalId, body) => { calls.push(body.output); return Promise.resolve({}); },
     status: "attached",
   });
@@ -203,7 +206,7 @@ test("A THROWING log() IS CONTAINED — a caller's logger cannot strand output o
   // instead of around a behaviour, and it was not done.
   const { post, calls, gates } = controllablePost();
   let threw = 0;
-  const sender = createOutputSender({
+  const sender = createOutputSender({ ...NO_WINDOW,
     post,
     log: () => { threw += 1; throw new Error("a caller's logger blew up"); },
   });
