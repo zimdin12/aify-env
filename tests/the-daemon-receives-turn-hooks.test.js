@@ -1,4 +1,6 @@
 // One transport witness for G3: actual daemon, probe and disk with a harmless Node process, never an agent.
+// B1: a resident's record and hooks carry the role's instance, `residents`, which the daemon holding the role for this
+// home serves; its turns are `residents.turns.json`, and a generation is seeded because the home is not fresh.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -55,12 +57,16 @@ test("the daemon delivers hooks to its real state host and a restart retains the
   await waitFor(quiet, /FIXTURE_ALIVE/);
   await pause(20); // writtenAtUs must follow the real process creation microseconds, not its rounded millisecond.
   const lifetime = randomUUID();
-  const r = { agentId: "fixture", lifetime, instance: "default", harness: "hermes", pid: quiet.child.pid,
+  const r = { agentId: "fixture", lifetime, instance: "residents", harness: "hermes", pid: quiet.child.pid,
     launcher: process.execPath, writtenAtUs: Date.now() * 1000 };
   fs.writeFileSync(path.join(b.home, "residents", `fixture.${lifetime}.json`), JSON.stringify(r));
+  fs.mkdirSync(path.join(b.home, "env"), { recursive: true });
+  fs.writeFileSync(path.join(b.home, "env", "residents.generation"), "41\n");
   const first = b.child([ENTRY, "--port", "0"]);
   const url = (await waitFor(first, /listening on (http:\/\/127\.0\.0\.1:\d+)/))[1];
-  const turns = path.join(b.home, "env", "default.turns.json");
+  const role = async (endpoint) => (await (await fetch(`${endpoint}/health`, { signal: AbortSignal.timeout(15000) })).json()).residents;
+  assert.deepEqual([(await role(url)).held, (await role(url)).generation], [true, 42], "the first daemon took the role under its lock");
+  const turns = path.join(b.home, "env", "residents.turns.json");
   assert.equal(fs.existsSync(turns), false);
   const post = async (endpoint, body, headers = {}) => {
     const response = await fetch(`${endpoint}/agents/fixture/turn-event`, { method: "POST",
@@ -69,7 +75,7 @@ test("the daemon delivers hooks to its real state host and a restart retains the
     return { status: response.status, body: await response.json() };
   };
   const startedAtUs = Date.now() * 1000;
-  const event = { instance: "default", lifetime, kind: "turn-start", firedAtUs: startedAtUs };
+  const event = { instance: "residents", lifetime, kind: "turn-start", firedAtUs: startedAtUs };
   const applied = await post(url, event);
   assert.equal(applied.status, 200, "the actual daemon did not deliver a current hook to its host");
   assert.equal(applied.body.applied, true);
@@ -88,6 +94,7 @@ test("the daemon delivers hooks to its real state host and a restart retains the
   await first.stop();
   const second = b.child([ENTRY, "--port", "0"]);
   const nextUrl = (await waitFor(second, /listening on (http:\/\/127\.0\.0\.1:\d+)/))[1];
+  assert.deepEqual([(await role(nextUrl)).held, (await role(nextUrl)).generation], [true, 43], "the successor's generation is above");
   assert.equal(fs.readFileSync(turns, "utf8"), before, "reboot discarded the verified lifetime's stored turn");
   const ended = await post(nextUrl, { ...event, kind: "turn-end" });
   assert.equal(ended.status, 200);

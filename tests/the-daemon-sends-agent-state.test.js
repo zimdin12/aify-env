@@ -14,6 +14,11 @@ catch (e) { if (e.code !== "ERR_MODULE_NOT_FOUND") throw e; }
 const source = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+const RESIDENTS_KEY = /^residents-[0-9a-f]{12}$/;
+/** The two populations compose concurrently and queue on the definition store, so the second post can lag a flush. */
+async function posted(f, count) {
+  for (const end = Date.now() + 5000; f.calls.length < count && Date.now() < end;) await new Promise((r) => setTimeout(r, 10));
+}
 function section(start, end) {
   const a = source.indexOf(start); assert.ok(a >= 0, `actual daemon is missing ${start}`);
   const b = source.indexOf(end, a); assert.ok(b > a, `actual daemon is missing ${end}`);
@@ -83,10 +88,16 @@ test("successful serving/durable boot wires actual sender and fixed 60s evaluati
   assert.strictEqual(f.shared.agents.stopFacts, f.lifecycle.stopFacts, "plugins share the actual stop reader");
   assert.strictEqual(f.shared.agents.admitColdStart, f.lifecycle.admitColdStart);
   assert.equal(typeof f.shared.agents.rawIdentity, "function");
-  assert.deepEqual(f.events, ["durable-boot", "lifecycle", "reap", "sender"]);
-  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].url, "http://fixture.invalid/state");
-  assert.equal(f.calls[0].body.kind, "snapshot", "the sender reaches the real stop reader");
-  assert.deepEqual(f.calls[0].body.inputs, { operatorStop: "tracked" });
+  // B1: a second sender, for the residents' key, because this daemon took the role for its private home at boot.
+  await posted(f, 2);
+  assert.deepEqual(f.events, ["durable-boot", "lifecycle", "reap", "sender", "sender"]);
+  assert.deepEqual(f.calls.map((call) => call.body.instance).sort().map((i) => i.replace(RESIDENTS_KEY, "residents-*")),
+    ["default", "residents-*"], "one publication per population, each under its own key");
+  for (const call of f.calls) {
+    assert.equal(call.url, "http://fixture.invalid/state");
+    assert.equal(call.body.kind, "snapshot", "the sender reaches the real stop reader");
+    assert.deepEqual(call.body.inputs, { operatorStop: "tracked" });
+  }
   assert.equal(f.intervals.length, 1); assert.equal(f.intervals[0].ms, 60_000); assert.equal(f.intervals[0].unreferenced, true);
   const sweep = section("const SWEEP_MS", "// ── telling"); let swept = 0, evaluated = 0;
   const run = new Function("process", "setInterval", "reaper", "evaluateAgentState", `let unknown; ${sweep}`);
@@ -95,7 +106,7 @@ test("successful serving/durable boot wires actual sender and fixed 60s evaluati
     { sweep: () => { swept++; return { unknown: [] }; } }, () => evaluated++);
   assert.equal(sweepTimer.ms, 177777); sweepTimer.fn(); assert.equal(swept, 1, "existing sweep remains unconditional"); assert.equal(evaluated, 1);
   f.actual.stopAgentStateSending(); assert.equal(f.cancelled.length, 1);
-  await f.intervals[0].fn(); await f.actual.evaluateAgentState(); await flush(); assert.equal(f.calls.length, 1, "captured callbacks are fenced after disarm");
+  await f.intervals[0].fn(); await f.actual.evaluateAgentState(); await flush(); assert.equal(f.calls.length, 2, "captured callbacks are fenced after disarm");
   const stopView = /stopView: (\(\) => \{[^}]+\})/.exec(source); assert.ok(stopView, "shutdown must synchronously stop sending");
   const order = []; new Function("stopAgentStateSending", "stopDashboard", `return (${stopView[1]})()`)(() => order.push("sender"), () => order.push("view"));
   assert.deepEqual(order, ["sender", "view"]);
@@ -103,8 +114,9 @@ test("successful serving/durable boot wires actual sender and fixed 60s evaluati
 
 test("dedicated readiness precedes sending; boot/readiness refusal and view-only send nothing", async (t) => {
   const dedicated = await boot(t, { context: { scope: "fixture-scope" } });
-  assert.equal(dedicated.error, null, String(dedicated.error)); assert.deepEqual(dedicated.events, ["durable-boot", "lifecycle", "ready", "sender"]);
-  assert.equal(dedicated.calls[0].body.instance, "fixture-scope");
+  assert.equal(dedicated.error, null, String(dedicated.error)); await posted(dedicated, 2); assert.deepEqual(dedicated.events, ["durable-boot", "lifecycle", "ready", "sender", "sender"]);
+  assert.deepEqual(dedicated.calls.map((call) => call.body.instance).sort().map((i) => i.replace(RESIDENTS_KEY, "residents-*")),
+    ["fixture-scope", "residents-*"]);
   for (const options of [{ failBoot: true }, { context: { scope: "fixture-scope" }, failReady: true }, { viewOnly: true }]) {
     const f = await boot(t, options); assert.equal(f.calls.length, 0); assert.equal(f.intervals.length, 0);
     assert.equal(f.events.includes("sender"), false);
@@ -114,6 +126,7 @@ test("dedicated readiness precedes sending; boot/readiness refusal and view-only
   // read operator stops, rather than a state that silently forgets them.
   const damaged = await boot(t, { context: { scope: "fixture-scope" }, failLifecycle: true });
   assert.equal(damaged.error, null, String(damaged.error));
-  assert.deepEqual(damaged.events, ["durable-boot", "lifecycle", "ready", "sender"]);
-  assert.equal(damaged.calls[0].body.kind, "unavailable");
+  await posted(damaged, 2);
+  assert.deepEqual(damaged.events, ["durable-boot", "lifecycle", "ready", "sender", "sender"]);
+  assert.deepEqual(damaged.calls.map((call) => call.body.kind), ["unavailable", "unavailable"]);
 });

@@ -99,16 +99,22 @@ test("the actual Windows boot probes an ended resident and removes its stored tu
   const file = `fixture.${lifetime}.json`;
   const residents = path.join(b.home, "residents");
   fs.mkdirSync(residents);
-  const record = { agentId: "fixture", lifetime, instance: "default", harness: "hermes",
+  const record = { agentId: "fixture", lifetime, instance: "residents", harness: "hermes",
     pid: ended.pid, launcher: process.execPath, writtenAtUs: Date.now() * 1000 };
   fs.writeFileSync(path.join(residents, file), JSON.stringify(record));
-  const turns = path.join(b.state, "default.turns.json");
+  // B1 POLICY: a record a launcher from before the role stamped `default` is not relabelled or adopted, so not removed.
+  const legacy = `legacy.${randomUUID()}.json`;
+  fs.writeFileSync(path.join(residents, legacy), JSON.stringify({ ...record, agentId: "legacy",
+    lifetime: legacy.slice("legacy.".length, -".json".length), instance: "default" }));
+  fs.writeFileSync(generation(b, "residents"), "7\n");
+  const turns = path.join(b.state, "residents.turns.json");
   fs.writeFileSync(turns, JSON.stringify({ [lifetime]: { open: true, startedAtUs: record.writtenAtUs,
     awaitingInput: false, lastEventAtUs: record.writtenAtUs } }));
   const d = daemon(t, b);
   assert.equal((await outcome(d)).ready, true, d.output);
-  assert.equal(fs.existsSync(path.join(residents, file)), false, "the real daemon never booted its state host/probe");
+  assert.equal(fs.existsSync(path.join(residents, file)), false, "the real daemon never booted its residents host/probe");
   assert.deepEqual(read(turns), {}, "the real daemon never restored the ended turn");
+  assert.equal(fs.existsSync(path.join(residents, legacy)), true, "a default-stamped record was treated as bound");
 });
 
 for (const broken of ["generation", "descriptor"]) {
