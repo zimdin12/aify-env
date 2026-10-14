@@ -136,6 +136,7 @@ test("any failed bind is no role, EACCES included", async (t) => {
 test("ORDERED RELEASE: stop admitting, wait bounded, close the endpoint even on timeout; a late operation cannot apply", { skip: SKIP }, async (t) => {
   const dir = home(t);
   const role = new ResidentsRole({ aifyHome: dir });
+  t.after(() => role.release({ waitMs: 0 }));
   assert.equal((await role.acquire()).held, true);
   const slow = role.enter();
   assert.equal(slow.live(), true);
@@ -161,6 +162,7 @@ test("ORDERED RELEASE: stop admitting, wait bounded, close the endpoint even on 
 
 test("ordered release that does not time out: entered operations finish first, then the endpoint closes", { skip: SKIP }, async (t) => {
   const role = new ResidentsRole({ aifyHome: home(t) });
+  t.after(() => role.release({ waitMs: 0 }));
   await role.acquire();
   const op = role.enter();
   const order = [];
