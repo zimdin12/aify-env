@@ -9,7 +9,7 @@ import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { credentialForTarget } from "../lib/credential-resolve.mjs";
 import { CredentialAclCache } from "../lib/credential-acl-cache.mjs";
 import { readServices } from "../lib/services.mjs";
-import { advertisementTargets } from "../lib/advertise.mjs";
+import { serviceTarget } from "../lib/advertise.mjs";
 import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
 import { CREDENTIAL_OK, CREDENTIAL_ABSENT } from "../lib/credential-store.mjs";
 
@@ -354,7 +354,7 @@ for (const row of credentialRows) test(`composed credential: ${row.name}`, async
     ...(!named && Object.hasOwn(row, "file") ? { credentialRef: ref } : {}),
     agentState: { path: "/state", ...(named ? { credentialRef: ref } : {}) } });
   const text = JSON.stringify({ version: 1, services: { x: service } });
-  const entry = readServices(text)[0], advertised = advertisementTargets([entry])[0];
+  const entry = readServices(text)[0], advertised = serviceTarget(entry);
   const ordinary = await credentialForTarget(advertised, opts);
   assert.equal(ordinary.state, named ? CREDENTIAL_OK : row.state);
   assert.equal(ordinary.source, named ? "env" : row.source ?? "");

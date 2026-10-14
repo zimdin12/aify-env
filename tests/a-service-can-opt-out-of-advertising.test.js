@@ -9,11 +9,12 @@
 // ONLY THE BOOLEAN false OPTS OUT. Any other value keeps today's behaviour and is REPORTED, so a field the operator
 // wrote is never silently ignored.
 //
-// ⛔ APPLIED AT THE ADVERTISEMENT PASS, NEVER INSIDE `advertisementTargets`. `pluginCredential` resolves a plugin's
-// key through that same helper, and a service that wants no heartbeat may still run a plugin that needs its key.
+// ⛔ APPLIED AT THE ADVERTISEMENT PASS, NEVER INSIDE `serviceTarget`. `pluginCredential` resolves a plugin's key
+// through that helper, and a service that wants no heartbeat may still run a plugin that needs its key.
 //
-// The last test boots a real daemon against two fake services, one opted out. The opted-out one is a live listener
-// that WOULD receive a beat if the opt-out were not wired, so its silence is evidence rather than an empty fixture.
+// The last test boots a real daemon against fake services, one opted out. Each DECLARES a heartbeat route, so the
+// opted-out one is a live listener that WOULD receive a beat if the opt-out were not wired, and its silence is
+// evidence rather than an empty fixture: since 0.9.7 a service with no route is sent nothing anyway.
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -24,7 +25,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { advertisementTargets, advertisingChoice } from "../lib/advertise.mjs";
+import { advertisementTargets, advertisingChoice, serviceTarget } from "../lib/advertise.mjs";
+import { advertisementPathFor } from "../lib/plugins/index.mjs";
 import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
 import { readServices } from "../lib/services.mjs";
 import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
@@ -32,6 +34,25 @@ import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
 const DAEMON = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs");
 
 const registryText = (services) => JSON.stringify({ version: 1, services });
+
+//: The route aify-comms takes a heartbeat on, as its plugin says -- the wire this host must keep sending.
+const ROUTE = advertisementPathFor("aify-comms");
+
+test("an opted-out service is sent nothing even where its plugin offers a route", () => {
+  // ⛔ The bug this catches: the opt-out lost when the route moved to the plugin capability (0.9.7). aify-comms HAS
+  // a route, so only the opt-out stands between it and a beat; aify-dashboard has a plugin and offers none.
+  const services = readServices(registryText({
+    "aify-comms": { endpoint: "http://comms", advertise: false },
+    "aify-dashboard": { endpoint: "http://dashboard" },
+    elsewhere: { endpoint: "http://elsewhere" },
+  }));
+  assert.deepEqual(advertisementTargets(advertisingChoice(services).advertised, advertisementPathFor), []);
+  // The control: the same registry without the opt-out sends aify-comms exactly one beat, so the empty list above
+  // is the opt-out and not a resolver that finds nothing.
+  const kept = readServices(registryText({ "aify-comms": { endpoint: "http://comms" } }));
+  assert.deepEqual(advertisementTargets(advertisingChoice(kept).advertised, advertisementPathFor).map((t) => t.url),
+    ["http://comms/api/v1/environments/heartbeat"]);
+});
 
 test("the registry reader carries advertise as written, so the opt-out reaches the daemon", () => {
   // ⛔ The bug this catches: the reader rebuilding each entry from named fields and dropping this one, which is
@@ -68,7 +89,7 @@ test("a service that opts out of heartbeats still resolves a key for its plugin"
   assert.equal(key, "k");
   assert.equal(asked?.credentialRef, "off.key");
   // And the shared helper itself is unchanged: it still names the opted-out service.
-  assert.equal(advertisementTargets([service]).length, 1);
+  assert.equal(serviceTarget(service).name, "off");
 });
 
 /** A listener that counts what reaches it. */
@@ -94,9 +115,9 @@ test("a real daemon beats to the neighbour and never to the service that opted o
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "aify-advertise-optout-"));
   const registry = path.join(scratch, "services.json");
   fs.writeFileSync(registry, registryText({
-    "fake-comms": { endpoint: kept.endpoint },
-    "fake-dashboard": { endpoint: optedOut.endpoint, advertise: false },
-    "fake-odd": { endpoint: odd.endpoint, advertise: "no" },
+    "fake-comms": { endpoint: kept.endpoint, advertisement: { path: ROUTE } },
+    "fake-dashboard": { endpoint: optedOut.endpoint, advertise: false, advertisement: { path: ROUTE } },
+    "fake-odd": { endpoint: odd.endpoint, advertise: "no", advertisement: { path: ROUTE } },
   }));
   const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
     stdio: ["ignore", "pipe", "pipe"],

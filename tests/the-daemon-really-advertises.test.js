@@ -24,6 +24,10 @@ import test from "node:test";
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DAEMON = path.join(ROOT, "bin", "aify-env.mjs");
 
+//: The fake service DECLARES its heartbeat route, as a registry entry may: since 0.9.7 the daemon names no route of its
+//: own, and a service with neither a declaration nor a plugin offering one is sent nothing.
+const ROUTE = "/api/v1/environments/heartbeat";
+
 /** A service that records what it was told and answers the way aify-comms does. */
 function fakeService() {
   const received = [];
@@ -46,7 +50,7 @@ async function advertisementFromARealDaemon() {
 
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "aify-advertise-"));
   const registry = path.join(scratch, "services.json");
-  fs.writeFileSync(registry, JSON.stringify({ version: 1, services: { "fake-comms": { endpoint } } }));
+  fs.writeFileSync(registry, JSON.stringify({ version: 1, services: { "fake-comms": { endpoint, advertisement: { path: ROUTE } } } }));
 
   const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
     cwd: ROOT,
@@ -164,7 +168,7 @@ async function healthAfterBeatingAt(makeService) {
 
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "aify-advertise-refused-"));
   const registry = path.join(scratch, "services.json");
-  fs.writeFileSync(registry, JSON.stringify({ version: 1, services: { "fake-comms": { endpoint } } }));
+  fs.writeFileSync(registry, JSON.stringify({ version: 1, services: { "fake-comms": { endpoint, advertisement: { path: ROUTE } } } }));
 
   const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
     cwd: ROOT,
@@ -250,7 +254,7 @@ test("a REAL daemon sends the credential the registry names, from its own enviro
   const registry = path.join(scratch, "services.json");
   fs.writeFileSync(registry, JSON.stringify({
     version: 1,
-    services: { "fake-comms": { endpoint, keyEnv: ["AIFY_API_KEY"] } },
+    services: { "fake-comms": { endpoint, keyEnv: ["AIFY_API_KEY"], advertisement: { path: ROUTE } } },
   }));
 
   const child = spawn(process.execPath, [DAEMON, "--port", "0"], {

@@ -29,6 +29,7 @@ import {
   runtimeAvailability,
   shouldRedetect,
 } from "../lib/advertise.mjs";
+import { advertisementPathFor } from "../lib/plugins/index.mjs";
 
 // ── what this host IS ────────────────────────────────────────────────────────────────────────
 
@@ -183,13 +184,16 @@ test("re-detection is due at the interval, and always on the first pass", () => 
 
 // ── where it goes ────────────────────────────────────────────────────────────────────────────
 
-test("targets are built from the registry, one per service", () => {
+test("targets are built from the registry, one per service that has a route", () => {
   assert.deepEqual(
     advertisementTargets([
+      // The route from the plugin's capability, and one the registry entry declares itself.
       { name: "aify-comms", endpoint: "http://127.0.0.1:8800" },
-      { name: "other", endpoint: "http://127.0.0.1:9000/" },
-      { name: "broken", endpoint: "" },
-    ]),
+      { name: "other", endpoint: "http://127.0.0.1:9000/", advertisement: { path: "/api/v1/environments/heartbeat" } },
+      { name: "broken", endpoint: "", advertisement: { path: "/api/v1/environments/heartbeat" } },
+      // No plugin and no declaration: nowhere to send it, so nothing is sent.
+      { name: "unrouted", endpoint: "http://127.0.0.1:9100" },
+    ], advertisementPathFor),
     [
       // The registry NAME travels with the endpoint. Without it "am I advertising?" is only
       // answerable for the daemon as a whole, so a success to one service stood another's bridge
@@ -462,8 +466,8 @@ test("disabled means not advertising, whatever was accepted", () => {
 test("targets keep their registry name so a result can be attributed", () => {
   const targets = advertisementTargets([
     { name: "aify-comms", endpoint: "http://a.invalid/" },
-    { name: "other-service", endpoint: "http://b.invalid" },
-  ]);
+    { name: "other-service", endpoint: "http://b.invalid", advertisement: { path: "/api/v1/environments/heartbeat" } },
+  ], advertisementPathFor);
   assert.deepEqual(targets.map((t) => t.name), ["aify-comms", "other-service"]);
   assert.deepEqual(targets.map((t) => t.url), [A.url, B.url]);
 });
@@ -528,7 +532,7 @@ test("a target with no key still gets its advertisement", async () => {
 test("the registry gives targets their key NAMES, and never a key value", () => {
   const targets = advertisementTargets([
     { name: "aify-comms", endpoint: "http://a.invalid", keyEnv: ["AIFY_API_KEY"] },
-  ]);
+  ], advertisementPathFor);
   assert.deepEqual(targets[0].keyEnv, ["AIFY_API_KEY"]);
   // The registry is a shared file. A value in it would be a secret shared with everything on the
   // host, so nothing in this pipeline may carry one.

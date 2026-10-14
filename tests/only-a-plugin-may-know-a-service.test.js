@@ -21,6 +21,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { advertisementPathFor, servicesWithPlugins } from "../lib/plugins/index.mjs";
+
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 //: Where a service's own knowledge is allowed to live.
@@ -39,12 +41,9 @@ const SERVICE_KNOWLEDGE = [
 //: SHRINK -- a test below fails if an entry stops being a violation, so it cannot rot into a set of
 //: names nobody re-checks. Adding to it is a decision, not a repair.
 const KNOWN_CROSSINGS = {
-  "lib/advertise.mjs":
-    "Builds `${service.endpoint}/api/v1/environments/heartbeat` from a registry entry. The endpoint "
-    + "is the service's, but the PATH SHAPE is aify-comms' API -- a second aify- service with a "
-    + "different shape would not be reachable. The real fix is for the registry to declare each "
-    + "service's heartbeat path, which is a cross-repo contract change rather than an edit here.",
-  // Same pre-existing transport crossing, extracted without changing its protocol.
+  // `lib/advertise.mjs` was here until 0.9.7: it built aify-comms' heartbeat path for every entry. The route is now
+  // the registry entry's declaration or its plugin's advertisement capability; see the route test below.
+  // A pre-existing transport crossing, extracted without changing its protocol.
   "lib/post-advertisement.mjs":
     "Sends the credential as `X-API-Key`. The registry declares which ENV VARS hold a key "
     + "(`keyEnv`) but not the header it travels in, so this host hardcodes aify-comms' choice and a "
@@ -145,4 +144,45 @@ test("the boundary is measured against a real population, not an empty one", () 
   const files = [...sourceFiles("lib"), ...sourceFiles("bin")];
   assert.ok(files.length > 20, `only ${files.length} source files were scanned; the walk is wrong`);
   assert.ok(files.some((f) => f.includes("runner")), "the walk missed the host's core modules");
+});
+
+/**
+ * Every way a plugin's advertisement route could be written into the core: the whole path and each tail of it that is
+ * two segments or more (`/api/v1/environments/heartbeat`, `/v1/environments/heartbeat`, `/environments/heartbeat`),
+ * since a core module that joins its own mount to the tail names the route as surely as one that spells it out.
+ * DERIVED from the plugins, so a route a plugin changes or a new plugin offers is checked without editing this file.
+ */
+function advertisementRoutes() {
+  const routes = new Set();
+  for (const name of servicesWithPlugins()) {
+    const segments = advertisementPathFor(name).split("/").filter(Boolean);
+    for (let from = 0; from <= segments.length - 2; from += 1) routes.add(`/${segments.slice(from).join("/")}`);
+  }
+  return [...routes];
+}
+
+test("CONTROL: the advertisement routes are derived from a real plugin, and found where they are allowed", () => {
+  const routes = advertisementRoutes();
+  // Without this the scan below passes on an empty list -- a plugin that stopped offering its route, or a resolver
+  // that answers "" for every name, would read as a clean core.
+  assert.ok(routes.length > 0, "no plugin offers an advertisement route, so the scan below checks nothing");
+  const pluginApi = codeWithoutComments(readFileSync(join(ROOT, "lib/plugins/aify-comms/api.mjs"), "utf8"));
+  assert.ok(routes.some((route) => pluginApi.includes(route)), "the scanner cannot see the route in the plugin that owns it");
+  // And it can say yes about core-shaped code: the line lib/advertise.mjs held before 0.9.7.
+  const before = codeWithoutComments("url: `${service.endpoint}/api/v1/environments/heartbeat`,");
+  assert.ok(routes.some((route) => before.includes(route)), "the scanner would not have caught the crossing it exists for");
+});
+
+test("the core names no plugin's advertisement route: the route is the service's or its plugin's (0.9.7, D13)", () => {
+  const found = [];
+  for (const relative of [...sourceFiles("lib"), ...sourceFiles("bin")]) {
+    if (relative.startsWith(PLUGIN_DIR)) continue;
+    const code = codeWithoutComments(readFileSync(join(ROOT, relative), "utf8"));
+    const hits = advertisementRoutes().filter((route) => code.includes(route));
+    if (hits.length) found.push(`${relative.split("\\").join("/")} (${hits.join(", ")})`);
+  }
+  assert.deepEqual(found, [],
+    "a core module names a service's heartbeat route. aify-env beats a service only where the registry entry declares "
+    + "`advertisement.path` or its plugin offers `advertisementPath` (lib/plugins/index.mjs); building the route "
+    + "here is how every service came to be beaten on aify-comms' API.");
 });

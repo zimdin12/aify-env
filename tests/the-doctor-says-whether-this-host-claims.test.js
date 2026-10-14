@@ -17,13 +17,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { claimingCheck } from "../lib/environment-checks.mjs";
+import { claimerFromAnswer } from "../lib/plugins/aify-comms/claimer-answer.mjs";
 import { STATE } from "../lib/health.mjs";
 
 const withClaimer = (claimer) => [{ name: "aify-comms", state: { claimer } }];
 
 test("an ACCEPTED claim passes and names the service", () => {
   const check = claimingCheck({
-    answered: true, plugins: withClaimer({ accepted: true, bridgeId: "me", reason: "" }),
+    answered: true, plugins: withClaimer({ accepted: true, holder: "me", reason: "" }),
   });
   assert.equal(check.state, STATE.PASSED);
   assert.match(check.detail, /claiming work for: aify-comms/);
@@ -34,7 +35,7 @@ test("a REFUSED claim FAILS and names who holds the row", () => {
   // legitimately owns the environment, so the remedy has to name the holder rather than say "retry".
   const check = claimingCheck({
     answered: true,
-    plugins: withClaimer({ accepted: false, bridgeId: "other-bridge", reason: "an existing bridge started later" }),
+    plugins: withClaimer({ accepted: false, holder: "other-bridge", reason: "an existing bridge started later" }),
   });
   assert.equal(check.state, STATE.FAILED);
   assert.match(check.detail, /other-bridge/);
@@ -91,8 +92,8 @@ test("no aify-env answering is UNANSWERED, and says so", () => {
 test("ACCEPTED and REFUSED are DISTINGUISHABLE — the control", () => {
   // If both answered the same, every assertion above could hold on a hardcoded verdict, which is the
   // failure being fixed one layer down.
-  const yes = claimingCheck({ answered: true, plugins: withClaimer({ accepted: true, bridgeId: "me" }) });
-  const no = claimingCheck({ answered: true, plugins: withClaimer({ accepted: false, bridgeId: "them" }) });
+  const yes = claimingCheck({ answered: true, plugins: withClaimer({ accepted: true, holder: "me" }) });
+  const no = claimingCheck({ answered: true, plugins: withClaimer({ accepted: false, holder: "them" }) });
   assert.notEqual(yes.state, no.state);
 });
 
@@ -102,7 +103,7 @@ test("one accepted and one silent passes, and still NAMES the silent one", () =>
   const check = claimingCheck({
     answered: true,
     plugins: [
-      { name: "aify-comms", state: { claimer: { accepted: true, bridgeId: "me" } } },
+      { name: "aify-comms", state: { claimer: { accepted: true, holder: "me" } } },
       { name: "aify-other", state: { claimer: null } },
     ],
   });
@@ -114,8 +115,8 @@ test("a refusal WINS over an acceptance, because the failure is the actionable h
   const check = claimingCheck({
     answered: true,
     plugins: [
-      { name: "aify-comms", state: { claimer: { accepted: true, bridgeId: "me" } } },
-      { name: "aify-other", state: { claimer: { accepted: false, bridgeId: "them", reason: "held" } } },
+      { name: "aify-comms", state: { claimer: { accepted: true, holder: "me" } } },
+      { name: "aify-other", state: { claimer: { accepted: false, holder: "them", reason: "held" } } },
     ],
   });
   assert.equal(check.state, STATE.FAILED);
@@ -125,7 +126,7 @@ test("a refusal WINS over an acceptance, because the failure is the actionable h
 test("a plugin KEPT FOR ITS WORKERS after a registry change FAILS as pending, though it is the accepted claimer", () => {
   // P0 C8. It claims and starts nothing until its last worker ends, so reading its accepted claimer as
   // "claiming work" would be a green row over refused spawns. A running one beside it stays named.
-  const accepted = { accepted: true, bridgeId: "me" };
+  const accepted = { accepted: true, holder: "me" };
   const check = claimingCheck({
     answered: true,
     plugins: [
@@ -141,4 +142,14 @@ test("a plugin KEPT FOR ITS WORKERS after a registry change FAILS as pending, th
   for (const state of [{ claimer: accepted, phase: "running", heldWorkers: 2 }, { claimer: accepted }]) {
     assert.equal(claimingCheck({ answered: true, plugins: [{ name: "aify-comms", state }] }).state, STATE.PASSED);
   }
+});
+
+test("the holder a plugin reads from a refusal is the holder the check names: both ends of `claimer.holder`", () => {
+  // The core check reads `holder`, never the service's `bridgeId` (0.9.7, D13), so the plugin must write it. Fixtures
+  // above hand the check a holder directly; this is the real producer feeding the real reader.
+  const { claimer } = claimerFromAnswer({ claimer: { accepted: false, bridgeId: "the-holder", reason: "held" } },
+    { ourBridgeId: "us" });
+  const check = claimingCheck({ answered: true, plugins: withClaimer(claimer) });
+  assert.equal(check.state, STATE.FAILED);
+  assert.match(check.detail, /held by the-holder: held/);
 });
