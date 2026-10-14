@@ -516,7 +516,8 @@ let stopAdvertising = null;
 let followServices = null;
 let agentState = null;
 let agentStateSender = null, stateEvaluationTimer = null, stateSendingStopped = false;
-// The residents role is tried, and its population published, on the same beat (lib/daemon-residents.mjs).
+// The residents role is tried at the first evaluation and on every sweep while not held, and its population published
+// on the same beat (lib/daemon-residents.mjs).
 function evaluateAgentState() {
   if (viewOnly || stateSendingStopped) return;
   void agentStateSender?.tick().catch(() => logLine("agent state: evaluation-failed"));
@@ -679,7 +680,6 @@ server.listen(port, HOST, async () => {
     });
     agentStateSender = sendFor({ instance: agentState.instance, generation: agentState.generation, stateHost: agentState.host });
     agentState.residents.attachSender(sendFor);
-    await agentState.residents.acquire().catch(() => logLine("residents: evaluation-failed")); // at boot, then each sweep
     evaluateAgentState();
     stateEvaluationTimer = setInterval(evaluateAgentState, 60_000);
     stateEvaluationTimer.unref();
