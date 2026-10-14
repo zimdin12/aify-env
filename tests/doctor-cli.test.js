@@ -17,6 +17,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { sealedDoctorEnv } from "./_sealed-doctor-env.mjs";
+
 const DOCTOR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env-doctor.mjs");
 const NOWHERE = "http://127.0.0.2:1";
 
@@ -28,13 +30,13 @@ function runDoctor({ registry, args = [] }) {
   const res = spawnSync(process.execPath, [DOCTOR, ...args], {
     encoding: "utf8",
     timeout: 120_000,
-    env: {
-      ...process.env,
+    // A home of its own (_sealed-doctor-env.mjs), so the operator's claude login and ~/.aify are not read.
+    env: sealedDoctorEnv({
       AIFY_SERVICE_REGISTRY: registryPath,
       // Nowhere, so no environment answers and nothing on this machine is contacted.
       AIFY_ENV_ENDPOINT: NOWHERE,
       AIFY_PROBE_TIMEOUT_MS: "300",
-    },
+    }),
   });
   fs.rmSync(dir, { recursive: true, force: true });
   return res;
