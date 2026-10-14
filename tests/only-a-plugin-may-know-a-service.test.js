@@ -155,7 +155,8 @@ test("the boundary is measured against a real population, not an empty one", () 
 function advertisementRoutes() {
   const routes = new Set();
   for (const name of servicesWithPlugins()) {
-    const segments = advertisementPathFor(name).split("/").filter(Boolean);
+    // An entry as the registry gives one: the lookup admits a service by name AND endpoint (`serviceIdentity`).
+    const segments = advertisementPathFor({ name, endpoint: "http://127.0.0.1:1" }).split("/").filter(Boolean);
     for (let from = 0; from <= segments.length - 2; from += 1) routes.add(`/${segments.slice(from).join("/")}`);
   }
   return [...routes];

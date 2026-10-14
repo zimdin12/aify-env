@@ -36,7 +36,7 @@ const DAEMON = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bi
 const registryText = (services) => JSON.stringify({ version: 1, services });
 
 //: The route aify-comms takes a heartbeat on, as its plugin says -- the wire this host must keep sending.
-const ROUTE = advertisementPathFor("aify-comms");
+const ROUTE = advertisementPathFor({ name: "aify-comms", endpoint: "http://127.0.0.1:1" });
 
 test("an opted-out service is sent nothing even where its plugin offers a route", () => {
   // ⛔ The bug this catches: the opt-out lost when the route moved to the plugin capability (0.9.7). aify-comms HAS

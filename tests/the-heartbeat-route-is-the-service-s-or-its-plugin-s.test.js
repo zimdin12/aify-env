@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { advertiseTo, advertisementTargets, advertisingChoice } from "../lib/advertise.mjs";
-import { advertisementPathFor } from "../lib/plugins/index.mjs";
+import { advertisementPathFor, pluginsForServices } from "../lib/plugins/index.mjs";
 import { readServices } from "../lib/services.mjs";
 
 const WIRE = "http://127.0.0.1:8800/api/v1/environments/heartbeat";
@@ -67,4 +67,41 @@ test("a declaration that is not a path sends nothing, does not fall back to the 
     'aify-comms: advertisement {"path":"//elsewhere.invalid/beat"} is not {"path": "/..."}, no heartbeat',
     'other: advertisement "/api/v1/environments/heartbeat" is not {"path": "/..."}, no heartbeat',
   ]);
+});
+
+// ── one identity rule for every decision that keys on a service (0.9.7 review) ──────────────────────────────────
+//
+// THE BUG. `readServices` keeps a registry key as written, and aify-wrapper's parser accepts and preserves
+// `" aify-comms "`. Plugin selection trimmed the name and built the comms plugin; the route lookup did not and found no
+// route, so the host description disappeared for a service whose plugin was running. Both now read `serviceIdentity`.
+
+/** What a plugin factory needs to be BUILT, and nothing that would start it or reach a service. */
+const stubContext = {
+  version: "test", machineId: "win32:identity", servedElsewhere: async () => false, windows: true,
+  advertisement: async () => ({}), cwdRoots: async () => [], watchRoots: async () => ({ roots: [], problems: [] }),
+  definitions: { list: async () => ({ definitions: [] }), snapshot: async () => ({ complete: false, incomplete: {} }) },
+  installedHarnesses: async () => new Set(),
+  setTimeoutImpl: () => 1, clearTimeoutImpl: () => {},
+};
+
+for (const key of ["aify-comms", " aify-comms "]) {
+  // The clean key is the control: the spaced key must be answered exactly as it is.
+  test(`registry key ${JSON.stringify(key)}: the comms plugin is built AND the host description is sent once`, async () => {
+    const services = registry({ [key]: { endpoint: "http://127.0.0.1:8800", keyEnv: ["AIFY_API_KEY"] } });
+    assert.equal(services[0].name, key, "the reader no longer keeps the key as written, so this test proves nothing");
+    const { plugins, unserved } = pluginsForServices(services, stubContext);
+    assert.deepEqual([plugins.map((plugin) => plugin.name), unserved], [["aify-comms"], []], "plugin selection");
+    const body = { hostname: "h", kind: "windows", runtimes: [], metadata: { advertiser: "aify-env" } };
+    const posts = await onePass(services, body);
+    assert.deepEqual(posts.map((post) => [post.url, post.name, post.key]), [[WIRE, "aify-comms", "k"]], "route lookup");
+    assert.equal(posts[0].sent, body);
+  });
+}
+
+test("an entry with a spaced key is named as the service in what /health reports", () => {
+  const choice = advertisingChoice(registry({
+    " aify-comms ": { endpoint: "http://127.0.0.1:8800", advertise: false },
+    " other ": { endpoint: "http://127.0.0.1:9000", advertise: "no" },
+  }));
+  assert.deepEqual([choice.optedOut, choice.ignored], [["aify-comms"], ['other: advertise "no" ignored, advertising']]);
 });
