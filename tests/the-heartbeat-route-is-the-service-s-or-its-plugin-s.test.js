@@ -57,16 +57,23 @@ test("a service with no plugin route and no declaration is sent nothing; one tha
   assert.deepEqual(posts.map((post) => post.url), ["http://127.0.0.1:9900/hosts/beat"]);
 });
 
-test("a declaration that is not a path sends nothing, does not fall back to the plugin, and is reported", async () => {
+test("a declaration that is not a path sends nothing, does not fall back to the plugin, and is reported in fixed words", async () => {
+  // Odd values on purpose: a secret-looking token, control characters and markup. /health is unauthenticated and its
+  // reader may be a terminal, so none of what was written may reach it -- only that it was not a path.
+  const odd = "sk-live-0123\u001b[2J<script>";
   const services = registry({
-    "aify-comms": { endpoint: "http://127.0.0.1:8800", advertisement: { path: "//elsewhere.invalid/beat" } },
-    other: { endpoint: "http://127.0.0.1:9000", advertisement: "/api/v1/environments/heartbeat" },
+    "aify-comms": { endpoint: "http://127.0.0.1:8800", advertisement: { path: `//elsewhere.invalid/${odd}` } },
+    other: { endpoint: "http://127.0.0.1:9000", advertisement: `/api/v1/${odd}` },
+    extra: { endpoint: "http://127.0.0.1:9100", advertisement: { path: "/beat", token: odd } },
   });
   assert.deepEqual(await onePass(services, {}), [], "a bad declaration was beaten, or replaced by the plugin's route");
-  assert.deepEqual(advertisingChoice(services).ignored, [
-    'aify-comms: advertisement {"path":"//elsewhere.invalid/beat"} is not {"path": "/..."}, no heartbeat',
-    'other: advertisement "/api/v1/environments/heartbeat" is not {"path": "/..."}, no heartbeat',
+  const { ignored } = advertisingChoice(services);
+  assert.deepEqual(ignored, [
+    "aify-comms: advertisement.path is not a valid path, no heartbeat",
+    "extra: advertisement.path is not a valid path, no heartbeat",
+    "other: advertisement.path is not a valid path, no heartbeat",
   ]);
+  assert.doesNotMatch(ignored.join("\n"), /sk-live|script|elsewhere|\u001b/, "the declared value reached /health");
 });
 
 // ── one identity rule for every decision that keys on a service (0.9.7 review) ──────────────────────────────────
