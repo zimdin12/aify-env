@@ -11,7 +11,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { advertiseTo, advertisementTargets, advertisingChoice } from "../lib/advertise.mjs";
+import {
+  acceptanceKey, advertiseTo, advertisementHealth, advertisementTargets, advertisingChoice, advertisingToService,
+  attemptsByService, credentialReadiness,
+} from "../lib/advertise.mjs";
+import { credentialReadinessFor } from "../lib/credential-resolve.mjs";
+import { advertiseCredentialCheck } from "../lib/environment-checks.mjs";
 import { advertisementPathFor, pluginsForServices } from "../lib/plugins/index.mjs";
 import { readServices } from "../lib/services.mjs";
 
@@ -140,4 +145,46 @@ test("Object.prototype names get no heartbeat unless they declare a path, and th
   // A declaration is the service's own word whatever it is called.
   const declared = readServices('{"version":1,"services":{"constructor":{"endpoint":"http://127.0.0.1:9100","advertisement":{"path":"/beat"}}}}');
   assert.deepEqual((await onePass(declared, {})).map((post) => [post.name, post.url]), [["constructor", "http://127.0.0.1:9100/beat"]]);
+});
+
+test("a prototype-named service that declares a route is beaten once and has its own row in every /health field", async () => {
+  // The daemon's own sequence: one pass, its outcomes recorded under `acceptanceKey`, then the per-service fields
+  // /health serves, JSON-serialised as they travel. Assigned by index, `__proto__` replaced the object's prototype
+  // and its row vanished; `constructor` and `toString` must be ordinary rows too. aify-comms is the control row.
+  const services = readServices(`{"version":1,"services":{${PROTOTYPE_NAMES
+    .map((name) => `"${name}":{"endpoint":"http://127.0.0.1:9${name.length}00","advertisement":{"path":"/beat"}}`)
+    .join(",")},"aify-comms":{"endpoint":"http://127.0.0.1:8800"}}}`);
+  const targets = advertisementTargets(advertisingChoice(services).advertised, advertisementPathFor);
+  const results = await advertiseTo({ targets, body: {}, env: {}, post: async () => ({ status: 200 }) });
+  const names = ["__proto__", "aify-comms", "constructor", "toString"];
+  assert.deepEqual(results.map((result) => result.name), names, "each service is beaten exactly once");
+  const attempts = new Map(results.map((result) => [acceptanceKey(result), { at: 1, ok: true, status: 200, error: "" }]));
+  const health = advertisementHealth({ enabled: true, targets, acceptedAt: new Map(results.map((r) => [acceptanceKey(r), 1])),
+    now: 1, staleMs: 10 });
+  const fields = {
+    advertisingTo: health.services,
+    advertiseAttempts: attemptsByService(targets, attempts),
+    advertiseCredentials: await credentialReadinessFor(targets, { env: {} }),
+    credentialReadiness: credentialReadiness(targets, {}),
+  };
+  const wire = JSON.parse(JSON.stringify(fields));
+  for (const [field, value] of Object.entries(wire)) {
+    assert.deepEqual(Object.keys(value), names, `${field} lost a row on its way to /health`);
+    assert.equal(Object.getPrototypeOf(fields[field]), Object.prototype, `${field} is not an ordinary object`);
+  }
+  assert.ok(names.every((name) => wire.advertisingTo[name].fresh === true));
+  assert.ok(names.every((name) => advertisingToService(health, name)), "a fresh row read as not advertising");
+  // The doctor reads the same fields off the wire and names every target as accepting.
+  const check = advertiseCredentialCheck({ answered: true, enabled: true, credentials: wire.advertiseCredentials,
+    attempts: wire.advertiseAttempts });
+  assert.match(check.detail, /every target is accepting beats \(0\/4 with a credential configured\)/);
+});
+
+test("asked about a service it holds no row for, health answers no, even for a prototype name", () => {
+  const health = advertisementHealth({ enabled: true, targets: [], now: 1, staleMs: 10 });
+  assert.deepEqual(PROTOTYPE_NAMES.map((name) => advertisingToService(health, name)), [false, false, false]);
+  // The doctor finds no row for a prototype name it is not given, rather than Object.prototype's.
+  const check = advertiseCredentialCheck({ answered: true, enabled: true,
+    credentials: { constructor: { keyEnv: [], hasCredential: false } }, attempts: {} });
+  assert.match(check.detail, /constructor \(no beat attempted yet\)/);
 });
