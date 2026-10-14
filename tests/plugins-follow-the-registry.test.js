@@ -404,3 +404,17 @@ witness("A HELD PLUGIN'S SYNC BEGINS NO SETUP, so the final detach waits on noth
     for (const release of parked.splice(0)) release();
   }
 });
+
+for (const [key, endpoint] of [["aify-comms", "http://127.0.0.1:8800"], [" aify-comms ", "http://127.0.0.1:8800"],
+  ["aify-comms", " http://127.0.0.1:8800 "]]) {
+  // The clean entry is the control. Plugin selection builds "aify-comms" at the trimmed endpoint from either key, so the
+  // follow must read the registry the same way (`serviceIdentity`, 0.9.7 review) or it detaches the plugin it built.
+  test(`registry entry ${JSON.stringify(key)} at ${JSON.stringify(endpoint)}: its running plugin is neither detached nor added again`, () => {
+    const services = readServices(JSON.stringify({ version: 1, services: { [key]: { endpoint } } }));
+    assert.equal(services[0].name, key, "the reader no longer keeps the key as written");
+    const running = [{ name: "aify-comms", endpoint: "http://127.0.0.1:8800" }];
+    assert.deepEqual(planPluginChanges(running, services), { detach: [], add: [] });
+    // And with nothing running it is added, as the entry it is.
+    assert.deepEqual(planPluginChanges([], services).add, services);
+  });
+}

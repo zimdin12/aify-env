@@ -208,3 +208,11 @@ test("a non-string build is ignored rather than rendered", () => {
     assert.doesNotMatch(r.detail, /42|object|abc/, `a ${typeof bad} build must not be rendered`);
   }
 });
+
+test("a spaced registry key and endpoint are probed and named as every other decision names them", () => {
+  // `readServices` keeps `" aify-comms "` as written; the doctor row must name the service /health and the plugins do.
+  const [entry] = readServices(JSON.stringify({ version: 1, services: { " aify-comms ": { endpoint: " http://127.0.0.1:8800 " } } }));
+  assert.equal(entry.name, " aify-comms ", "the reader no longer keeps the key as written");
+  const check = probeService(entry, { ok: false, error: "refused" });
+  assert.deepEqual([check.id, check.detail], ["aify-comms", "no answer from http://127.0.0.1:8800: refused"]);
+});
