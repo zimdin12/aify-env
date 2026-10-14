@@ -18,6 +18,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
+
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const KEY = "e2e-proof-key-8f3a2b1c9d4e5f60";
 
@@ -64,14 +66,14 @@ async function storeCredential(home) {
 /** Run a daemon against a keyed service and return the first beat it managed to send. */
 async function firstBeat({ home, registry, received }) {
   const daemon = spawn(process.execPath, [path.join(REPO, "bin", "aify-env.mjs"), "--port", "0"], {
-    env: {
+    env: sealedHomeEnv({
       ...scratchEnv(home),
       AIFY_ADVERTISE: "1",
       AIFY_ADVERTISE_MS: "500",
       AIFY_SERVICE_REGISTRY: registry,
       AIFY_ENV_PROCESS_RECORD: path.join(home, "env-processes.json"),
       AIFY_NO_DASHBOARD: "1",
-    },
+    }),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";

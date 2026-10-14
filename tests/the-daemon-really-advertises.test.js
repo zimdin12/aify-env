@@ -20,6 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DAEMON = path.join(ROOT, "bin", "aify-env.mjs");
@@ -54,14 +55,14 @@ async function advertisementFromARealDaemon() {
 
   const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
     cwd: ROOT,
-    env: {
+    env: sealedHomeEnv({
       ...process.env,
       AIFY_ADVERTISE: "1",
       AIFY_ADVERTISE_MS: "250",
       AIFY_SERVICE_REGISTRY: registry,
       AIFY_ENV_PROCESS_RECORD: path.join(scratch, "owned.json"),
       AIFY_NO_DASHBOARD: "1",
-    },
+    }),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -172,14 +173,14 @@ async function healthAfterBeatingAt(makeService) {
 
   const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
     cwd: ROOT,
-    env: {
+    env: sealedHomeEnv({
       ...process.env,
       AIFY_ADVERTISE: "1",
       AIFY_ADVERTISE_MS: "250",
       AIFY_SERVICE_REGISTRY: registry,
       AIFY_ENV_PROCESS_RECORD: path.join(scratch, "owned.json"),
       AIFY_NO_DASHBOARD: "1",
-    },
+    }),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -259,7 +260,7 @@ test("a REAL daemon sends the credential the registry names, from its own enviro
 
   const child = spawn(process.execPath, [DAEMON, "--port", "0"], {
     cwd: ROOT,
-    env: {
+    env: sealedHomeEnv({
       ...process.env,
       AIFY_ADVERTISE: "1",
       AIFY_ADVERTISE_MS: "250",
@@ -267,7 +268,7 @@ test("a REAL daemon sends the credential the registry names, from its own enviro
       AIFY_ENV_PROCESS_RECORD: path.join(scratch, "owned.json"),
       AIFY_NO_DASHBOARD: "1",
       AIFY_API_KEY: "sk-from-the-daemon-env",
-    },
+    }),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";

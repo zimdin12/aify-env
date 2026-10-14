@@ -27,6 +27,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENTRY = path.join(HERE, "..", "bin", "aify-env.mjs");
@@ -50,7 +51,7 @@ const SEALED = {
 function stillRunningAfter(args, ms) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [ENTRY, ...args], {
-      env: { ...process.env, ...SEALED },
+      env: sealedHomeEnv({ ...process.env, ...SEALED }),
       stdio: ["ignore", "ignore", "ignore"],
     });
     let exited = null;

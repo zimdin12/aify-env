@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { freePort } from "./_free-port.mjs";
+import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENTRY = path.join(ROOT, "bin", "aify-env.mjs");
@@ -34,7 +35,7 @@ function tempRecord(label) {
 }
 
 function sealedEnv(record, port) {
-  return {
+  return sealedHomeEnv({
     ...process.env,
     AIFY_ENV_PROCESS_RECORD: record,
     // Point the view at a registry that does not exist, so this test never depends on -- or reads --
@@ -42,7 +43,7 @@ function sealedEnv(record, port) {
     AIFY_SERVICE_REGISTRY: path.join(path.dirname(record), "no-such-registry.json"),
     AIFY_TUI_REFRESH_MS: "300",
     AIFY_ENV_PORT: String(port),
-  };
+  });
 }
 
 async function collect(child, ms) {
