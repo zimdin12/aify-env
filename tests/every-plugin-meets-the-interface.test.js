@@ -1,7 +1,7 @@
 // Every plugin the host can build meets the interface in lib/plugins/ports.mjs (0.9 plan P0 C10).
 //
 // Built through `pluginsForServices`, the host's own path, for every name `servicesWithPlugins` reports, with a stub
-// context: no service is contacted, nothing is started. A plugin added to FACTORIES is checked here without anyone
+// context: no service is contacted, nothing is started. A plugin added to PLUGINS is checked here without anyone
 // remembering to add it.
 
 import assert from "node:assert/strict";

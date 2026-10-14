@@ -180,7 +180,8 @@ const SUBCOMMANDS = {
 };
 const firstArg = args[0];
 if (firstArg && !firstArg.startsWith("-")) {
-  const target = SUBCOMMANDS[firstArg];
+  // OWN keys only: `aify-env constructor` must be an unknown subcommand, not Object's own function.
+  const target = Object.hasOwn(SUBCOMMANDS, firstArg) ? SUBCOMMANDS[firstArg] : null;
   if (!target) {
     const known = Object.keys(SUBCOMMANDS).join(", ");
     // Its OWN newline, not the module-level `chr10`, which is declared further down and would be in

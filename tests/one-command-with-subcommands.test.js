@@ -11,13 +11,15 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
+import { ownHome } from "./_sealed-doctor-env.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = () => JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 const ENTRY = path.join(ROOT, "bin", "aify-env.mjs");
 
+// A home of its own as well as the daemon seals: `doctor` reads the claude login and ~/.aify.
 const run = (args, env = {}) => spawnSync(process.execPath, [ENTRY, ...args], {
-  encoding: "utf8", timeout: 30_000, env: sealedDaemonEnv(env),
+  encoding: "utf8", timeout: 30_000, env: sealedDaemonEnv({ ...ownHome(), ...env }),
 });
 
 test("exactly one command is published", () => {

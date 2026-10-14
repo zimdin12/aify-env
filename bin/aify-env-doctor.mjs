@@ -15,7 +15,7 @@
 // green means "some of this was unverifiable" stops being worth running.
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 
 import { EXIT, summarise } from "../lib/health.mjs";
@@ -27,6 +27,14 @@ import { collectEnvironmentChecks } from "../lib/environment-report.mjs";
 import { discoverServingEndpoint, readyReceipts } from "../lib/serving-endpoint.mjs";
 import { credentialRoot, listCredentialStore } from "../lib/credential-fs.mjs";
 import { terminalSupport } from "../lib/runner.mjs";
+// THE HOST CHECKS that moved here from `aify-comms doctor` (plan D11). Every reader below only reads:
+// the process listing, the credential resolution and the service GETs start, write and kill nothing.
+import { collectHostChecks } from "../lib/host-checks.mjs";
+import { listHostProcesses } from "../lib/process-list.mjs";
+import { machineIdFor } from "../lib/advertise.mjs";
+import { hostIsWsl } from "../lib/host-wsl.mjs";
+import { credentialForTarget } from "../lib/credential-resolve.mjs";
+import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
 
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
@@ -80,6 +88,14 @@ const checks = await collectEnvironmentChecks({
   terminalSupport,
   readCredentialStore: () => listCredentialStore(credentialRoot()),
   listDefinitions: () => new DefinitionStore().list(),
+  hostChecks: ({ services, endpoint }) => collectHostChecks({
+    services,
+    endpoint,
+    knock,
+    machineId: machineIdFor({ platform: process.platform, hostname: hostname(), env: process.env, isWsl: hostIsWsl() }),
+    listProcesses: () => listHostProcesses(),
+    credentialFor: (service) => pluginCredential(service, (target) => credentialForTarget(target, { env: process.env, root: credentialRoot() })),
+  }),
 });
 
 const result = summarise(checks);

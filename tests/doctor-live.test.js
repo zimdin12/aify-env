@@ -19,6 +19,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
+import { sealedDoctorEnv } from "./_sealed-doctor-env.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON = path.join(HERE, "..", "bin", "aify-env.mjs");
@@ -69,12 +70,12 @@ function runDoctor(endpoint, registryPath) {
   return spawnSync(process.execPath, [DOCTOR, "--json"], {
     encoding: "utf8",
     timeout: 60_000,
-    env: {
-      ...process.env,
+    // A home of its own (_sealed-doctor-env.mjs), so the operator's claude login and ~/.aify are not read.
+    env: sealedDoctorEnv({
       AIFY_ENV_ENDPOINT: endpoint,
       AIFY_SERVICE_REGISTRY: registryPath,
       AIFY_PROBE_TIMEOUT_MS: "1000",
-    },
+    }),
   });
 }
 
