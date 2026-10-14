@@ -137,6 +137,12 @@ or `keyEnv`) while the endpoint stays the same keeps the running plugin on the k
 with, until aify-env restarts. Rotating the key's value inside the same file or variable is picked up
 without a restart.
 
+**Which services it describes this host to.** Every 30 seconds (`AIFY_ADVERTISE_MS`) aify-env posts a
+description of this host to each registered service it has a route for: the service's plugin supplies
+one (aify-comms' does), or the entry declares it with `"advertisement": {"path": "/..."}`. An entry with
+neither is sent nothing, and `"advertise": false` still opts a service out even when a route exists. A
+declaration that is not a path sends nothing and is named in `/health` under `advertiseIgnored`.
+
 ### What it leaves behind, and what it does not
 
 Every process it starts is recorded in `~/.aify/env-processes.json` (`AIFY_ENV_PROCESS_RECORD` to move

@@ -9,7 +9,7 @@ import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { credentialForTarget } from "../lib/credential-resolve.mjs";
 import { CredentialAclCache } from "../lib/credential-acl-cache.mjs";
 import { readServices } from "../lib/services.mjs";
-import { advertisementTargets } from "../lib/advertise.mjs";
+import { serviceTarget } from "../lib/advertise.mjs";
 import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
 import { CREDENTIAL_OK, CREDENTIAL_ABSENT } from "../lib/credential-store.mjs";
 
@@ -354,7 +354,7 @@ for (const row of credentialRows) test(`composed credential: ${row.name}`, async
     ...(!named && Object.hasOwn(row, "file") ? { credentialRef: ref } : {}),
     agentState: { path: "/state", ...(named ? { credentialRef: ref } : {}) } });
   const text = JSON.stringify({ version: 1, services: { x: service } });
-  const entry = readServices(text)[0], advertised = advertisementTargets([entry])[0];
+  const entry = readServices(text)[0], advertised = serviceTarget(entry);
   const ordinary = await credentialForTarget(advertised, opts);
   assert.equal(ordinary.state, named ? CREDENTIAL_OK : row.state);
   assert.equal(ordinary.source, named ? "env" : row.source ?? "");
@@ -374,3 +374,25 @@ for (const row of credentialRows) test(`composed credential: ${row.name}`, async
   } else assert.deepEqual(f.reports, [`agent state "x": ${row.state}`]);
   assert.doesNotMatch(f.reports.join(" "), /secret|ordinary\.key|state\.key/);
 });
+
+for (const key of ["x", " x "]) {
+  // The clean key is the control. A spaced key is kept as written by readServices and accepted by aify-wrapper's parser;
+  // the sender reads it by the one rule plugin selection and the advertiser use (`serviceIdentity`, 0.9.7 review).
+  test(`registry key ${JSON.stringify(key)}: pushed to the same destination with the same credential, named "x"`, async (t) => {
+    const f = await fixture(t); f.sender.stop();
+    const calls = [], reports = [];
+    const services = { [key]: target({ keyEnv: ["ORDINARY_KEY"], agentState: { path: "/state" } }) };
+    assert.equal(readServices(JSON.stringify({ version: 1, services }))[0].name, key, "the reader no longer keeps the key as written");
+    const sender = new AgentStateSender({ identity: { machineId: "win32:fixture", instance: "default", generation: 10, incarnationId: "identity" },
+      stateHost: f.host, definitions: f.definitions, lifecycle: { stopFacts: () => new Map() }, observedHarnesses: () => new Set(["claude"]),
+      readRegistry: () => JSON.stringify({ version: 1, services }),
+      credentialOptions: () => ({ root: path.join(f.home, "credentials"), env: { ORDINARY_KEY: "ordinary-key" } }),
+      // Refused, so the sender names the service in its notice: that name is the one it keys the slot by.
+      fetchImpl: async (url, options) => { calls.push({ url, options }); return response(503); },
+      report: (s) => reports.push(s) }); t.after(() => sender.stop());
+    await sender.tick(); await until(() => reports.length > 0); await flush();
+    assert.deepEqual(calls.map((call) => [call.url, call.options.headers["x-aify-agent-state-key"]]),
+      [["http://fixture.invalid/state", "ordinary-key"]]);
+    assert.deepEqual(reports, ['agent state "x": not-applied']);
+  });
+}

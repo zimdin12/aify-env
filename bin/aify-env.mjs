@@ -84,7 +84,7 @@ import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
 import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
 import { AgentStateSender } from "../lib/agent-state-sender.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
-import { pluginsForServices } from "../lib/plugins/index.mjs";
+import { advertisementPathFor, pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
 import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
 import {
@@ -863,8 +863,9 @@ async function advertiseOnce() {
     return;
   }
   if (registryIsReadable(registryText)) followServices?.(readServices(registryText));
-  advertising = advertisingChoice(readServices(registryText)); // HERE, never in advertisementTargets: see advertise.mjs
-  const targets = advertisementTargets(advertising.advertised);
+  advertising = advertisingChoice(readServices(registryText)); // HERE, never in serviceTarget: see advertise.mjs
+  // THE ROUTE IS THE SERVICE'S OR ITS PLUGIN'S (`advertisementPath`), never this file's; neither means no beat.
+  const targets = advertisementTargets(advertising.advertised, advertisementPathFor);
   advertisingTargets = targets;
   if (targets.length === 0) return;
 
