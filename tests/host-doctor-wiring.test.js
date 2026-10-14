@@ -211,6 +211,29 @@ test("a loop bound to a FRESH environment's bridge is live; the same loop on a S
   assert.match(stale[3], /team\.coder \(pid 41/);
 });
 
+test("the host is not listed when there is nothing to compare it against", async () => {
+  // A whole-host enumeration is a PowerShell CIM query. With the service silent, or no bridge live, the
+  // verdict is unknown whatever the table holds, so the table is not read -- and not claimed unreadable.
+  for (const [what, deps] of [
+    ["a silent service", { reads: readsOf(async () => null) }],
+    ["no live bridge", { reads: readsOf(fleet({ bridges: [] })) }],
+  ]) {
+    const added = [];
+    let listed = 0;
+    await checkManagedOrphans({ ...deps, add: (...args) => added.push(args), listProcesses: () => { listed += 1; return []; }, selfPid: 7, now: () => NOW });
+    assert.equal(listed, 0, `the host was listed with ${what}`);
+    assert.equal(added[0][2], "unknown-all");
+    assert.doesNotMatch(added[0][3], /process table/, `an unread table was called unreadable with ${what}`);
+  }
+  // CONTROL: with something to compare against, it IS listed.
+  let listed = 0;
+  await checkManagedOrphans({
+    reads: readsOf(fleet({ bridges: [{ id: LIVE_BRIDGE }] })), add: () => {},
+    listProcesses: () => { listed += 1; return [{ pid: 7, commandLine: "node" }]; }, selfPid: 7, now: () => NOW,
+  });
+  assert.equal(listed, 1);
+});
+
 test("a claimer stamp is judged on the service's word first, then on its age", () => {
   assert.equal(envCanClaimASpawnAt({ spawnClaim: { state: "fresh" }, metadata: { bridgeLastSeen: "2000-01-01T00:00:00Z" } }, NOW), true);
   assert.equal(envCanClaimASpawnAt({ metadata: { bridgeLastSeen: new Date(NOW - 30_000).toISOString() } }, NOW), true);
