@@ -30,6 +30,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { freePort } from "./_free-port.mjs";
+import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENTRY = path.join(ROOT, "bin", "aify-env.mjs");
@@ -43,7 +44,7 @@ function sealed(label) {
   return {
     dir,
     record: path.join(dir, "owned.json"),
-    env: (record) => ({
+    env: (record) => sealedHomeEnv({
       ...process.env,
       AIFY_ENV_PROCESS_RECORD: record,
       AIFY_SERVICE_REGISTRY: path.join(dir, "no-registry.json"),
@@ -60,7 +61,7 @@ function longLauncher(dir) {
 }
 
 const start = (env, port) =>
-  spawn(process.execPath, [ENTRY, "--port", String(port)], { env, stdio: ["ignore", "pipe", "pipe"] });
+  spawn(process.execPath, [ENTRY, "--port", String(port)], { env: sealedHomeEnv(env), stdio: ["ignore", "pipe", "pipe"] });
 
 function waitFor(child, pattern, ms = 20000) {
   return new Promise((resolve, reject) => {

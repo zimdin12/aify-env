@@ -27,7 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
+import { sealedDaemonEnv, sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 import { freePort } from "./_free-port.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -63,7 +63,7 @@ function longLauncher(dir) {
 }
 
 const start = (env, port, extra = []) =>
-  spawn(process.execPath, [ENTRY, "--port", String(port), ...extra], { env, stdio: ["ignore", "pipe", "pipe"] });
+  spawn(process.execPath, [ENTRY, "--port", String(port), ...extra], { env: sealedHomeEnv(env), stdio: ["ignore", "pipe", "pipe"] });
 
 function waitFor(child, pattern, ms = 20000) {
   return new Promise((resolve, reject) => {

@@ -24,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, test } from "node:test";
 
-import { sealedDaemonEnv } from "./_sealed-daemon-env.mjs";
+import { sealedDaemonEnv, sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 import { workLostToSupersession, showViewInsteadOfRefusing } from "../lib/environment-checks.mjs";
 import { freePort } from "./_free-port.mjs";
 
@@ -65,7 +65,7 @@ afterEach(() => {
 });
 
 const start = (env, port, extra = []) => {
-  const child = spawn(process.execPath, [ENTRY, "--port", String(port), ...extra], { env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [ENTRY, "--port", String(port), ...extra], { env: sealedHomeEnv(env), stdio: ["ignore", "pipe", "pipe"] });
   started.add(child);
   return child;
 };

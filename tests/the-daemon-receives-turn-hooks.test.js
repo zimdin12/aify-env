@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 
 const ENTRY = path.resolve(import.meta.dirname, "../bin/aify-env.mjs");
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -16,9 +17,9 @@ function box(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "aify-hook-daemon-"));
   const allowed = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
     /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|SYSTEMDRIVE|USERNAME|USERDOMAIN)$/i.test(key)));
-  const env = { ...allowed, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root,
+  const env = sealedHomeEnv({ ...allowed, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root,
     TEMP: root, TMP: root, TMPDIR: root, AIFY_ADVERTISE: "0", AIFY_NO_DASHBOARD: "1",
-    AIFY_SERVICE_REGISTRY: path.join(root, "absent-services.json"), AIFY_ENV_PROCESS_RECORD: path.join(root, "owned.json") };
+    AIFY_SERVICE_REGISTRY: path.join(root, "absent-services.json"), AIFY_ENV_PROCESS_RECORD: path.join(root, "owned.json") });
   const home = path.join(root, ".aify");
   fs.mkdirSync(path.join(home, "residents"), { recursive: true });
   const closers = [];

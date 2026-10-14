@@ -34,8 +34,51 @@
 // A PATH THAT DOES NOT EXIST, never an empty one. Empty means "unset" to every `||` default in this
 // codebase, and "unset" is the operator's home directory.
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 /** A path no registry lives at, so a daemon that reads it finds no services and claims nothing. */
 export const NO_REGISTRY = "/aify-tests/no-such-registry.json";
+
+// AND THE HOME IS SEALED, measured 2026-10-14. A daemon resolves `~/.aify` through `os.homedir()`, which on Windows
+// reads USERPROFILE, and a test that spread `process.env` inherited whatever home its process had. Under
+// tests/run-in-a-temp-root.mjs that is a private temp home; run directly with `node --test`, it is the operator's
+// own. `the-daemon-really-advertises.test.js`, run that way, booted daemons that rewrote the real
+// `~/.aify/env/default.json` and `default.generation` and took the real home's residents role. So every daemon
+// env goes through `sealedHomeEnv`, which keeps a home only when it is private and otherwise substitutes one.
+
+/** The operator's own home, from the OS account, never from a variable a test or a runner may have set. */
+export const REAL_HOME = path.resolve(os.userInfo().homedir);
+
+/** A home a test daemon may use: set, under the temp directory, and not the operator's own. */
+export function isPrivateHome(dir) {
+  if (typeof dir !== "string" || !dir.trim()) return false;
+  const home = path.resolve(dir), temp = path.resolve(os.tmpdir());
+  const fold = (p) => (process.platform === "win32" ? p.toLowerCase() : p);
+  if (fold(home) === fold(REAL_HOME)) return false;
+  return fold(home).startsWith(fold(temp) + path.sep);
+}
+
+let processHome = null;
+/** One private home for every daemon this test process starts outside the runner's, made on first use. */
+function privateHome() {
+  processHome ??= fs.mkdtempSync(path.join(os.tmpdir(), "aify-sealed-home-"));
+  return processHome;
+}
+
+/**
+ * `env` with HOME and USERPROFILE both pointing at one private home: its own when both already are, else this
+ * process's. Throws when the result could still resolve the operator's home, so a seal that regresses fails here.
+ */
+export function sealedHomeEnv(env) {
+  const own = isPrivateHome(env.HOME) && isPrivateHome(env.USERPROFILE) ? env.USERPROFILE : privateHome();
+  const sealed = { ...env, HOME: own, USERPROFILE: own };
+  if (!isPrivateHome(sealed.HOME) || !isPrivateHome(sealed.USERPROFILE)) {
+    throw new Error(`a test daemon's home is not private: HOME=${sealed.HOME} USERPROFILE=${sealed.USERPROFILE}`);
+  }
+  return sealed;
+}
 
 /**
  * `process.env` plus the seals every spawned daemon needs, and nothing else.
@@ -43,7 +86,7 @@ export const NO_REGISTRY = "/aify-tests/no-such-registry.json";
  * @param {object} [extra] per-test additions, applied last so a test can deliberately re-enable
  */
 export function sealedDaemonEnv(extra = {}) {
-  return {
+  return sealedHomeEnv({
     ...process.env,
     // Say nothing to anyone. A test daemon has no host to describe.
     AIFY_ADVERTISE: "0",
@@ -54,5 +97,5 @@ export function sealedDaemonEnv(extra = {}) {
     // The view writes escapes into captured output and slows every assertion that reads it.
     AIFY_NO_DASHBOARD: "1",
     ...extra,
-  };
+  });
 }

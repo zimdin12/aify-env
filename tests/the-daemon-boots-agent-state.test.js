@@ -11,6 +11,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { instanceFixture } from "./helpers/instance-fixture.mjs";
+import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 
 const ENTRY = path.resolve(import.meta.dirname, "../bin/aify-env.mjs");
 const RUNNER = path.resolve(import.meta.dirname, "run-in-a-temp-root.mjs");
@@ -19,9 +20,9 @@ function box(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "aify-state-boot-"));
   const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
     /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|SYSTEMDRIVE|USERNAME|USERDOMAIN)$/i.test(key)));
-  const env = { ...clean, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root,
+  const env = sealedHomeEnv({ ...clean, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root,
     TEMP: root, TMP: root, TMPDIR: root, AIFY_ADVERTISE: "0", AIFY_NO_DASHBOARD: "1",
-    AIFY_SERVICE_REGISTRY: path.join(root, "absent-services.json"), AIFY_ENV_PROCESS_RECORD: path.join(root, "owned.json") };
+    AIFY_SERVICE_REGISTRY: path.join(root, "absent-services.json"), AIFY_ENV_PROCESS_RECORD: path.join(root, "owned.json") });
   const home = path.join(root, ".aify");
   const state = path.join(home, "env");
   fs.mkdirSync(state, { recursive: true });

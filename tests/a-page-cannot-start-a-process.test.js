@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DAEMON = path.join(ROOT, "bin", "aify-env.mjs");
@@ -28,7 +29,7 @@ test("start a real daemon on an ephemeral port", async () => {
   scratch = fs.mkdtempSync(path.join(os.tmpdir(), "aify-csrf-"));
   daemon = spawn(process.execPath, [DAEMON, "--port", "0"], {
     cwd: ROOT,
-    env: {
+    env: sealedHomeEnv({
       ...process.env,
       AIFY_NO_DASHBOARD: "1",
       // A SCRATCH RECORD. The daemon reaps from this file once it holds the port, and the real one
@@ -49,7 +50,7 @@ test("start a real daemon on an ephemeral port", async () => {
       // whether it lands a beat before it is killed is a race -- which is why a bisect kept clearing
       // this file and only a static scan caught it.
       AIFY_SERVICE_REGISTRY: path.join(scratch, "no-such-registry.json"),
-    },
+    }),
     stdio: ["ignore", "pipe", "pipe"],
   });
 

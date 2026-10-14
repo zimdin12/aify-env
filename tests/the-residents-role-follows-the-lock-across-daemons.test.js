@@ -15,6 +15,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { instanceFixture } from "./helpers/instance-fixture.mjs";
+import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
 
 const ENTRY = path.resolve(import.meta.dirname, "../bin/aify-env.mjs");
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,9 +54,9 @@ test("one holder per home across an ordinary and two dedicated daemons; a crash 
 
   const allowed = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
     /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|SYSTEMDRIVE|USERNAME|USERDOMAIN)$/i.test(key)));
-  const env = { ...allowed, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root, TEMP: root, TMP: root, TMPDIR: root,
+  const env = sealedHomeEnv({ ...allowed, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root, TEMP: root, TMP: root, TMPDIR: root,
     AIFY_ADVERTISE: "0", AIFY_NO_DASHBOARD: "1", AIFY_SWEEP_MS: "300", AIFY_MACHINE_ID: "b1-fixture",
-    AIFY_SERVICE_REGISTRY: path.join(root, "services.json"), AIFY_ENV_PROCESS_RECORD: path.join(root, "owned.json") };
+    AIFY_SERVICE_REGISTRY: path.join(root, "services.json"), AIFY_ENV_PROCESS_RECORD: path.join(root, "owned.json") });
   const child = (argv) => {
     const processChild = spawn(process.execPath, argv, { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
     const exited = once(processChild, "exit");
