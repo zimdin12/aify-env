@@ -98,3 +98,19 @@ test("the parts are read when the signal arrives, not when this is built", async
   await hooks.beforeStop();
   assert.deepEqual(stopped, ["socket"], "a socket opened after boot must still be closed at shutdown");
 });
+
+test("B1: the residents role is released inside the awaited wait, after the view stops, beside the rest", async () => {
+  // THE RELEASE IS THE SLOW ONE, so a release that was fired and forgotten would land after beforeStop resolved.
+  const { done, step } = recorder();
+  const hooks = daemonShutdownHooks({
+    runner: {},
+    stopView: () => done.push("view"),
+    releaseResidents: step("residents-released", 60),
+    inputSocket: () => ({ stop: step("socket", 10) }),
+    servicePlugins: { stopAll: step("plugins", 10) },
+    closeHttpServer: () => {}, clearOwned: () => {}, exit: () => {}, write: () => {},
+  });
+  await hooks.beforeStop();
+  assert.deepEqual(done, ["view", "socket", "plugins", "residents-released"],
+    "the role's endpoint must be closed by the time the wait resolves, and must not hold up the socket or the plugins");
+});

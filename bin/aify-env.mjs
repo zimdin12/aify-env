@@ -396,6 +396,7 @@ let stopDashboard = () => {};
 const shutdown = createShutdown(daemonShutdownHooks({
   runner,
   stopView: () => { stopAgentStateSending(); stopDashboard(); },
+  releaseResidents: () => agentState?.residents?.release(),
   inputSocket: () => inputSocketServer,
   servicePlugins,
   closeHttpServer: () => server.close(),
@@ -443,6 +444,7 @@ const server = createServer(createDaemonHttp({
         turnEvents: agentState?.turnEvents,
         stateHost: agentState?.host ?? null,
         lifecycle: agentState?.lifecycle ?? null,
+        residents: agentState?.residents?.report() ?? null,
         observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
         inputSocket: inputSocketAddress,
         readFile: (path) => readFileSync(path, "utf8"),
@@ -514,13 +516,17 @@ let stopAdvertising = null;
 let followServices = null;
 let agentState = null;
 let agentStateSender = null, stateEvaluationTimer = null, stateSendingStopped = false;
+// The residents role is tried, and its population published, on the same beat (lib/daemon-residents.mjs).
 function evaluateAgentState() {
-  if (!viewOnly && !stateSendingStopped) void agentStateSender?.tick().catch(() => logLine("agent state: evaluation-failed"));
+  if (viewOnly || stateSendingStopped) return;
+  void agentStateSender?.tick().catch(() => logLine("agent state: evaluation-failed"));
+  void agentState?.residents?.tick().catch(() => logLine("residents: evaluation-failed"));
 }
 function stopAgentStateSending() {
   stateSendingStopped = true;
   if (stateEvaluationTimer) { clearInterval(stateEvaluationTimer); stateEvaluationTimer = null; }
   agentStateSender?.stop();
+  void agentState?.residents?.release();
 }
 server.on("error", async (failure) => {
   if (failure?.code === "EADDRINUSE") {
@@ -646,14 +652,11 @@ server.listen(port, HOST, async () => {
   try { agentState = bootDaemonAgentState({ aifyHome: join(homedir(), ".aify"), context: instanceContext,
     url: `http://${HOST}:${bound.port}`, report: logLine });
     agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine });
-    agentState.lifecycle = {
-      ...createAgentLifecyclePorts({ aifyHome: join(homedir(), ".aify"),
-        machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(),
-          env: process.env, exists: existsSync, isWsl: hostIsWsl() }).machineId,
-        stateHost: agentState.host, runner, definitions: definitionStore,
-        installed: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) }),
-      rawIdentity: (id) => agentState.host.rawIdentity(id),
-    };
+    agentState.lifecycle = createAgentLifecyclePorts({ aifyHome: join(homedir(), ".aify"),
+      machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(),
+        env: process.env, exists: existsSync, isWsl: hostIsWsl() }).machineId,
+      stateHost: agentState.host, residents: agentState.residents, runner, definitions: definitionStore,
+      installed: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) });
   }
   catch (error) { process.stderr.write(`[aify-env] agent state boot failed: ${error.message}\n`); process.exit(2); }
   // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
@@ -666,14 +669,17 @@ server.listen(port, HOST, async () => {
   // Only after serving and successful durable boot/readiness. Sweep cadence is configurable;
   // this fixed beat evaluates boot-anchored quiet epochs even when the sweep is much slower.
   if (!viewOnly && !stateSendingStopped) {
-    agentStateSender = new AgentStateSender({
+    // One sender per population: this daemon's own (managed) key now, the residents' key while it holds the role.
+    const sendFor = ({ instance, generation, ...population }) => new AgentStateSender({
       identity: { machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
-        exists: existsSync, isWsl: hostIsWsl() }).machineId, instance: agentState.instance, generation: agentState.generation },
-      stateHost: agentState.host, definitions: definitionStore,
-      lifecycle: agentState.lifecycle,
+        exists: existsSync, isWsl: hostIsWsl() }).machineId, instance, generation },
+      definitions: definitionStore, lifecycle: agentState.lifecycle,
       observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
-      readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"), credentialOptions: credentialReading, report: logLine,
+      readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"), credentialOptions: credentialReading, report: logLine, ...population,
     });
+    agentStateSender = sendFor({ instance: agentState.instance, generation: agentState.generation, stateHost: agentState.host });
+    agentState.residents.attachSender(sendFor);
+    await agentState.residents.acquire().catch(() => logLine("residents: evaluation-failed")); // at boot, then each sweep
     evaluateAgentState();
     stateEvaluationTimer = setInterval(evaluateAgentState, 60_000);
     stateEvaluationTimer.unref();
