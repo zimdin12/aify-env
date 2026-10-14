@@ -112,3 +112,32 @@ test("an entry with a spaced key is named as the service in what /health reports
   }));
   assert.deepEqual([choice.optedOut, choice.ignored], [["aify-comms"], ['other: advertise "no" ignored, advertising']]);
 });
+
+// ── a registry key that names an Object.prototype member is just an unknown service ────────────────────────────────
+//
+// A plain-object table indexed by `constructor` or `toString` returns an inherited function, and `__proto__` returns
+// Object.prototype itself. Each must resolve to no plugin and no route, beside an ordinary unknown name (the control
+// for "unknown") and the real aify-comms entry (the control that the pass beats at all). Raw JSON, because a JS
+// object literal turns `__proto__` into a prototype instead of a key.
+const PROTOTYPE_NAMES = ["__proto__", "constructor", "toString"];
+const prototypeRegistry = (extra = "") => readServices(`{"version":1,"services":{${[...PROTOTYPE_NAMES, "unknown-svc"]
+  .map((name) => `"${name}":{"endpoint":"http://127.0.0.1:9${name.length}00"}`).join(",")},"aify-comms":{"endpoint":"http://127.0.0.1:8800"}${extra}}}`);
+
+test("Object.prototype names select no plugin and no route; aify-comms still does", () => {
+  const services = prototypeRegistry();
+  assert.deepEqual(services.map((service) => service.name), ["__proto__", "aify-comms", "constructor", "toString", "unknown-svc"],
+    "the reader dropped a key, so the names below are not being asked");
+  const { plugins, unserved } = pluginsForServices(services, stubContext);
+  assert.deepEqual([plugins.map((plugin) => plugin.name), unserved], [["aify-comms"], [...PROTOTYPE_NAMES, "unknown-svc"]]);
+  assert.deepEqual(services.map((service) => [service.name, advertisementPathFor(service)]), [
+    ["__proto__", ""], ["aify-comms", "/api/v1/environments/heartbeat"], ["constructor", ""], ["toString", ""], ["unknown-svc", ""],
+  ]);
+});
+
+test("Object.prototype names get no heartbeat unless they declare a path, and then exactly that one", async () => {
+  assert.deepEqual((await onePass(prototypeRegistry(), {})).map((post) => [post.name, post.url]),
+    [["aify-comms", "http://127.0.0.1:8800/api/v1/environments/heartbeat"]]);
+  // A declaration is the service's own word whatever it is called.
+  const declared = readServices('{"version":1,"services":{"constructor":{"endpoint":"http://127.0.0.1:9100","advertisement":{"path":"/beat"}}}}');
+  assert.deepEqual((await onePass(declared, {})).map((post) => [post.name, post.url]), [["constructor", "http://127.0.0.1:9100/beat"]]);
+});
