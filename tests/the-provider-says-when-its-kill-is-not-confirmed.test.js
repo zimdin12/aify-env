@@ -16,6 +16,8 @@ import { join } from "node:path";
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
 import { CleanupWarnings, ProviderRunner, SCRIPT } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
+import { pluginProblemsCheck } from "../lib/plugin-problems-check.mjs";
+import { STATE } from "../lib/health.mjs";
 
 const KEY = "dashboard-key-sentinel-7f3a";
 const CHECKOUT = "C:/checkout";
@@ -161,4 +163,56 @@ test("a kill that was confirmed leaves no such row (the control)", async () => {
   await s.runner.pass();
   await s.runner.pass();
   assert.deepEqual(s.rows(), []);
+});
+
+test("through the plugin, an unconfirmed kill stays said while it yields to another aify-env, and after it resumes", async (t) => {
+  // The bug (comms-senior-dev, R1 on 155b6d5): the declined state returned problems: [] before reading the cleanup
+  // warnings, so a run-then-decline dropped the row, and the doctor's plugin-problems row passed while the client's
+  // tree was not confirmed ended. Its own endpoint, so the row is told apart from the one the test above leaves in this
+  // process's store.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-unconfirmed-yield-")));
+  const checkout = join(root, "apg");
+  mkdirSync(join(checkout, "scripts"), { recursive: true });
+  writeFileSync(join(checkout, SCRIPT), "process.exit(0);\n");
+  const proj = join(root, "proj").replace(/\\/g, "/");
+  mkdirSync(proj);
+  for (const args of [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "p"]]) execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", ...args], { cwd: proj });
+  const endpoint = "http://127.0.0.1:8";
+  const fetch = async (url) => {
+    const at = String(url);
+    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p2", name: "n", root: { fsNamespace: "windows", path: proj } }] });
+    if (at.endsWith("/host/h/provider/pending")) return Response.json({ hostKey: "h", projects: [{ projectId: "p2", queued: 1 }] });
+    if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: "", cursorRevision: 1 });
+    return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
+  };
+  const results = [{ code: null, signal: null, timedOut: true, stopped: false, error: UNCONFIRMED, unconfirmed: UNCONFIRMED }];
+  const runChild = async () => results.shift() ?? { code: 0, signal: null, timedOut: false, stopped: false, error: "", unconfirmed: "" };
+  let other = false;
+  const plugin = createDashboardPlugin({
+    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
+    servedElsewhere: async () => other,
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
+  }, { fetch, runChild, runEveryMs: 25, tickMs: 25 });
+  t.after(() => plugin.stop());
+  const mine = () => plugin.state().problems.filter((row) => row.includes(endpoint) && row.includes("not confirmed ended"));
+  const waitFor = async (done) => { const until = Date.now() + 30_000; while (!done() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10)); };
+  const doctor = () => pluginProblemsCheck({ answered: true, plugins: [{ name: "aify-dashboard", state: plugin.state() }] });
+
+  await plugin.start({ credential: async () => KEY });
+  await waitFor(() => mine().length === 1);
+  const [row] = mine();
+  assert.match(row ?? "", /project p2: the provider client serving http:\/\/127\.0\.0\.1:8 was killed when it ran past its time/);
+
+  other = true;
+  await waitFor(() => plugin.state().phase === "declined");
+  assert.equal(plugin.state().phase, "declined");
+  assert.deepEqual(mine(), [row], "the same row is still said while this instance yields");
+  assert.equal(doctor().state, STATE.FAILED, "and the doctor's row fails on it");
+  assert.ok(doctor().detail.includes(row), doctor().detail);
+
+  other = false;
+  await waitFor(() => plugin.state().phase === "running");
+  assert.deepEqual(mine(), [row], "resuming does not clear it");
+  await plugin.stop();
 });
