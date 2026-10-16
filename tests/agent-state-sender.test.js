@@ -104,11 +104,14 @@ test("real token ending and recreation removes only actual selected tokens, neve
   const f = await fixture(t); await f.tick(); f.live(false); await f.tick();
   assert.deepEqual(f.calls[1].body.removed, [{ agentId: "lead", lifetime: L }]);
   assert.equal(f.calls[1].body.agents[0].lifetime, null); envelope(f.calls[1].body);
+  // A null row that left is withdrawn by a whole snapshot, never by a fabricated null removal (review of 462022e, J2).
   await f.definitions.remove("ready"); await f.tick();
-  assert.equal(f.calls.length, 2, "no fabricated null removal");
+  assert.deepEqual([f.calls[2].body.kind, f.calls[2].body.removed], ["snapshot", []], "no fabricated null removal");
+  assert.deepEqual(f.calls[2].body.agents.map((r) => r.agentId), ["lead", "offline"], "ready was not withdrawn");
+  envelope(f.calls[2].body);
   f.live(true); f.resident(M); await f.tick();
-  assert.deepEqual(f.calls[2].body.agents.map((r) => r.lifetime), [M]);
-  assert.deepEqual(f.calls[2].body.removed, []); envelope(f.calls[2].body);
+  assert.deepEqual(f.calls[3].body.agents.map((r) => r.lifetime), [M]);
+  assert.deepEqual(f.calls[3].body.removed, []); envelope(f.calls[3].body);
 });
 
 test("initial, 59999 and 60000 quiet snapshots use boot epochs and changes cannot postpone them", async (t) => {
