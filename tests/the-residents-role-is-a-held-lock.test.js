@@ -138,18 +138,27 @@ test("ORDERED RELEASE: stop admitting, wait bounded, close the endpoint even on 
   const role = new ResidentsRole({ aifyHome: dir });
   t.after(() => role.release({ waitMs: 0 }));
   assert.equal((await role.acquire()).held, true);
+  // THE CONTENDER IS STARTED AND LOADED BEFORE THE RELEASE, and binds on a cue sent inside the wait. A contender
+  // spawned after the release began could reach its bind only after the endpoint closed, and then correctly take the
+  // role (review of 462022e). `settled` proves the bind's answer came back while the wait still held the endpoint.
+  const during = holder(t, dir, "role-on-cue");
+  assert.deepEqual(await during.line(0), { ready: true });
   const slow = role.enter();
   assert.equal(slow.live(), true);
   const started = Date.now();
-  const releasing = role.release({ waitMs: 300 });
+  let settled = false;
+  const releasing = role.release({ waitMs: 1000 }).then((outcome) => { settled = true; return outcome; });
   assert.equal(role.enter(), null, "admission stops at once: not-owner");
   assert.equal(role.holds(), false);
+  during.child.stdin.write("bind\n");
+  assert.deepEqual(await during.line(1), { attempting: true });
+  const answer = await during.line(2);
+  assert.equal(settled, false, "the contender's bind was not inside the release's wait, so it proves nothing about it");
   // A contender during the wait is still refused: the endpoint is held until the wait ends.
-  const during = holder(t, dir, "role");
-  assert.equal((await during.line()).reason, "held-elsewhere");
+  assert.equal(answer.reason, "held-elsewhere");
   const outcome = await releasing;
   assert.deepEqual(outcome, { timedOut: true, abandoned: 1 });
-  assert.ok(Date.now() - started >= 280, "the wait was bounded, not skipped");
+  assert.ok(Date.now() - started >= 980, "the wait was bounded, not skipped");
   // The late operation completes now: asked at its effect, it is refused.
   assert.equal(slow.live(), false);
   assert.throws(() => slow.guard(), { code: notOwnerError().code, message: notOwnerError().message });
