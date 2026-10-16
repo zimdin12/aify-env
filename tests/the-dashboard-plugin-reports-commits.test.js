@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { DashboardApi } from "../lib/plugins/aify-dashboard/dashboard-api.mjs";
 import { GitReader, parseLog } from "../lib/plugins/aify-dashboard/git-reader.mjs";
 import { HeadWatcher, TICK_MS } from "../lib/plugins/aify-dashboard/head-watcher.mjs";
+import { createDashboardPlugin, DEDICATED_DECLINE } from "../lib/plugins/aify-dashboard/index.mjs";
 import { batchesOf, BATCH_SIZE } from "../lib/plugins/aify-dashboard/range-reporter.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
 
@@ -28,7 +29,14 @@ const git = (cwd, ...args) => execFileSync("git", ["-c", "user.email=t@example.i
 const slashed = (path) => path.replace(/\\/g, "/");
 
 /** A dashboard that keeps one folder's coverage by the rules above, and records everything it was sent. */
-async function coverageDashboard(listedPath) {
+async function coverageDashboard(listedPath, { anyReporter = false } = {}) {
+  // The plugin names its reporter with a fresh id per process, so a test through the plugin accepts any instance.
+  const instance = (url, suffix) => {
+    const found = url.match(new RegExp(`^/instances/([^/]+)/${suffix}$`));
+    if (found === null) return null;
+    const named = decodeURIComponent(found[1]);
+    return anyReporter || named === REPORTER ? named : null;
+  };
   const sent = [];
   const fail = [];
   const state = { head: "", ackedHead: "", cursor: 0, ranges: new Map(), stored: [], gaps: [] };
@@ -46,12 +54,13 @@ async function coverageDashboard(listedPath) {
       return [200, { ok: true, ackedHead: state.ackedHead, cursorRevision: state.cursor }];
     }
     const current = { ackedHead: state.ackedHead, cursorRevision: state.cursor };
-    if (method === "POST" && url === `/instances/${encodeURIComponent(REPORTER)}/commit-ranges`) {
+    const opener = instance(url, "commit-ranges");
+    if (method === "POST" && opener !== null) {
       if (body.baseHead !== state.ackedHead) return [409, { error: "stale", code: "stale_base", current }];
       if (body.cursorRevision !== state.cursor) return [409, { error: "stale", code: "stale_cursor", current }];
       if (body.targetHead === body.baseHead) return [409, { error: "same", code: "not_a_move", current }];
       const rangeId = `r${state.ranges.size + 1}`;
-      state.ranges.set(rangeId, { ...body, opener: REPORTER, next: 0, continuation: null, state: "open" });
+      state.ranges.set(rangeId, { ...body, opener, next: 0, continuation: null, state: "open" });
       return [201, { rangeId, baseHead: body.baseHead, targetHead: body.targetHead, cursorRevision: body.cursorRevision }];
     }
     const batch = url.match(/^\/commit-ranges\/([^/]+)\/batches$/);
@@ -70,7 +79,7 @@ async function coverageDashboard(listedPath) {
       }
       return [200, { rangeId: batch[1], batchIndex: body.batchIndex, acceptedShas: body.commits.map((c) => c.sha), continuationSha: range.continuation, state: range.state, replayed: false }];
     }
-    if (method === "POST" && url === `/instances/${encodeURIComponent(REPORTER)}/resync`) {
+    if (method === "POST" && instance(url, "resync") !== null) {
       if (body.oldHead !== state.ackedHead || body.cursorRevision !== state.cursor) return [409, { error: "stale", code: "stale_resync", current }];
       state.gaps.push({ from: body.oldHead, to: body.newHead, reason: body.reason });
       Object.assign(state, { ackedHead: body.newHead, cursor: state.cursor + 1 });
@@ -376,4 +385,54 @@ test("a head report answered without the accepted head fails closed: no commits,
   await s.watcher.tick();
   assert.match(s.watcher.state().problems.join("\n"), /did not say which head it has accepted/);
   assert.equal(s.dashboard.sent.filter((r) => r.url.includes("commit-ranges")).length, 0);
+});
+
+test("through the plugin: a folder resumed after a yield is reported again, and the dashboard's coverage is brought back to it", { skip: onlyWindows }, async (t) => {
+  // The bug (comms-senior-dev, R2 on 155b6d5, inherited from main): the watcher kept the folder's last report through a
+  // yield. Another reporter moved the dashboard to B meanwhile; this checkout was still at A with the same fingerprint,
+  // so the quiet-tick shortcut held for ever and the dashboard said B. The other reporter's write is modelled as its
+  // accepted API history, not run.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-resume-")));
+  const repo = join(root, "proj");
+  mkdirSync(repo);
+  git(repo, "init", "-q");
+  git(repo, "commit", "-q", "--allow-empty", "-m", "A");
+  const a = git(repo, "rev-parse", "HEAD");
+  git(repo, "commit", "-q", "--allow-empty", "-m", "B");
+  const b = git(repo, "rev-parse", "HEAD");
+  git(repo, "checkout", "-q", "--detach", a);
+  const dashboard = await coverageDashboard(repo, { anyReporter: true });
+  t.after(() => dashboard.close());
+  let other = false;
+  const plugin = createDashboardPlugin({
+    name: "aify-dashboard", endpoint: dashboard.endpoint, service: { name: "aify-dashboard", endpoint: dashboard.endpoint }, machineId: MACHINE,
+    servedElsewhere: async () => other,
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+  }, { tickMs: 25 });
+  t.after(() => plugin.stop());
+  const heads = () => dashboard.sent.filter((r) => r.url === "/reports/head").length;
+  const waitFor = async (done) => { const until = Date.now() + 30_000; while (!done() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10)); };
+
+  await plugin.start({ credential: async () => "k" });
+  await waitFor(() => dashboard.state.ackedHead === a);
+  assert.equal(dashboard.state.ackedHead, a, "detached A is acknowledged");
+
+  other = true;
+  await waitFor(() => plugin.state().phase === "declined");
+  assert.deepEqual(plugin.state().phase, "declined");
+  assert.equal(plugin.state().declined, DEDICATED_DECLINE);
+  // Another reporter, while this one yields: the dashboard now holds B, head and coverage.
+  Object.assign(dashboard.state, { head: b, ackedHead: b, cursor: dashboard.state.cursor + 1 });
+  const before = heads();
+
+  other = false;
+  await waitFor(() => dashboard.state.ackedHead === a && dashboard.state.head === a);
+  assert.ok(heads() > before, "the resumed folder was reported again, though nothing in it moved");
+  assert.deepEqual({ head: dashboard.state.head, ackedHead: dashboard.state.ackedHead }, { head: a, ackedHead: a }, "the dashboard is back at this checkout's A");
+
+  // Control, same run: once reconciled, the folder is quiet again, with no report on every tick.
+  const settled = heads();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(heads(), settled, "a reconciled folder went on reporting");
+  await plugin.stop();
 });
