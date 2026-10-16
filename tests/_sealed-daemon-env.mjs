@@ -38,8 +38,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-/** A path no registry lives at, so a daemon that reads it finds no services and claims nothing. */
-export const NO_REGISTRY = "/aify-tests/no-such-registry.json";
+/**
+ * A path no registry lives at, so a daemon that reads it finds no services and claims nothing. Under the test temp
+ * directory, never the inherited AIFY_SERVICE_REGISTRY: a private home does not fence an absolute registry a shell
+ * set, and that registry would start a test daemon's plugins against the services it names (review of B1, 2026-10-17).
+ */
+export const NO_REGISTRY = path.join(os.tmpdir(), "aify-tests-no-such-registry", "services.json");
 
 // AND THE HOME IS SEALED, measured 2026-10-14. A daemon resolves `~/.aify` through `os.homedir()`, which on Windows
 // reads USERPROFILE, and a test that spread `process.env` inherited whatever home its process had. Under
@@ -92,8 +96,9 @@ export function sealedDaemonEnv(extra = {}) {
     AIFY_ADVERTISE: "0",
     // And if a test turns advertising back on, it must also say WHERE. Pointed at a path that does
     // not exist rather than emptied: `||` reads empty as unset and falls back to the operator's own
-    // `~/.aify/services.json`, which is the file this line exists to keep out.
-    AIFY_SERVICE_REGISTRY: process.env.AIFY_SERVICE_REGISTRY || NO_REGISTRY,
+    // `~/.aify/services.json`, which is the file this line exists to keep out. And never the inherited value: a test
+    // that needs a registry passes it in `extra`.
+    AIFY_SERVICE_REGISTRY: NO_REGISTRY,
     // The view writes escapes into captured output and slows every assertion that reads it.
     AIFY_NO_DASHBOARD: "1",
     ...extra,
