@@ -403,6 +403,55 @@ test("a folder whose git directory holds a way out is never offered, though its 
   assert.deepEqual(watcher.watched(), [], "nor on the next look");
 });
 
+test("through the plugin: while another aify-env serves the host it runs no client, and resumes when that one stops", async (t) => {
+  // The bug: an ordinary aify-env starting after this herdr instance had served a folder. The head watcher yields, but
+  // it keeps the folders it last judged, so the runner went on starting clients and two hosts claimed one queue.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-provider-yield-")));
+  const checkout = join(root, "apg");
+  mkdirSync(join(checkout, "scripts"), { recursive: true });
+  writeFileSync(join(checkout, SCRIPT), "process.exit(0);\n");
+  const proj = join(root, "proj").replace(/\\/g, "/");
+  mkdirSync(proj);
+  const { execFileSync } = await import("node:child_process");
+  execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "init", "-q"], { cwd: proj });
+  execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "p"], { cwd: proj });
+  const endpoint = "http://127.0.0.1:9";
+  const fetch = async (url) => {
+    const at = String(url);
+    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", name: "n", root: { fsNamespace: "windows", path: proj } }] });
+    if (at.endsWith("/host/h/provider/pending")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", queued: 1 }] });
+    if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: "", cursorRevision: 1 });
+    return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
+  };
+  const runs = [];
+  const runChild = async (args) => { runs.push(args); return { code: 0, signal: null, timedOut: false, stopped: false, error: "" }; };
+  let other = false;
+  const plugin = createDashboardPlugin({
+    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
+    servedElsewhere: async () => other,
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
+  }, { fetch, runChild, runEveryMs: 25, tickMs: 25 });
+  t.after(() => plugin.stop());
+  await plugin.start({ credential: async () => KEY });
+  await waitFor(() => runs.length >= 1);
+  assert.ok(runs.length >= 1, "it served the folder before the other one started");
+
+  other = true;
+  await waitFor(() => plugin.state().phase === "declined");
+  assert.equal(plugin.state().phase, "declined");
+  // A pass already under way when the answer changed may finish; none may start after it.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const yielded = runs.length;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(runs.length, yielded, "no client started while the other aify-env served the host");
+
+  other = false;
+  await waitFor(() => runs.length > yielded);
+  await plugin.stop();
+  assert.ok(runs.length > yielded, "it resumed once the other one stopped");
+});
+
 test("through the plugin: it serves the watched folder once a minute, and stop ends the loop", async (t) => {
   // The bugs: the runner never wired into the plugin, wired to another endpoint or host, or a timer left after stop.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-provider-")));
