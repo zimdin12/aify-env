@@ -134,6 +134,27 @@ for (const broken of ["generation", "descriptor"]) {
   });
 }
 
+// B1 contract item 5 through the real boot: an unreadable residents.generation refuses the residents role alone. Its
+// control is the test above, where this daemon's OWN generation, unreadable the same way, still refuses boot.
+test("an unreadable residents generation refuses only the residents role: the daemon boots, holds no role, says why", async (t) => {
+  const b = box(t);
+  fs.mkdirSync(generation(b, "residents"));
+  // A home with a generation has booted before, so its lifecycle journal exists.
+  fs.writeFileSync(path.join(b.home, "agent-lifecycle.json"), JSON.stringify({ version: 1, records: {}, stops: {} }));
+  const d = daemon(t, b);
+  const up = await outcome(d);
+  assert.equal(up.ready, true, `an unreadable residents generation refused the whole daemon: ${d.output}`);
+  assert.ok(fs.existsSync(descriptor(b)) && fs.existsSync(generation(b)), "the managed boot did not complete");
+  let role = null;
+  for (const end = Date.now() + 30000; Date.now() < end && !(role?.reason && role.reason !== "not-attempted"); await pause(25)) {
+    role = (await health(up.url)).residents;
+  }
+  assert.equal(role?.held, false, JSON.stringify(role));
+  assert.match(role.reason, /^generation-unreadable: /);
+  assert.match(d.output, /residents\.generation: .*the residents role is refused until it is readable/);
+  assert.equal(fs.statSync(generation(b, "residents")).isDirectory(), true, "a generation was guessed over the unreadable one");
+});
+
 test("a refused port bind cannot touch the predecessor's state files", async (t) => {
   const b = box(t);
   fs.writeFileSync(descriptor(b), '{"predecessor":"kept"}\n');
