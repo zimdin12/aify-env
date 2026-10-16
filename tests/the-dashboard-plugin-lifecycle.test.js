@@ -156,8 +156,12 @@ test("a stop that arrives during a tick ends the loop, and detach always detache
     return recorded.fetch(url);
   };
   let clock = 0;
+  // Every tick asks whether another aify-env serves the host, before any fetch, so a loop still running after stop is
+  // counted here even though its aborted signal keeps it from fetching (main 0.9's per-tick question).
+  let asked = 0;
   const plugin = createDashboardPlugin(
-    { ...entry, service: entry, machineId: "win32:h", watchRoots: async () => ({ roots: [], problems: ["none"] }) },
+    { ...entry, service: entry, machineId: "win32:h", watchRoots: async () => ({ roots: [], problems: ["none"] }),
+      servedElsewhere: async () => { asked += 1; return false; } },
     { fetch, tickMs: 5, now: () => (clock += LIST_EVERY_MS) },
   );
   await plugin.start(host);
@@ -171,6 +175,9 @@ test("a stop that arrives during a tick ends the loop, and detach always detache
   assert.deepEqual(await detaching, { detached: true, held: 0 });
   await settle();
   assert.equal(recorded.calls.length, 2, "the tick in flight finished, and none followed it");
+  const after = asked;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(asked, after, "a tick ran after the plugin was detached");
 });
 
 test("the claiming row ignores a plugin that claims nothing", () => {
