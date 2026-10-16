@@ -4,6 +4,9 @@
 //   node residents-holder.mjs <aifyHome> role [pauseMs]
 //       acquire; print {held, reason, generation}; with pauseMs, then block this process's event loop that long (a
 //       paused holder) and print "resumed" with whether it still holds; then wait to be killed or for stdin to close.
+//   node residents-holder.mjs <aifyHome> role-on-cue
+//       load everything, print {ready: true}, wait for a line on stdin, then print {attempting: true} and acquire as
+//       `role` does: a contender already started, whose bind attempt the test places inside an interval it controls.
 //   node residents-holder.mjs <aifyHome> turn <agentId> <lifetime> <pid> <writtenAtUs> <firedAtUs>
 //       hold the role as a daemon does (lib/daemon-residents.mjs), with an OS probe that verifies <pid>, apply one
 //       turn-start at <firedAtUs> as the residents hook route would, print the outcome, then wait to be killed.
@@ -22,8 +25,13 @@ const say = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 process.stdin.on("end", () => process.exit(0));
 process.stdin.resume();
 
-if (mode === "role") {
+if (mode === "role" || mode === "role-on-cue") {
   const role = new ResidentsRole({ aifyHome });
+  if (mode === "role-on-cue") {
+    say({ ready: true });
+    await new Promise((resolve) => process.stdin.once("data", resolve));
+    say({ attempting: true });
+  }
   const taken = await role.acquire();
   say({ ...taken, generation: role.generation });
   const pauseMs = Number(rest[0] || 0);
