@@ -65,7 +65,12 @@ for (const name of Object.keys(inherited)) {
 // Daemon boot now writes descriptor/generation/turns under homedir(), so tests must own that home too.
 const home = path.join(root, 'home');
 fs.mkdirSync(home);
-const env = { ...inherited, HOME: home, USERPROFILE: home, TMPDIR: root, TEMP: root, TMP: root, AIFY_HOST_SECRET_FILE: path.join(root, 'host-secret') };
+// AND THE SERVICE REGISTRY (review of B1, 2026-10-17). A private HOME does not fence an absolute AIFY_SERVICE_REGISTRY
+// the starting shell set, and advertising off is not plugin startup off: a daemon started under it read that registry
+// and started its plugins against the services it named. The suite's registry is a path in this root that no file is
+// at; a test that needs a registry names its own.
+const env = { ...inherited, HOME: home, USERPROFILE: home, TMPDIR: root, TEMP: root, TMP: root, AIFY_HOST_SECRET_FILE: path.join(root, 'host-secret'),
+  AIFY_SERVICE_REGISTRY: path.join(root, 'no-such-services.json') };
 
 const files = fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map((f) => path.join('tests', f));
 

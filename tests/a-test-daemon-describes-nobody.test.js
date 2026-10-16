@@ -74,7 +74,7 @@ test("the seal turns advertising OFF and names no real registry", () => {
   // spent minutes answering "not the claimer". The intent in the old comment was right; the
   // mechanism was its opposite.
   assert.ok(sealed.AIFY_SERVICE_REGISTRY, "an empty seal IS the operator's registry, spelled differently");
-  assert.equal(sealed.AIFY_SERVICE_REGISTRY, process.env.AIFY_SERVICE_REGISTRY || NO_REGISTRY);
+  assert.equal(sealed.AIFY_SERVICE_REGISTRY, NO_REGISTRY, "the seal kept an inherited registry");
 });
 
 test("a test can still opt back in deliberately", () => {

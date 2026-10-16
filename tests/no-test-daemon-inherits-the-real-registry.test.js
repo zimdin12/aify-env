@@ -69,8 +69,8 @@ test("the seal names a path that cannot exist, rather than an empty one", () => 
   // sealing with an empty string resolves straight back to the operator's file. Asserted here as
   // well as there, because this gate is what a future author will read when it fires.
   const helper = readFileSync(join(HERE, "_sealed-daemon-env.mjs"), "utf8");
-  assert.match(helper, /AIFY_SERVICE_REGISTRY: process\.env\.AIFY_SERVICE_REGISTRY \|\| NO_REGISTRY/);
-  assert.match(helper, /NO_REGISTRY = "\/aify-tests\/no-such-registry\.json"/);
+  assert.match(helper, /AIFY_SERVICE_REGISTRY: NO_REGISTRY,/);
+  assert.match(helper, /NO_REGISTRY = path\.join\(os\.tmpdir\(\), "aify-tests-no-such-registry", "services\.json"\)/);
 });
 
 test("THE WIDENED SCAN REACHES spawnSync AND ENTRY-NAMED SPAWNS", () => {
