@@ -112,7 +112,8 @@ test("G6 nullable lifetime is a row, never a fabricated removal, and inputs stay
   assert.deepEqual(changed.body.inputs, inputs);
   assert.deepEqual(changed.body.removed, []);
   const gone = publisher.changes({ complete: true, agents: [], inputs }, changed.view);
-  assert.equal(gone, null, "forgetting a null lifetime cannot invent a removal");
+  assert.deepEqual([gone.body.kind, gone.body.agents, gone.body.removed], ["snapshot", [], []],
+    "a null lifetime that left is withdrawn by a snapshot, never by an invented removal");
   const recreated = publisher.changes({ complete: true, agents: [agent("ready")], inputs }, changed.view);
   assert.deepEqual(recreated.body.removed, [], "null to real token is creation, not null removal");
   const ended = publisher.changes(nullable, recreated.view);
