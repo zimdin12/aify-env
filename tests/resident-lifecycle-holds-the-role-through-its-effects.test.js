@@ -125,3 +125,42 @@ for (const action of ["stop", "delete"]) {
     }
   });
 }
+
+// Review of 9f194d5: the check before applyRequest is not the removal's gate. The store's write waits for its lock,
+// and the role can be released (an ordinary shutdown) while it waits, so the role is asked again once the lock is held.
+test("a resident delete waiting on the definitions lock removes nothing when the role goes during the wait", { skip: SKIP }, async (t) => {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  for (const lose of [true, false]) {
+    const f = await fixture(t);
+    const holder = f.residents(`http://127.0.0.1:${lose ? 6 : 7}`);
+    assert.equal(await holder.acquire(), true);
+    // Another writer of this host's definitions takes the store's own lock just before the delete reaches the store.
+    const writer = new DefinitionStore({ dir: path.join(f.home, "definitions") });
+    let releaseLock, holding;
+    const takeLock = () => new Promise((locked) => {
+      holding = writer.withLifecycleDefinition(() => { locked(); return new Promise((resolve) => { releaseLock = resolve; }); });
+    });
+    let entered = false, settled = false;
+    const real = f.definitions.applyRequest.bind(f.definitions);
+    f.definitions.applyRequest = (...args) => { entered = true; return real(...args); };
+    const request = await f.request("delete", null);
+    const deleting = f.ports(holder, { onInstalled: takeLock }).lifecycle.execute(request)
+      .then((answer) => { settled = true; return answer; });
+    for (const end = Date.now() + 5000; !entered && Date.now() < end;) await pause(10);
+    await pause(200);
+    assert.equal(entered, true, "the delete never passed its pre-lock check into the store");
+    assert.equal(settled, false, "the delete was not waiting on the definitions lock");
+    if (lose) await holder.release({ waitMs: 0 });
+    releaseLock();
+    await holding;
+    const answer = await deleting;
+    if (lose) {
+      assert.deepEqual(outcome(answer), ["refused", "stopped; the definition was not removed: not-owner"]);
+      assert.equal(await f.defined(), true, "the definition was removed after the role was released during the lock wait");
+    } else {
+      assert.deepEqual(outcome(answer), ["done", "delete"], "control: the holder's delete removes it after the wait");
+      assert.equal(await f.defined(), false);
+    }
+    assert.deepEqual(f.stopFact(holder), [true], "the stop, made while held, is kept");
+  }
+});
