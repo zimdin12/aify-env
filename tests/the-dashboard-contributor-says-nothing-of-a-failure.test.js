@@ -62,7 +62,9 @@ async function start(contributors, runner) {
     processes: new PluginProcesses(runner), cwdRoots: ["C:/work"], windows: true, withinRoots: workspaceWithinRoots, baseEnv: {},
     buildSpec: ({ launcher, args, cwd, env, label }) => ({ spec: { launcher, args, cwd, env, label, fileText: "#!" } }),
     resolveCandidates: () => ["C:/bin/claude-aify"],
-    admitStart: (l, produce) => store.admitStart(l, produce), definitionFor: (l) => store.boundReading(l),
+    // Main's admission contract (0.9): `complete` runs once the process is produced.
+    admitStart: async (l, produce, complete) => { const admitted = await store.admitStart(l, produce); if (admitted.produced) await complete(admitted.produced); return admitted; },
+    definitionFor: (l) => store.boundReading(l),
     spawnEnv: contributors,
   });
   return { result, sent, logs };
