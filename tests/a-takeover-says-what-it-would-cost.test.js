@@ -95,9 +95,21 @@ async function environmentWithWork(box, port) {
     signal: AbortSignal.timeout(20000),
   });
   assert.equal(created.status, 201, `could not start a process: ${created.status}`);
-  const { pid } = await created.json();
+  const { id, pid } = await created.json();
   assert.ok(alive(pid), "nothing was running, so this test would prove nothing");
-  return { daemon, workerPid: pid };
+  return { daemon, workerPid: pid, workerId: id };
+}
+
+// Cleanup goes through the daemon and the child handles, never `process.kill(pid)`: by the time a
+// finally runs, the worker may have been reaped by a takeover and `second` has exited, so their pids
+// may already belong to another process on this host.
+async function stopWork(port, workerId) {
+  try {
+    await fetch(`http://127.0.0.1:${port}/processes/${encodeURIComponent(workerId)}`, {
+      method: "DELETE",
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch { /* nobody serves the port any more, so nobody holds the worker */ }
 }
 
 // -- the decision, without starting anything -------------------------------------------------------
@@ -132,7 +144,7 @@ test("a list that is not a list does not manufacture work", () => {
 test("a second start REFUSES while the first is running agents, and touches nothing", async () => {
   const PORT = await freePort();
   const box = sealed("refuse");
-  const { daemon, workerPid } = await environmentWithWork(box, PORT);
+  const { daemon, workerPid, workerId } = await environmentWithWork(box, PORT);
   let second = null;
   try {
     second = start(box.env, PORT);
@@ -152,9 +164,9 @@ test("a second start REFUSES while the first is running agents, and touches noth
     })).json();
     assert.equal(health.pid, daemon.pid, "the incumbent is no longer the one serving");
   } finally {
+    await stopWork(PORT, workerId);
     if (second) second.kill();
     daemon.kill();
-    if (alive(workerPid)) { try { process.kill(workerPid, "SIGKILL"); } catch { /* already gone */ } }
   }
 });
 
@@ -208,7 +220,7 @@ test("A PIPE KEEPS THE REFUSAL EXACTLY AS IT WAS — explanation, pointer, exit 
   // no view is the only one who needs to be told the command that looks without disturbing.
   const PORT = await freePort();
   const box = sealed("piped");
-  const { daemon, workerPid } = await environmentWithWork(box, PORT);
+  const { daemon, workerPid, workerId } = await environmentWithWork(box, PORT);
   let second = null;
   try {
     second = start(box.env, PORT);
@@ -219,7 +231,9 @@ test("A PIPE KEEPS THE REFUSAL EXACTLY AS IT WAS — explanation, pointer, exit 
     assert.doesNotMatch(said, /Showing it instead/, "a pipe was told a view it will never see");
     assert.ok(alive(daemon.pid) && alive(workerPid), "the refusal touched something");
   } finally {
-    for (const pid of [second?.pid, daemon.pid]) { try { if (pid) process.kill(pid); } catch { /* gone */ } }
+    await stopWork(PORT, workerId);
+    if (second) second.kill();
+    daemon.kill();
   }
 });
 
@@ -228,7 +242,7 @@ test("AIFY_NO_DASHBOARD=1 keeps the old shape even in a terminal", async () => {
   // operator who turned the dashboard off gets one anyway at the least welcome moment.
   const PORT = await freePort();
   const box = sealed("nodash");
-  const { daemon, workerPid } = await environmentWithWork(box, PORT);
+  const { daemon, workerPid, workerId } = await environmentWithWork(box, PORT);
   let second = null;
   try {
     second = start({ ...box.env, AIFY_NO_DASHBOARD: "1" }, PORT);
@@ -238,7 +252,9 @@ test("AIFY_NO_DASHBOARD=1 keeps the old shape even in a terminal", async () => {
     assert.doesNotMatch(said, /Showing it instead/);
     assert.ok(alive(daemon.pid) && alive(workerPid));
   } finally {
-    for (const pid of [second?.pid, daemon.pid]) { try { if (pid) process.kill(pid); } catch { /* gone */ } }
+    await stopWork(PORT, workerId);
+    if (second) second.kill();
+    daemon.kill();
   }
 });
 
@@ -247,7 +263,7 @@ test("--force takes over anyway, which is what makes refusing safe", async () =>
   // into a permanently unusable command.
   const PORT = await freePort();
   const box = sealed("forced");
-  const { daemon, workerPid } = await environmentWithWork(box, PORT);
+  const { daemon, workerPid, workerId } = await environmentWithWork(box, PORT);
   let second = null;
   try {
     second = start(box.env, PORT, ["--force"]);
@@ -261,9 +277,9 @@ test("--force takes over anyway, which is what makes refusing safe", async () =>
     })).json();
     assert.equal(health.pid, second.pid, "/health does not report the process that is actually serving");
   } finally {
+    await stopWork(PORT, workerId);
     if (second) second.kill();
     daemon.kill();
-    if (alive(workerPid)) { try { process.kill(workerPid, "SIGKILL"); } catch { /* already gone */ } }
   }
 });
 
