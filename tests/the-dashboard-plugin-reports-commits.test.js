@@ -426,7 +426,14 @@ test("through the plugin: a folder resumed after a yield is reported again, and 
   const before = heads();
 
   other = false;
-  await waitFor(() => dashboard.state.ackedHead === a && dashboard.state.head === a);
+  // ⛔ The resume ends with the read-back of where coverage stands, after the resync (head-watcher.mjs, the report that
+  // follows ranges.sync), not when the dashboard first reads A. Waiting for A alone took the count between the resync
+  // and that read-back, and the read-back then landed in the quiet window below: 3 !== 2 (2026-10-17, found with a
+  // 100 ms delay on the read-back, which turned this red 3 of 3).
+  const resumedFrom = dashboard.sent.length;
+  const resumed = () => dashboard.sent.slice(resumedFrom).map((r) => (r.url === "/reports/head" ? "head" : r.url.endsWith("/resync") ? "resync" : null)).filter(Boolean);
+  await waitFor(() => resumed().join(" ") === "head resync head");
+  assert.deepEqual(resumed(), ["head", "resync", "head"], "the resume: reported, resynced from B, then read back");
   assert.ok(heads() > before, "the resumed folder was reported again, though nothing in it moved");
   assert.deepEqual({ head: dashboard.state.head, ackedHead: dashboard.state.ackedHead }, { head: a, ackedHead: a }, "the dashboard is back at this checkout's A");
 

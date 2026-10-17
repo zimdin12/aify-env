@@ -27,7 +27,7 @@ function running(options = {}) {
   const child = fakeChild();
   const stop = new AbortController();
   const kills = [];
-  const run = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, signal: stop.signal, killWaitMs: 50, start: () => child, kill: async (pid) => { kills.push(pid); }, ...options });
+  const run = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, platform: "win32", signal: stop.signal, killWaitMs: 50, start: () => child, kill: async (pid) => { kills.push(pid); }, ...options });
   child.emit("spawn");
   return { child, stop, kills, run };
 }
@@ -110,7 +110,7 @@ test("runChild hands the kill the client's own handle and a live view of whether
   const child = fakeChild();
   const stop = new AbortController();
   const asked = [];
-  const run = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, signal: stop.signal, killWaitMs: 50, start: () => child, kill: async (pid, options) => { asked.push({ pid, options }); } });
+  const run = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, platform: "win32", signal: stop.signal, killWaitMs: 50, start: () => child, kill: async (pid, options) => { asked.push({ pid, options }); } });
   child.emit("spawn");
   stop.abort();
   assert.equal(asked.length, 1);

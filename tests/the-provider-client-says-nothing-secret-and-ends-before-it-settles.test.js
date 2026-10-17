@@ -86,7 +86,7 @@ function stoppedWith(kill, killWaitMs, { closeAfterMs = 0 } = {}) {
   const stop = new AbortController();
   const events = [];
   const state = { settled: false };
-  const running = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, signal: stop.signal, start: () => child, kill: () => { events.push("kill-called"); return kill(events); }, killWaitMs })
+  const running = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, platform: "win32", signal: stop.signal, start: () => child, kill: () => { events.push("kill-called"); return kill(events); }, killWaitMs })
     .then((result) => { state.settled = true; events.push("run-settled"); return result; });
   child.emit("spawn");
   stop.abort();
@@ -225,7 +225,7 @@ test("a run settled at its deadline leaves no timer and no stop listener behind,
   const startedWith = (signal) => {
     const child = fakeChild();
     const kills = [];
-    const running = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, signal, timeoutMs: 10_000, killWaitMs: 20, start: () => child, kill: (pid) => { kills.push(pid); return new Promise(() => {}); } });
+    const running = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, platform: "win32", signal, timeoutMs: 10_000, killWaitMs: 20, start: () => child, kill: (pid) => { kills.push(pid); return new Promise(() => {}); } });
     child.emit("spawn");
     return { child, kills, running };
   };
@@ -259,7 +259,7 @@ test("a run past its time and then stopped kills its tree once", async () => {
   const child = fakeChild();
   const stop = new AbortController();
   let kills = 0;
-  const running = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, signal: stop.signal, timeoutMs: 10, start: () => child, kill: async () => { kills += 1; } });
+  const running = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, platform: "win32", signal: stop.signal, timeoutMs: 10, start: () => child, kill: async () => { kills += 1; } });
   child.emit("spawn");
   await new Promise((resolve) => setTimeout(resolve, 50));
   stop.abort();
