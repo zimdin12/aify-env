@@ -20,6 +20,8 @@ import { randomBytes } from "node:crypto";
 import test from "node:test";
 
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
+import { LifecycleJournal } from "../lib/agent-lifecycle.mjs";
+import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
 import { createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
@@ -126,7 +128,15 @@ async function startDefinedWorker(t, value) {
   };
 
   const ownedFile = path.join(root, "env-processes.json");
-  const runner = new Runner({ ownedFile });
+  // The managed host the daemon's agent-state answers as: 0.9 refuses a managed child without one. What it is handed
+  // is what agent-state would keep, so it is searched too.
+  const managed = [];
+  let current = null;
+  const runner = new Runner({ ownedFile, managedHost: () => ({ instance: "default", url: "http://127.0.0.1:1",
+    host: {
+      startManaged: (record) => { managed.push(JSON.stringify(record)); current = record; },
+      endManaged: (lifetime) => { managed.push(lifetime); if (current?.lifetime === lifetime) current = null; return { problem: "" }; },
+    } }) });
   const registry = new ServicePlugins();
   const logs = [];
   const host = new PluginHost({ processes: new PluginProcesses(runner), environmentId: "", log: (line) => logs.push(line),
@@ -138,14 +148,26 @@ async function startDefinedWorker(t, value) {
   });
   // A dedicated instance's dashboard plugin: it offers the contributor and reports no heads, so the dashboard sees
   // only the fetch. An ordinary one offers the same (the-dashboard-plugin-fetches-a-workers-secrets.test.js).
-  await registry.add(createDashboardPlugin({ endpoint: dashboard.endpoint, dedicated: true, service: { name: "aify-dashboard", endpoint: dashboard.endpoint } }), host);
+  // On 0.9 the yield is asked per tick through `servedElsewhere`; answering yes keeps the ticks from reporting heads.
+  await registry.add(createDashboardPlugin({ endpoint: dashboard.endpoint, servedElsewhere: async () => true, service: { name: "aify-dashboard", endpoint: dashboard.endpoint } }), host);
+  // THE DAEMON'S LIFECYCLE PORT, as bin wires it: on 0.9 a defined automatic start is admitted through it, and without
+  // it the start is refused as automatic-lifecycle-capability-unavailable before anything is contributed.
+  const aifyHome = path.join(root, "aify-home");
+  fs.mkdirSync(aifyHome);
+  new LifecycleJournal({ file: path.join(aifyHome, "agent-lifecycle.json") }).initialize({ priorBoot: false });
+  // Agent-state's reading of the agent, from what the managed host was handed: cold until the worker is recorded, so
+  // the admission sees the birth it produced (matchesBirth, daemon-agent-lifecycle.mjs).
+  const identity = () => ({ current, conflict: false, unknown: false });
+  const agents = { ...createAgentLifecyclePorts({ aifyHome, machineId: "win32:test-host",
+    stateHost: { rawIdentity: identity }, runner, definitions: store }), rawIdentity: identity };
   const comms = createCommsPlugin({ endpoint: "http://127.0.0.1:1", machineId: "win32:test-host", windows: process.platform === "win32", api,
     advertisement: async () => ({ hostname: "test-host", kind: "test" }), cwdRoots: async () => [slashed(root)],
-    definitions: store, installedHarnesses: async () => ALL, setTimeoutImpl: () => 0, clearTimeoutImpl: () => {} });
+    definitions: store, agents, installedHarnesses: async () => ALL, setTimeoutImpl: () => 0, clearTimeoutImpl: () => {} });
   await registry.add(comms, host);
 
   await until(() => sent.some((s) => s.startsWith('["reportControl"')), "the start to be reported");
-  await until(() => fs.existsSync(`${out}.child`), "the worker to write what it saw");
+  await until(() => fs.existsSync(`${out}.child`),
+    `the worker to write what it saw; the start was reported as ${sent.find((s) => s.startsWith('["reportControl"'))}`);
   // What the host keeps about a running worker, read while it runs: its owned-process record drops it at exit.
   const whileRunning = { owned: fs.readFileSync(ownedFile, "latin1"), listed: runner.list(), health: JSON.stringify(registry.report()) };
   const bound = boundWorker({ reported: JSON.parse(sent.find((s) => s.startsWith('["reportControl"')))[2],
@@ -155,7 +177,7 @@ async function startDefinedWorker(t, value) {
   fs.writeFileSync(`${out}.release`, "");
   // THAT worker's exit, by its own id, before anything is read as "after".
   await until(() => !runner.list().some((p) => p.id === handle), `worker ${handle} to exit`);
-  return { root, out, runner, registry, logs, sent, dashboard, storeDir, handle, whileRunning };
+  return { root, out, runner, registry, logs, sent, dashboard, storeDir, handle, whileRunning, managed };
 }
 
 /**
@@ -214,6 +236,7 @@ test("THE SENTINEL reaches the worker's env, and no byte of it is anywhere else"
     ["the runner's registry while the worker ran", JSON.stringify(run.whileRunning.listed)],
     ["/health plugins while the worker ran", run.whileRunning.health],
     ["the runner's replay", replay.join("")],
+    ...run.managed.map((record, i) => [`agent-state managed record ${i}`, record]),
     // Labelled by the call, so a leak names its destination: `terminalOutput` is the output stream.
     ...run.sent.map((call, i) => [`aify-comms ${JSON.parse(call)[0]} (call ${i})`, call]),
     ...run.dashboard.requests.map((request, i) => [`sent to aify-dashboard ${i}`, request]),
@@ -221,6 +244,7 @@ test("THE SENTINEL reaches the worker's env, and no byte of it is anywhere else"
   ];
   assert.ok(places.some(([label]) => label.endsWith("env-processes.json")), "the runner's file was written, so it is searched");
   assert.ok(places.some(([label]) => label.includes("/definitions/")), "the definition store's files are searched");
+  assert.ok(places.some(([label]) => label.startsWith("agent-state managed record")), "the managed lifetime was recorded, so it is searched");
   const found = holding(places, SENTINEL);
   assert.deepEqual(found, [], `no byte of the value outside the worker's env; found in: ${found.join(", ")}`);
 });
