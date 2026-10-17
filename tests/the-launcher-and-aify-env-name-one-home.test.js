@@ -40,7 +40,7 @@ function launcherHome(root, env) {
 . "$1/node_modules/aify-wrapper/bin/aify-lease.sh"
 aify_lease_pid() { printf 4242; }
 EPOCHREALTIME=1780000000.123456
-aify_lifetime_start "$1" home-proof claude resident
+aify_lifetime_start home-proof claude resident
 printf '%s\\n%s\\n' "$AIFY_RESIDENT_RECORD" "$AIFY_ENV_INSTANCE"`;
   const run = spawnSync(bash(), ["--noprofile", "--norc", "-c", script, "/fake/claude-aify", bridge.split(path.sep).join("/")],
     { env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, ...env }, encoding: "utf8", timeout: 20000 });

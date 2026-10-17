@@ -32,7 +32,9 @@ async function sentinel(t) {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const file = path.join(path.dirname(os.tmpdir()), `aify-registry-sentinel-${randomUUID()}.json`);
-  const text = JSON.stringify({ version: 1, services: { sentinel: { endpoint: `http://127.0.0.1:${server.address().port}` } } });
+  // The entry names its own heartbeat route: a service with no route and no plugin is sent nothing.
+  const text = JSON.stringify({ version: 1, services: { sentinel: { endpoint: `http://127.0.0.1:${server.address().port}`,
+    advertisement: { path: "/heartbeat" } } } });
   fs.writeFileSync(file, text);
   t.after(async () => { fs.rmSync(file, { force: true }); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); });
   assert.equal(inside(file, os.tmpdir()), false, "the sentinel must sit outside the test temp root");
