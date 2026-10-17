@@ -109,7 +109,7 @@ async function stopWork(port, workerId) {
       method: "DELETE",
       signal: AbortSignal.timeout(8000),
     });
-  } catch { /* nobody serves the port any more, so nobody holds the worker */ }
+  } catch { /* an attempt, not proof: a timeout or a 500 can leave the worker running, but a pid would be worse */ }
 }
 
 // -- the decision, without starting anything -------------------------------------------------------
