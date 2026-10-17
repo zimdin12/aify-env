@@ -20,6 +20,15 @@ const alive = (pid) => {
     return error.code === "EPERM";
   }
 };
+/**
+ * A kill that only records what it was asked to kill. A probe whose subject is not the kill takes this, so its own
+ * timer firing could never reach a real taskkill (comms-senior-dev, safety addendum on cc3999c).
+ */
+function recordingKill() {
+  const asked = [];
+  return { asked, kill: async (pid) => { asked.push(pid); } };
+}
+
 async function until(check, ms = 10_000) {
   for (let waited = 0; waited < ms; waited += 50) {
     if (check()) return true;
@@ -63,8 +72,10 @@ test("the client sees only the environment it was handed", async () => {
   const parent = { ...process.env, AIFY_TEST_SENTINEL: "sentinel-9d41" };
   const seen = async (configuration) => {
     const out = join(dir, `env-${Object.keys(configuration).length}.json`);
-    const result = await runChild({ nodePath: process.execPath, script, cwd: dir, env: childEnv(parent, { OUT_FILE: out, ...configuration }) });
+    const kills = recordingKill();
+    const result = await runChild({ nodePath: process.execPath, script, cwd: dir, env: childEnv(parent, { OUT_FILE: out, ...configuration }), kill: kills.kill });
     assert.equal(result.code, 0, result.error);
+    assert.deepEqual(kills.asked, [], "a client that exits by itself is killed by nothing");
     return readFileSync(out, "utf8");
   };
   const handed = await seen({ APG_DASHBOARD_PROJECT: "p1" });
@@ -105,11 +116,13 @@ test("a stop kills the client and everything it started, and is not read as its 
 test("a client that cannot be started ends the run with the reason, never hangs it", { timeout: 30_000 }, async () => {
   // The bug: a spawn that fails leaves the run waiting for a close that never comes, and every later pass behind it.
   const dir = scratch();
+  const kills = recordingKill();
   const result = await Promise.race([
-    runChild({ nodePath: join(dir, "no-such-node.exe"), script: join(dir, "x.mjs"), cwd: dir, env: childEnv(process.env, {}) }),
+    runChild({ nodePath: join(dir, "no-such-node.exe"), script: join(dir, "x.mjs"), cwd: dir, env: childEnv(process.env, {}), kill: kills.kill }),
     sleep(10_000).then(() => "hung"),
   ]);
   assert.notEqual(result, "hung");
+  assert.deepEqual(kills.asked, [], "a client that never started is killed by nothing");
   assert.equal(result.code, null);
   assert.match(result.error, /ENOENT/);
 });
@@ -124,6 +137,10 @@ test("taskkill is run by its absolute path, never by name", async () => {
   await killTree(4242, { platform: "win32", taskkill: taskkillPath({ SystemRoot: "C:\\Windows" }), run: (file, args, options, done) => { ran.push([file, ...args]); done(); } });
   assert.deepEqual(ran, [["C:\\Windows\\System32\\taskkill.exe", "/T", "/F", "/PID", "4242"]]);
   ran.length = 0;
-  await killTree(2 ** 30, { platform: "win32", taskkill: null, run: (file) => { ran.push(file); } });
+  // ⛔ The process signalling is a recording fake too: the default would send a real SIGKILL to -pid and pid, and only
+  // assume nothing on this host holds that number (comms-senior-dev, safety addendum on cc3999c).
+  const signalled = [];
+  await killTree(2 ** 30, { platform: "win32", taskkill: null, run: (file) => { ran.push(file); }, signalProcess: (target, name) => { signalled.push([target, name]); } });
   assert.deepEqual(ran, [], "with no SystemRoot nothing is run by name");
+  assert.deepEqual(signalled, [[-(2 ** 30), "SIGKILL"]], "only the supplied signal was used, and nothing native");
 });
