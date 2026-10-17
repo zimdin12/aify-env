@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { Runner, withoutPaneIdentity } from "../lib/runner.mjs";
+import { INHERITED_PANE_IDENTITY, Runner, withoutPaneIdentity } from "../lib/runner.mjs";
 
 const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
 const IDENTITY = { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", HERDR_TAB_ID: "w1:t1", HERDR_WORKSPACE_ID: "w1" };
@@ -71,4 +71,15 @@ test("NEGATIVE CONTROL: with nothing to remove, the environment is handed over u
   const given = { ...IDENTITY, PATH: "/bin" };
   assert.deepEqual(withoutPaneIdentity(given), { PATH: "/bin" });
   assert.equal(given.HERDR_PANE_ID, "w1:p1", "the caller's object was mutated");
+});
+
+test("the exported pane identity is exactly what a child's env loses, each name alone enough to clean it", () => {
+  // spawn-env refuses a contributed secret under these names because this function removes them (R1 on f219ae1), so
+  // the export must say what the function does: a name it removes and the list omits would reach the child absent,
+  // unrefused. The Herdr socket and an ordinary variable are the names it keeps.
+  const all = Object.fromEntries([...INHERITED_PANE_IDENTITY, "HERDR_SOCKET_PATH", "KEEP"].map((name) => [name, "v"]));
+  const cleaned = withoutPaneIdentity(all, {});
+  assert.deepEqual(Object.keys(all).filter((name) => !(name in cleaned)), [...INHERITED_PANE_IDENTITY]);
+  assert.deepEqual(Object.keys(cleaned), ["HERDR_SOCKET_PATH", "KEEP"]);
+  for (const name of INHERITED_PANE_IDENTITY) assert.deepEqual(withoutPaneIdentity({ [name]: "v", KEEP: "k" }, {}), { KEEP: "k" }, name);
 });

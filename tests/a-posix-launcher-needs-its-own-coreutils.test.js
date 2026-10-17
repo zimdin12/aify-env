@@ -25,7 +25,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { toolchainDirsFor, withToolchainOnPath } from "../lib/shell-toolchain.mjs";
+import { TOOLCHAIN_PATH_VARIABLE, toolchainDirsFor, withToolchainOnPath } from "../lib/shell-toolchain.mjs";
 
 const BASH = "C:" + String.fromCharCode(92) + "Program Files" + String.fromCharCode(92)
   + "Git" + String.fromCharCode(92) + "bin" + String.fromCharCode(92) + "bash.exe";
@@ -117,4 +117,13 @@ test("nothing to add means the env is returned UNTOUCHED", () => {
   // Linux nothing ever should.
   const env = { PATH: "/usr/bin" };
   assert.equal(withToolchainOnPath(env, "/usr/bin/bash", { platform: "linux" }), env);
+});
+
+test("the exported toolchain variable is the one the PATH rule writes, and every casing of it is replaced", () => {
+  // spawn-env refuses a contributed secret under this name because this rule rewrites it (R1 on f219ae1), so the
+  // export must name what the rule writes, and in any casing it removes.
+  const out = withToolchainOnPath({ Path: "C:/mine", KEEP: "k" }, "C:/Git/usr/bin/bash.exe", { platform: "win32", exists: () => true });
+  assert.deepEqual(Object.keys(out).filter((key) => key.toLowerCase() === TOOLCHAIN_PATH_VARIABLE.toLowerCase()), [TOOLCHAIN_PATH_VARIABLE]);
+  assert.notEqual(out[TOOLCHAIN_PATH_VARIABLE], "C:/mine", "rewritten, which is why a secret cannot ride under it");
+  assert.equal(out.KEEP, "k");
 });
