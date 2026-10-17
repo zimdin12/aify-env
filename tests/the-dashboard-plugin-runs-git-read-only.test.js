@@ -8,7 +8,7 @@ import { copyFileSync, linkSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { GitReader, READ_ONLY_VERBS, gitOnPath } from "../lib/plugins/aify-dashboard/git-reader.mjs";
+import { GitReader, READ_ONLY_VERBS, TREE_MAX_BYTES, TREE_TIMEOUT_MS, gitOnPath } from "../lib/plugins/aify-dashboard/git-reader.mjs";
 
 /** An execFile that records each call and answers when the test says so. */
 function recordingExecFile() {
@@ -59,7 +59,32 @@ test("a verb that writes is refused before any process starts", async () => {
     await assert.rejects(reader.run("C:/x", [verb]), /not a read-only verb/);
   }
   assert.equal(fake.calls.length, 0);
-  assert.deepEqual([...READ_ONLY_VERBS], ["rev-parse", "log", "merge-base"]);
+  assert.deepEqual([...READ_ONLY_VERBS], ["rev-parse", "log", "merge-base", "ls-tree"]);
+});
+
+test("a head's file list is read under its own limit and cap, as raw bytes, and only for a full commit id", async () => {
+  // The bug (B3, aify-dashboard docs/DESIGN-FILE-LIST.md): a tree read with the 30 s history limit and no cap, or
+  // decoded as UTF-8 here, which turns a path that is not UTF-8 into a name no file has.
+  const fake = recordingExecFile();
+  const reader = new GitReader({ execFile: fake.execFile, findGit: () => "C:/tools/git.exe" });
+  const places = { toplevel: "C:/w", gitDir: "C:/w/.git" };
+  const head = "a".repeat(40);
+  const reading = reader.trackedFiles(places, head);
+  await new Promise((resolve) => setImmediate(resolve));
+  const [call] = fake.calls;
+  assert.deepEqual(call.args, ["ls-tree", "-r", "-z", "--name-only", "--full-tree", head]);
+  assert.equal(call.options.env.GIT_DIR, "C:/w/.git", "read from the judged git directory");
+  assert.equal(call.options.timeout, TREE_TIMEOUT_MS);
+  assert.equal(TREE_TIMEOUT_MS < 30_000, true, "the tree read has a shorter limit than history");
+  assert.equal(call.options.maxBuffer, TREE_MAX_BYTES);
+  assert.equal(call.options.encoding, "buffer");
+  call.finish(null, Buffer.from([0x61, 0, 0xff, 0]));
+  const bytes = await reading;
+  assert.ok(Buffer.isBuffer(bytes) && bytes.equals(Buffer.from([0x61, 0, 0xff, 0])), "the bytes were not handed back as git printed them");
+
+  // The control: an id that is not a full commit id is refused before any process starts.
+  await assert.rejects(reader.trackedFiles(places, "--output=x"), /not a full commit id/);
+  assert.equal(fake.calls.length, 1);
 });
 
 test("one git process at a time, and a failed one does not stop the next", async () => {
