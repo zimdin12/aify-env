@@ -173,12 +173,14 @@ test("a client that closes soon after its kill answered is waited for, not repor
   assert.deepEqual(s.events, ["kill-called", "child-closed", "run-settled"]);
 });
 
-test("a taskkill that fails rejects, with its reason, and one that succeeds resolves", async () => {
-  // The bug (review of 17f6f48, S1-R3): the tree kill resolved from taskkill's callback whatever it carried, so a
-  // refused or failed taskkill reached the run as a tree confirmed ended.
-  const failing = (file, args, options, done) => done(Object.assign(new Error("taskkill exited 128"), { code: 128 }), "", "ERROR: refused");
-  await assert.rejects(killTree(4242, { platform: "win32", taskkill: "C:\\Windows\\System32\\taskkill.exe", run: failing }), /taskkill exited 128/);
-  await killTree(4242, { platform: "win32", taskkill: "C:\\Windows\\System32\\taskkill.exe", run: (file, args, options, done) => done(null, "", "") });
+test("a Windows tree kill that fails rejects, with its reason, and one that succeeds resolves", async () => {
+  // The bug (review of 17f6f48, S1-R3): the tree kill resolved whatever its tool said, so a refused or failed one
+  // reached the run as a tree confirmed ended. The tool is now the held kill; its outcome is passed on as it is.
+  const stillOurs = () => true;
+  await assert.rejects(killTree(4242, { platform: "win32", stillOurs, held: async () => { throw new Error("could not end 4242 (error 5)"); } }), /could not end 4242/);
+  await killTree(4242, { platform: "win32", stillOurs, held: async () => {} });
+  // A held kill that throws at once is a rejection too, never an escape.
+  await assert.rejects(killTree(4242, { platform: "win32", stillOurs, held: () => { throw new Error("no helper"); } }), /no helper/);
 });
 
 test("a signal that could not be sent rejects; a process already gone does not", async () => {

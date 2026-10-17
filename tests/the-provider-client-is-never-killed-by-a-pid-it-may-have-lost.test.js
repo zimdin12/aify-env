@@ -12,6 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 
+import { heldKill } from "../lib/plugins/aify-dashboard/held-kill.mjs";
 import { killTree, runChild } from "../lib/plugins/aify-dashboard/provider-child.mjs";
 
 function fakeChild() {
@@ -63,6 +64,63 @@ test("where only the client itself can be killed, it is killed through its own h
   await killTree(4242, { platform: "linux", own, signalProcess: (target, name) => { signalled.push(target); if (target < 0) throw refuse; } }).catch(() => {});
   assert.deepEqual(signalled, [-4242], "only the group was signalled by number");
   assert.deepEqual(handled, ["SIGKILL"], "the client itself was killed through its handle");
+});
+
+/**
+ * A recording kill helper: it says `held`, records the one line it is answered, and then ends as a real one would,
+ * `done` after a `go` and `released` otherwise. `beforeHeld` runs just before it says `held`.
+ */
+function recordingHelper(beforeHeld = () => {}) {
+  const answers = [];
+  const start = () => {
+    const helper = new EventEmitter();
+    helper.stdout = new EventEmitter();
+    helper.stderr = new EventEmitter();
+    helper.stdin = {
+      end(line = "") {
+        answers.push(line);
+        setImmediate(() => {
+          helper.stdout.emit("data", line === "go\n" ? "done 2\r\n" : "released\r\n");
+          helper.emit("close", line === "go\n" ? 0 : 4);
+        });
+      },
+    };
+    setImmediate(() => { beforeHeld(); helper.stdout.emit("data", "held 133000000000000000\r\n"); });
+    return helper;
+  };
+  return { answers, start };
+}
+
+test("the Windows kill answers go only while the client's exit is unseen when its helper holds it", async () => {
+  // comms-senior-dev, REVISE of 33689cd: the exit check covered the moment of the call, and taskkill looked the pid up
+  // later. The decision is now read when the helper says it holds the process, and only then.
+  let exited = false;
+  const late = recordingHelper(() => { exited = true; });
+  await assert.rejects(heldKill(4242, { stillOurs: () => !exited, start: late.start, powershell: "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" }), /exited before its process was held, so nothing was killed by pid/);
+  assert.deepEqual(late.answers, ["no\n"], "an exit seen before held is answered no");
+  // Control: the same helper with the client still running is answered go, and the kill resolves.
+  const live = recordingHelper();
+  await heldKill(4242, { stillOurs: () => true, start: live.start, powershell: "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" });
+  assert.deepEqual(live.answers, ["go\n"]);
+});
+
+test("runChild hands the kill the client's own handle and a live view of whether it has exited", async () => {
+  // comms-senior-dev, on 33689cd: removing `{ own: child }` at the call site turned no test red. The second argument
+  // is recorded here, and `stillOurs` is read after the exit to show it is live, not a copy taken at the call.
+  const child = fakeChild();
+  const stop = new AbortController();
+  const asked = [];
+  const run = runChild({ nodePath: "C:/node.exe", script: "C:/client.mjs", cwd: "C:/w", env: {}, signal: stop.signal, killWaitMs: 50, start: () => child, kill: async (pid, options) => { asked.push({ pid, options }); } });
+  child.emit("spawn");
+  stop.abort();
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].pid, 4242);
+  assert.equal(asked[0].options?.own, child, "the client's own ChildProcess");
+  assert.equal(asked[0].options?.stillOurs?.(), true, "still ours before any exit");
+  child.emit("exit", null, "SIGKILL");
+  assert.equal(asked[0].options.stillOurs(), false, "and not once the exit is seen");
+  child.emit("close", null, "SIGKILL");
+  await run;
 });
 
 test("control: a stop while the client still runs kills its pid", async () => {

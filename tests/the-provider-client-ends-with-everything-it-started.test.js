@@ -8,7 +8,8 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { childEnv, killTree, runChild, taskkillPath } from "../lib/plugins/aify-dashboard/provider-child.mjs";
+import { heldKill, powershellPath } from "../lib/plugins/aify-dashboard/held-kill.mjs";
+import { childEnv, killTree, runChild } from "../lib/plugins/aify-dashboard/provider-child.mjs";
 
 const scratch = () => mkdtempSync(join(tmpdir(), "aify-provider-child-"));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -127,20 +128,26 @@ test("a client that cannot be started ends the run with the reason, never hangs 
   assert.match(result.error, /ENOENT/);
 });
 
-test("taskkill is run by its absolute path, never by name", async () => {
-  // The bug: a bare "taskkill" is looked up in the working directory before PATH on Windows, the way a planted
-  // git.exe once ran inside this daemon.
-  assert.equal(taskkillPath({ SystemRoot: "C:\\Windows" }), "C:\\Windows\\System32\\taskkill.exe");
-  assert.equal(taskkillPath({}), null);
-  assert.equal(taskkillPath({ SystemRoot: "Windows" }), null, "a relative root is no root");
-  const ran = [];
-  await killTree(4242, { platform: "win32", taskkill: taskkillPath({ SystemRoot: "C:\\Windows" }), run: (file, args, options, done) => { ran.push([file, ...args]); done(); } });
-  assert.deepEqual(ran, [["C:\\Windows\\System32\\taskkill.exe", "/T", "/F", "/PID", "4242"]]);
-  ran.length = 0;
-  // ⛔ The process signalling is a recording fake too: the default would send a real SIGKILL to -pid and pid, and only
-  // assume nothing on this host holds that number (comms-senior-dev, safety addendum on cc3999c).
-  const signalled = [];
-  await killTree(2 ** 30, { platform: "win32", taskkill: null, run: (file) => { ran.push(file); }, signalProcess: (target, name) => { signalled.push([target, name]); } });
-  assert.deepEqual(ran, [], "with no SystemRoot nothing is run by name");
-  assert.deepEqual(signalled, [[-(2 ** 30), "SIGKILL"]], "only the supplied signal was used, and nothing native");
+test("the kill helper is run by its absolute path, never by name", async () => {
+  // The bug: a bare name is looked up in the working directory before PATH on Windows, the way a planted git.exe once
+  // ran inside this daemon. The helper is PowerShell, found from SystemRoot, or not at all.
+  assert.equal(powershellPath({ SystemRoot: "C:\\Windows" }), "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+  assert.equal(powershellPath({}), null);
+  assert.equal(powershellPath({ SystemRoot: "Windows" }), null, "a relative root is no root");
+  const started = [];
+  const recording = (file) => { started.push(file); throw new Error("not started in this test"); };
+  await assert.rejects(heldKill(4242, { stillOurs: () => true, start: recording, powershell: null }), /no SystemRoot/);
+  assert.deepEqual(started, [], "with no SystemRoot nothing is run by name");
+});
+
+test("on Windows, with nothing to tell whether the pid is still the client's, nothing is killed by it", async () => {
+  // ⛔ Fails closed: no `stillOurs`, no held kill and no tree. Only the client's own handle is used, and the tree is
+  // said not to be confirmed ended. Recording fakes only: nothing native is sent.
+  const held = [];
+  const own = { killed: [], kill(name) { this.killed.push(name); return true; } };
+  await assert.rejects(killTree(4242, { platform: "win32", own, held: async (pid) => { held.push(pid); } }), /its tree was not walked/);
+  assert.deepEqual(held, [], "no held kill without stillOurs");
+  assert.deepEqual(own.killed, ["SIGKILL"], "the client itself, through its own handle");
+  await assert.rejects(killTree(4242, { platform: "win32", held: async (pid) => { held.push(pid); } }), /nothing was killed by it/);
+  assert.deepEqual(held, []);
 });
