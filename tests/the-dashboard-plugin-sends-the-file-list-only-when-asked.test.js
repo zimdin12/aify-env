@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile as nodeExecFile, execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -171,6 +171,14 @@ test("git that cannot list a head is one problem line and is not run again for t
   dashboard.answers.wanted.push(true);
   const watcher = await s.watcher(dashboard);
   await watcher.tick();
+  s.clock.at += TICK_MS;
+  await watcher.tick();
+  // The branch's ref file touched, at the same commit: the fingerprint moves, so the folder is looked at in full again,
+  // and HEAD has not moved, so nothing asks for the list afresh. That look is the one that must not run git ls-tree
+  // again. (`git update-ref` to the same value leaves the file alone, so the time is set directly.)
+  const ref = join(s.watched, ".git", git(s.watched, "symbolic-ref", "HEAD"));
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(ref, later, later);
   s.clock.at += TICK_MS;
   await watcher.tick();
   assert.equal(calls, 1, "the failed tree read was run again for the same head");
