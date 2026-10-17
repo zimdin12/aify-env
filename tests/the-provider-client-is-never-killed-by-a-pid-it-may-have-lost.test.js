@@ -123,6 +123,26 @@ test("runChild hands the kill the client's own handle and a live view of whether
   await run;
 });
 
+test("on POSIX the kill waits for the check phase, and a client reaped in the meantime is killed by nothing", async () => {
+  // comms-senior-dev, on 33689cd: libuv reaps every exited child before it runs any exit callback, so a stop made from
+  // an earlier child's exit can find this client reaped with `exit` not yet emitted. The kill is scheduled with
+  // setImmediate and `exited` read again there; here the exit lands between the stop and that immediate.
+  const r = running({ platform: "linux" });
+  r.stop.abort();
+  assert.deepEqual(r.kills, [], "nothing is killed inside the stack that stopped the run");
+  r.child.emit("exit", 0, null);
+  const result = await r.run;
+  assert.deepEqual(r.kills, [], "nor once the exit came before the immediate");
+  assert.match(result.unconfirmed, /had exited before it was killed/);
+  // Control: the same stop with no exit before the immediate kills the client's pid there.
+  const live = running({ platform: "linux" });
+  live.stop.abort();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(live.kills, [4242]);
+  live.child.emit("close", null, "SIGKILL");
+  await live.run;
+});
+
 test("control: a stop while the client still runs kills its pid", async () => {
   // The same fake and the same stop, with no exit first: the kill this file says is withheld is still made here.
   const r = running();
