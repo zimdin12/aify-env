@@ -35,13 +35,18 @@ async function until(check, ms = 10_000) {
  * with the child whatever kills the child (measured: a kill without taskkill's /T took it down too), so a test of that
  * kind cannot tell a tree kill from a plain one. A detached one leaves that job, and only a kill that walks the tree
  * reaches it.
+
+ *
+ * ⛔ It ends itself after 60 s, and nothing here kills it by pid. A cleanup that killed `pids.grandchild` ran after the
+ * test had confirmed that pid gone, when Windows may already have given it to any process on this host (comms-tech-lead,
+ * on cc3999c: a file of this suite died with exit 1 and nothing said, which is how such a kill ends a process).
  */
 function hangingClient(dir) {
   const script = join(dir, "client.mjs");
   writeFileSync(script, [
     'import { spawn } from "node:child_process";',
     'import { writeFileSync } from "node:fs";',
-    'const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: true });',
+    'const grandchild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", detached: true });',
     'writeFileSync(process.env.PIDS_FILE, JSON.stringify({ child: process.pid, grandchild: grandchild.pid }));',
     "setInterval(() => {}, 1000);",
     "",
@@ -68,15 +73,13 @@ test("the client sees only the environment it was handed", async () => {
   assert.match(await seen({ APG_DASHBOARD_PROJECT: "p1", PASSED_ON_PURPOSE: "sentinel-9d41" }), /sentinel-9d41/, "positive control: the probe can see it");
 });
 
-test("a client past its time is killed with everything it started", { timeout: 30_000 }, async (t) => {
+test("a client past its time is killed with everything it started", { timeout: 30_000 }, async () => {
   // The bug: only the node process killed, leaving the git (here, a grandchild) it started running for ever.
   const dir = scratch();
   const pidsFile = join(dir, "pids.json");
   const running = runChild({ nodePath: process.execPath, script: hangingClient(dir), cwd: dir, env: childEnv(process.env, { PIDS_FILE: pidsFile }), timeoutMs: 3_000 });
   assert.ok(await until(() => existsSync(pidsFile)), "the client started its grandchild");
   const pids = JSON.parse(readFileSync(pidsFile, "utf8"));
-  // A grandchild a failing run leaves behind is ended here, not left running on the host.
-  t.after(() => { try { process.kill(pids.grandchild); } catch { /* already gone */ } });
   assert.ok(alive(pids.grandchild), "positive control: the grandchild was running");
   const result = await running;
   assert.equal(result.timedOut, true);
@@ -84,15 +87,13 @@ test("a client past its time is killed with everything it started", { timeout: 3
   assert.ok(!alive(pids.child));
 });
 
-test("a stop kills the client and everything it started, and is not read as its exit", { timeout: 30_000 }, async (t) => {
+test("a stop kills the client and everything it started, and is not read as its exit", { timeout: 30_000 }, async () => {
   const dir = scratch();
   const pidsFile = join(dir, "pids.json");
   const stop = new AbortController();
   const running = runChild({ nodePath: process.execPath, script: hangingClient(dir), cwd: dir, env: childEnv(process.env, { PIDS_FILE: pidsFile }), signal: stop.signal });
   assert.ok(await until(() => existsSync(pidsFile)));
   const pids = JSON.parse(readFileSync(pidsFile, "utf8"));
-  // A grandchild a failing run leaves behind is ended here, not left running on the host.
-  t.after(() => { try { process.kill(pids.grandchild); } catch { /* already gone */ } });
   assert.ok(alive(pids.grandchild));
   stop.abort();
   const result = await running;
