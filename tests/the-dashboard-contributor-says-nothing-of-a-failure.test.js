@@ -36,7 +36,9 @@ async function dashboardPlugin(t, answer, { fetchKey = async () => "fetch-key-fo
   const runner = { starts: [], async start(spec) { this.starts.push(spec); return { id: "proc-1", pid: 1 }; }, subscribe() { return () => {}; }, list() { return []; } };
   const host = new PluginHost({ processes: new PluginProcesses(runner),
     credential: async (service, field) => (field === "secretsCredentialRef" ? fetchKey() : "api-key-for-every-agent-0123456789") });
-  const plugin = createDashboardPlugin({ endpoint: "http://dashboard.invalid", dedicated: true, service: { name: "aify-dashboard" } }, { fetch });
+  // On 0.9 a yield is asked per tick through `servedElsewhere` (the start-time `dedicated` flag is gone): yielding, so
+  // the only requests are the contributor's.
+  const plugin = createDashboardPlugin({ endpoint: "http://dashboard.invalid", servedElsewhere: async () => true, service: { name: "aify-dashboard" } }, { fetch });
   const registry = new ServicePlugins();
   t.after(() => registry.stopAll());
   await registry.add(plugin, host);
@@ -267,11 +269,18 @@ for (const [what, target] of [["a wrong name", { name: "OTHER", value: S }], ["a
 }
 
 test("an ask whose host signal is already aborted makes no request at all", async (t) => {
-  // The check before each request: without it the request is made and fails, which the outcome alone cannot show.
-  const { registry, asked } = await dashboardPlugin(t, valid);
+  // The check before each request: without it the request is made and fails, which the outcome alone cannot show. The
+  // client refuses to send under an aborted signal too, so no request is the same either way; what differs is that
+  // the fetch key is read from the store for an ask already called off. That read is what this counts.
+  let keyReads = 0;
+  const { registry, asked } = await dashboardPlugin(t, valid, { fetchKey: async () => { keyReads += 1; return "fetch-key-for-the-secrets-route-01"; } });
   const [offered] = registry.capabilities("spawnEnv");
   const aborted = new AbortController();
   aborted.abort();
   assert.deepEqual(await offered.contribute({ definition: LEAD, signal: aborted.signal }), { refused: { reason: "unreachable", variable: "OPENAI_API_KEY" } });
   assert.equal(asked.length, 0);
+  assert.equal(keyReads, 0, "the fetch key is not read for an ask already called off");
+  // THE CONTROL, in the same run: an ask that is not called off reads the key, so the count can say yes.
+  await offered.contribute({ definition: LEAD, signal: new AbortController().signal });
+  assert.ok(keyReads > 0, "a live ask reads the fetch key");
 });
