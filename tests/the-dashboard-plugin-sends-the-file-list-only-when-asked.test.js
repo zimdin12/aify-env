@@ -297,7 +297,7 @@ test("a list over the ceiling is withheld with its count, and an empty commit st
   // paged, and the dashboard refuses an over-size page whole, so the list is withheld as unpageable rather than sent.
   const longName = Buffer.from(`ok.txt\0${"n".repeat(525_000)}\0`);
   const before = sent.length;
-  assert.deepEqual(await sender(longName).send({ path: "C:/p", places: {}, head }), { kind: "withheld", files: 2 });
+  assert.deepEqual(await sender(longName).send({ path: "C:/p", places: {}, head }), { kind: "withheld", files: 2 }, "a page over the bound was sent");
   assert.deepEqual(sent.slice(before).map((body) => body.withheld), [{ reason: "unpageable", fileCount: 2 }], "a page over the bound was sent");
   await sender(Buffer.alloc(0)).send({ path: "C:/p", places: {}, head });
   const empty = sent[sent.length - 1];
