@@ -232,11 +232,23 @@ test("a git failure's problem line stays while its latch holds, through a re-syn
   assert.equal(watcher.state().problems.filter((line) => /were not sent: git ls-tree timed out/.test(line)).length, 1, "the re-sync hid the failure");
 
   // The control: a new head is listed, and the line goes.
+  const failed = git(s.watched, "rev-parse", "HEAD");
   git(s.watched, "commit", "-q", "--allow-empty", "-m", "second");
   s.clock.at += TICK_MS;
   await watcher.tick();
   assert.equal(calls, 2);
   assert.equal(lists(dashboard.requests).length, 1);
+  assert.deepEqual(watcher.state().problems, []);
+
+  // Back to the head that failed, and the dashboard asks for it (comms-senior-dev, R4 on adf5456): the latch went with
+  // its line, so HEAD having moved means git is run for it again, never a silent skip with health reading clean.
+  dashboard.answers.wanted.push(true);
+  git(s.watched, "reset", "-q", "--soft", failed);
+  s.clock.at += TICK_MS;
+  await watcher.tick();
+  assert.equal(heads(dashboard.requests).at(-1).body.head, failed, "the return was not reported, so it cannot test the latch");
+  assert.equal(calls, 3, "the head that failed before was skipped on its return, with no problem line to say so");
+  assert.equal(lists(dashboard.requests).at(-1).body.head, failed);
   assert.deepEqual(watcher.state().problems, []);
 });
 
