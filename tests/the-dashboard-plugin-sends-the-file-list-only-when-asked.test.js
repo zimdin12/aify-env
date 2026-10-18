@@ -320,3 +320,29 @@ test("a list over the ceiling is withheld with its count, and an empty commit st
   const stale = new FileListSender({ api: staleApi, git: { trackedFiles: async () => Buffer.from("a\0") }, machineId: MACHINE, reporter: "r" });
   assert.deepEqual(await stale.send({ path: "C:/p", places: {}, head }), { kind: "stale" });
 });
+
+test("a list the dashboard holds to its raw-byte cap is withheld as too large, and any other refusal still throws", async () => {
+  // Bug this catches (comms-tech-lead's rule 1 of the receiver's allowance, 2026-10-18): a list refused part-way with
+  // 413 list_too_large, thrown, and so tried again on every tick for ever, when it is to be recorded as withheld.
+  const head = "0".repeat(40);
+  const bytes = Buffer.from(`${Array.from({ length: MAX_PAGE_FILES + 1 }, (_, i) => `f${i}`).join("\0")}\0`);
+  const refusing = (code) => {
+    const sent = [];
+    const api = {
+      sendFileList: async (body) => {
+        sent.push(body);
+        if (body.page === 1) throw new DashboardApiError("refused", { status: 413, code, kind: "answered" });
+        return { ok: true };
+      },
+    };
+    return { sent, sender: new FileListSender({ api, git: { trackedFiles: async () => bytes }, machineId: MACHINE, reporter: "r" }) };
+  };
+  const capped = refusing("list_too_large");
+  assert.deepEqual(await capped.sender.send({ path: "C:/p", places: {}, head }), { kind: "withheld", files: MAX_PAGE_FILES + 1 });
+  assert.deepEqual(capped.sent.map((body) => body.withheld ?? body.page), [0, 1, { reason: "too_large", fileCount: MAX_PAGE_FILES + 1 }]);
+
+  // The control: a page refused for its own size is a reporter bug, and is not turned into a withheld list.
+  const oversize = refusing("page_too_large");
+  await assert.rejects(oversize.sender.send({ path: "C:/p", places: {}, head }), (error) => error.code === "page_too_large");
+  assert.equal(oversize.sent.length, 2, "a refusal other than the cap sent something after it");
+});
