@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DashboardApi, DashboardApiError } from "../lib/plugins/aify-dashboard/dashboard-api.mjs";
-import { decodeTree, FileListSender, MAX_LIST_FILES, MAX_PAGE_CHARS, MAX_PAGE_FILES, pagesOf } from "../lib/plugins/aify-dashboard/file-list.mjs";
+import { decodeTree, FileListSender, MAX_LIST_FILES, MAX_PAGE_BYTES, MAX_PAGE_FILES, pagesOf } from "../lib/plugins/aify-dashboard/file-list.mjs";
 import { GitReader, GitReadError } from "../lib/plugins/aify-dashboard/git-reader.mjs";
 import { HeadWatcher, TICK_MS } from "../lib/plugins/aify-dashboard/head-watcher.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
@@ -194,12 +194,20 @@ test("a page closes at the count bound or the size bound, whichever comes first,
   const long = Array.from({ length: 600 }, (_, i) => `${"d".repeat(3_000)}/${i}.ts`);
   const pages = pagesOf(long);
   assert.ok(pages.length > 1, "long paths were not paged by size");
-  for (const page of pages) assert.ok(JSON.stringify(page).length <= MAX_PAGE_CHARS, `a page of ${JSON.stringify(page).length} characters`);
+  const bytesOf = (page) => Buffer.byteLength(JSON.stringify(page), "utf8");
+  for (const page of pages) assert.ok(bytesOf(page) <= MAX_PAGE_BYTES, `a page of ${bytesOf(page)} bytes`);
   assert.deepEqual(pages.flat(), long);
-  // At the edge: a page exactly at the bound is kept whole, one character more closes it.
-  const exact = ["x".repeat(MAX_PAGE_CHARS - 4)];
-  assert.equal(JSON.stringify(exact).length, MAX_PAGE_CHARS);
+  // At the edge: a page exactly at the bound is kept whole, one byte more closes it.
+  const exact = ["x".repeat(MAX_PAGE_BYTES - 4)];
+  assert.equal(bytesOf(exact), MAX_PAGE_BYTES);
   assert.deepEqual(pagesOf([...exact, "y"]).map((page) => page.length), [1, 1]);
+  // Bytes, not characters (dashboard-senior-dev, ea19107 finding 2): three-byte characters fill a page three times as
+  // fast, and a page measured in characters would be refused by the dashboard whole.
+  const euros = Array.from({ length: 100 }, (_, i) => `${"€".repeat(2_000)}/${i}.ts`);
+  assert.ok(JSON.stringify(euros).length < MAX_PAGE_BYTES, "the fixture fits in characters, so it cannot tell bytes from characters");
+  const euroPages = pagesOf(euros);
+  assert.ok(euroPages.length > 1, "a page over the bound in bytes was kept whole");
+  for (const page of euroPages) assert.ok(bytesOf(page) <= MAX_PAGE_BYTES, `a page of ${bytesOf(page)} bytes`);
 });
 
 test("a path that is not UTF-8 is counted, never sent under another name", () => {
