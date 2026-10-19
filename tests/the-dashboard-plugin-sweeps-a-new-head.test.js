@@ -458,3 +458,53 @@ test("a bug the client says it has (exit 1) stops that head only, and a new head
   assert.equal(s.runs.length, 2);
   assert.deepEqual(s.runner.state().problems, []);
 });
+
+test("only refusals in a row count: another outcome between two of them starts the count again", async () => {
+  // The bug (comms-senior-dev, on 872f4e6): the count was kept across other outcomes at one head, so 2, 4, 2, 4, 2
+  // stopped the head with only one refusal in a row at the end.
+  const s = setUp({ exits: [{ code: 2 }, { code: 4 }, { code: 2 }, { code: 5 }, { code: 2 }, { code: 2 }, { code: 2 }] });
+  for (let i = 0; i < 6; i += 1) {
+    await s.runner.pass();
+    s.at += DIRTY_WAIT_MAX_MS;
+  }
+  assert.equal(s.runs.length, 6);
+  assert.doesNotMatch(s.problems(), /refused 3 times in a row/, "2, 4, 2, 5, 2, 2 is two in a row");
+  await s.runner.pass();
+  assert.equal(s.runs.length, 7);
+  assert.match(s.problems(), /refused 3 times in a row at 1{40}/, "and the third in a row stops it");
+});
+
+test("a dashboard that answers again clears its row, even when the answer leaves nothing to sweep", async () => {
+  // The bug (comms-senior-dev, on 872f4e6): after the wait reached its cap, an answered watch-set read with nothing in
+  // it settled the head and started no client, so "tried again every 16 minutes" stayed up with no retry behind it.
+  const s = setUp({ exits: Array.from({ length: 5 }, () => ({ code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" })) });
+  for (let i = 0; i < 5; i += 1) {
+    await s.runner.pass();
+    s.at += DIRTY_WAIT_MAX_MS;
+  }
+  assert.match(s.problems(), /has not answered the sweep client 5 times in a row/);
+  s.items = [];
+  await s.runner.pass();
+  assert.equal(s.runs.length, 5, "nothing to sweep, so no client");
+  assert.deepEqual(s.runner.state().problems, [], "the dashboard answered, so the row is gone");
+});
+
+test("only an outcome that carries the dashboard's answer ends a wait for it: a dirty tree does not, a refusal does", async () => {
+  // A dirty tree (4) is decided before the client asks the dashboard anything, so it says nothing about whether the
+  // dashboard is up; a refusal (6) or a re-read (2) is the dashboard answering.
+  const down = { code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" };
+  const s = setUp({ exits: [down, down, down, down, down, { code: 4 }, { code: 6, error: "REFUSED 401 unauthenticated: no\n" }] });
+  for (let i = 0; i < 5; i += 1) {
+    await s.runner.pass();
+    s.at += DIRTY_WAIT_MAX_MS;
+  }
+  assert.match(s.problems(), /has not answered the sweep client 5 times in a row/);
+  await s.runner.pass();
+  assert.equal(s.runs.length, 6);
+  assert.match(s.problems(), /has not answered the sweep client 5 times in a row/, "a dirty tree asked the dashboard nothing");
+  s.at += DIRTY_WAIT_MAX_MS;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 7);
+  assert.doesNotMatch(s.problems(), /has not answered/, "a refusal is an answer");
+  assert.match(s.problems(), /was refused at 1{40} \(REFUSED 401 unauthenticated: no\)/);
+});
