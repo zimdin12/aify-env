@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
+import { CleanupWarnings } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
 import { DIRTY_WAIT_MAX_MS, SWEEP_SCRIPT, SweepRunner, sweepOutcomeOf } from "../lib/plugins/aify-dashboard/sweep-runner.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
 
@@ -41,12 +42,14 @@ function setUp(overrides = {}) {
     ...overrides,
   };
   s.runner = new SweepRunner({
-    api: {
+    // `api` replaces the stand-in with a real client; `cleanupWarnings` shares one store, as the plugin does.
+    api: s.api ?? {
       watchSet: async (hostKey, projectId) => {
         s.asked.push(projectId);
         return s.answer === undefined ? { watchRevision: "r1", items: s.items } : s.answer;
       },
     },
+    ...(s.cleanupWarnings ? { cleanupWarnings: s.cleanupWarnings } : {}),
     credential: async () => s.key,
     folders: () => s.folders,
     watchRoots: async () => ({ roots: s.roots, problems: [] }),
@@ -114,9 +117,12 @@ test("the client is handed no reporter name, so a restarted aify-env continues t
 });
 
 test("exit codes mean what the client's owner said: 0 and 3 settle the head, 4 waits, 2 runs again, anything else is a bug", () => {
+  // The codes are aify-project-graph 5d693d63's (scripts/lib/sweep-outcome.mjs EXIT), split by graph-tech-lead after a
+  // closed port was measured exiting 1 and a wrong key exiting 2.
   const rows = [
-    [{ code: 0 }, "swept"], [{ code: 3 }, "swept"], [{ code: 4 }, "dirty"], [{ code: 2 }, "again"], [{ code: 1 }, "bug"],
-    [{ code: 5 }, "bug"], [{ code: null, signal: "SIGKILL" }, "bug"], [{ code: null, timedOut: true }, "retry"],
+    [{ code: 0 }, "swept"], [{ code: 3 }, "swept"], [{ code: 4 }, "dirty"], [{ code: 2 }, "again"], [{ code: 5 }, "unavailable"],
+    [{ code: 6 }, "refused"], [{ code: 1 }, "failed"], [{ code: 7 }, "bug"], [{ code: 255 }, "bug"],
+    [{ code: null, signal: "SIGKILL" }, "bug"], [{ code: null, timedOut: true }, "retry"],
   ];
   for (const [result, outcome] of rows) assert.equal(sweepOutcomeOf({ timedOut: false, ...result }), outcome, JSON.stringify(result));
 });
@@ -191,12 +197,13 @@ test("refusals stop one head, not the folder: a new head is swept with the confi
 });
 
 test("a bug stops the folder with a row, a stale sweep settles the head, and the key never reaches a row", async () => {
-  const b = setUp({ exits: [{ code: 1, error: `POST refused for x-api-key ${KEY}` }] });
+  // An exit the client does not use is the fail-closed case: the folder, every head, until the configuration changes.
+  const b = setUp({ exits: [{ code: 7, error: `POST refused for x-api-key ${KEY}` }] });
   await b.runner.pass();
   b.folders[0].head = H2;
   await b.runner.pass();
   assert.equal(b.runs.length, 1, "a bug is not run again, even for a new head");
-  assert.match(b.problems(), /project p1: the sweep client stopped with exit 1 \(a bug\).*POST refused for x-api-key <the dashboard key>/);
+  assert.match(b.problems(), /project p1: the sweep client stopped with exit 7 \(a bug\).*POST refused for x-api-key <the dashboard key>/);
   assert.ok(!b.problems().includes(KEY));
 
   const stale = setUp({ exits: [{ code: 3 }] });
@@ -303,4 +310,151 @@ test("through the plugin: a watched folder's head is swept after the provider's 
   const after = runs.length;
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(runs.length, after, "no pass after stop");
+});
+
+test("a sweep client whose kill is not confirmed is said, through a later success and beside the queue client's row", async () => {
+  // The bug (comms-senior-dev, R1 on 4ae0d24): the sweep never read `unconfirmed`, so a sweep client killed at its
+  // time limit or at a stop, with its tree not confirmed ended, left no row, and the doctor's plugin-problems check
+  // passed with its processes possibly still running.
+  const shared = new CleanupWarnings();
+  shared.note("http://127.0.0.1:9", "p1", "project p1: the provider client serving http://127.0.0.1:9 was killed, its own row");
+  const s = setUp({ cleanupWarnings: shared, exits: [{ code: null, timedOut: true, unconfirmed: `taskkill said no for ${KEY}` }, {}] });
+  await s.runner.pass();
+  await s.runner.pass();
+  assert.equal(s.runs.length, 2, "a timeout is still tried again, and the second run succeeded");
+  assert.match(s.problems(), /project p1: the sweep client serving http:\/\/127\.0\.0\.1:9 was killed when it ran past its time, and taskkill said no for <the dashboard key>: its processes may still be running/);
+  assert.match(s.problems(), /the provider client serving .* its own row/, "the queue client's row for the same project is kept too");
+  assert.ok(!s.problems().includes(KEY));
+
+  const stopped = setUp({ exits: [{ code: null, signal: "SIGKILL", stopped: true, unconfirmed: "the handle was gone" }] });
+  await stopped.runner.pass();
+  assert.match(stopped.problems(), /the sweep client serving .* was killed when it was stopped, and the handle was gone/);
+
+  const confirmed = setUp({ exits: [{ code: null, timedOut: true }] });
+  await confirmed.runner.pass();
+  assert.deepEqual(confirmed.runner.state().problems, [], "a kill that was confirmed leaves no row");
+});
+
+test("a refusal that echoes the key back is said without it, from the watch-set read to the plugin's state", async () => {
+  // The bug (comms-senior-dev, R2 on 4ae0d24): DashboardApi put the dashboard's `error` text into its message as it
+  // came, the sweep kept that message as a row, and the plugin's state hands rows to core health and the doctor. A
+  // refusal quoting the key it was sent would carry it there.
+  const { DashboardApi } = await import("../lib/plugins/aify-dashboard/dashboard-api.mjs");
+  const said = { error: `x-api-key ${KEY} is not a key this dashboard holds` };
+  const api = new DashboardApi({ endpoint: "http://127.0.0.1:9", credential: async () => KEY, fetch: async () => Response.json(said, { status: 401 }) });
+  const s = setUp({ api });
+  await s.runner.pass();
+  assert.equal(s.runs.length, 0);
+  assert.ok(!s.problems().includes(KEY), s.problems());
+  assert.match(s.problems(), /project p1: the dashboard's watch set was not read.*401: x-api-key <the dashboard key> is not a key/);
+  // Control: text with no key in it is kept as it was said.
+  said.error = "this route needs agent authentication";
+  const plain = setUp({ api });
+  await plain.runner.pass();
+  assert.match(plain.problems(), /401: this route needs agent authentication/);
+});
+
+test("through the plugin: a sweep kill not confirmed is still said after a yield, a stop and a rebuilt plugin", async (t) => {
+  // The bug (comms-senior-dev, R1 on 4ae0d24): the plugin's one store of kills not confirmed was handed only to the
+  // queue client, and a yielding plugin reports only that store, so a sweep's row vanished on the first yield.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-sweep-kill-")));
+  const checkout = join(root, "apg");
+  mkdirSync(join(checkout, "scripts"), { recursive: true });
+  writeFileSync(join(checkout, SWEEP_SCRIPT), "process.exit(0);\n");
+  const proj = join(root, "proj").replace(/\\/g, "/");
+  mkdirSync(proj);
+  const { execFileSync } = await import("node:child_process");
+  execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "init", "-q"], { cwd: proj });
+  execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "p"], { cwd: proj });
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: proj, encoding: "utf8" }).trim();
+  const marker = `sweep-tree-not-confirmed-${Date.now()}`;
+  const fetch = async (url) => {
+    const at = String(url);
+    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p-kill", name: "n", root: { fsNamespace: "windows", path: proj } }] });
+    if (at.endsWith("/host/h/provider/pending")) return Response.json({ hostKey: "h", projects: [] });
+    if (at.endsWith("/host/h/projects/p-kill/watch-set")) return Response.json({ watchRevision: "r1", items: [{ watchId: "w1" }] });
+    if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: head, cursorRevision: 1 });
+    return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
+  };
+  const runs = [];
+  const runChild = async (args) => { runs.push(args); return { code: null, signal: null, timedOut: true, stopped: false, error: "", unconfirmed: marker }; };
+  let other = false;
+  const make = () => createDashboardPlugin({
+    name: "aify-dashboard", endpoint: "http://127.0.0.1:9", service: { name: "aify-dashboard", endpoint: "http://127.0.0.1:9" }, machineId: "win32:h",
+    servedElsewhere: async () => other,
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
+  }, { fetch, runChild, runEveryMs: 25, tickMs: 25 });
+  const rows = (plugin) => plugin.state().problems.join("\n");
+  const plugin = make();
+  t.after(() => plugin.stop());
+  await plugin.start({ credential: async () => KEY });
+  await waitFor(() => rows(plugin).includes(marker));
+  assert.match(rows(plugin), new RegExp(`the sweep client serving .* was killed when it ran past its time, and ${marker}`));
+  assert.equal(plugin.state().problems.filter((row) => row.includes(marker)).length, 1, "said once, though both runners report the one store");
+  other = true;
+  await waitFor(() => plugin.state().phase === "declined");
+  assert.equal(plugin.state().phase, "declined");
+  assert.ok(rows(plugin).includes(marker), "said while yielding");
+  await plugin.stop();
+  assert.ok(rows(plugin).includes(marker), "said once stopped");
+  const rebuilt = make();
+  t.after(() => rebuilt.stop());
+  assert.ok(rows(rebuilt).includes(marker), "said by a plugin built again in the same process");
+  assert.ok(runs.length >= 1);
+});
+
+test("a dashboard that does not answer is waited out on any head, never a stop, and said once the wait reaches its cap", async () => {
+  // The bug (graph-tech-lead, measured against a closed port): a dashboard restart exited 1 and stopped sweeping that
+  // folder until aify-env restarted. Exit 5 is "no answer, or a 5xx or 429": nothing about the sweep was judged.
+  const line = "UNAVAILABLE no answer: ECONNREFUSED";
+  const s = setUp({ exits: Array.from({ length: 8 }, () => ({ code: 5, error: `reserving a sweep\n${line}\n` })) });
+  await s.runner.pass();
+  assert.equal(s.runs.length, 1);
+  s.folders[0].head = H2;
+  s.at += MINUTE / 2;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 1, "a new head does not cut the wait short: the dashboard is what is down");
+  for (let i = 0; i < 3; i += 1) {
+    s.at += DIRTY_WAIT_MAX_MS;
+    await s.runner.pass();
+  }
+  assert.equal(s.runs.length, 4, "tried again after each wait");
+  assert.deepEqual(s.runner.state().problems, [], "a wait short of the cap is not a problem yet");
+  s.at += DIRTY_WAIT_MAX_MS;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 5);
+  assert.match(s.problems(), /project p1: the dashboard has not answered the sweep client 5 times in a row \(UNAVAILABLE no answer: ECONNREFUSED\); it is tried again every 16 minutes/);
+  s.exits = [{}];
+  s.at += DIRTY_WAIT_MAX_MS;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 6, "never stopped");
+  assert.deepEqual(s.runner.state().problems, [], "an answer clears it");
+});
+
+test("a refusal rerunning cannot fix stops that head, quotes the client's last line, and a new head is tried", async () => {
+  // Exit 6, e.g. a wrong key: one refused request per commit, and it recovers once the key is fixed, with no restart.
+  const s = setUp({ exits: [{ code: 6, error: `posting\nREFUSED 401 unauthenticated: x-api-key ${KEY} is not held\n` }, {}] });
+  await s.runner.pass();
+  await s.runner.pass();
+  assert.equal(s.runs.length, 1, "not run again at that head");
+  assert.match(s.problems(), /project p1: the sweep client was refused at 1{40} \(REFUSED 401 unauthenticated: x-api-key <the dashboard key> is not held\), and running again cannot fix that; a new head is tried/);
+  assert.ok(!s.problems().includes(KEY));
+  s.folders[0].head = H2;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 2, "a new head is tried");
+  assert.deepEqual(s.runner.state().problems, []);
+});
+
+test("a bug the client says it has (exit 1) stops that head only, and a new head is tried", async () => {
+  // Exit 1 includes an incomplete batch, which depends on what is in that commit.
+  const s = setUp({ exits: [{ code: 1, error: "incomplete batch: 2 of 7 anchors unresolved\n" }, {}] });
+  await s.runner.pass();
+  await s.runner.pass();
+  assert.equal(s.runs.length, 1);
+  assert.match(s.problems(), /project p1: the sweep client stopped with exit 1 \(its own bug\) at 1{40} \(incomplete batch: 2 of 7 anchors unresolved\); a new head is tried/);
+  s.folders[0].head = H2;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 2);
+  assert.deepEqual(s.runner.state().problems, []);
 });
