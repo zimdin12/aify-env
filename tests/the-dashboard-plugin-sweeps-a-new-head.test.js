@@ -482,7 +482,8 @@ test("only refusals in a row count: another outcome between two of them starts t
 test("a dashboard that answers again clears its row, even when the answer leaves nothing to sweep", async () => {
   // The bug (comms-senior-dev, on 872f4e6): after the wait reached its cap, an answered watch-set read with nothing in
   // it settled the head and started no client, so "tried again every 16 minutes" stayed up with no retry behind it.
-  const s = setUp({ exits: Array.from({ length: 5 }, () => ({ code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" })) });
+  const down5 = { code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" };
+  const s = setUp({ exits: Array.from({ length: 5 }, () => ({ ...down5 })) });
   for (let i = 0; i < 5; i += 1) {
     await s.runner.pass();
     s.at += DIRTY_WAIT_MAX_MS;
@@ -492,6 +493,18 @@ test("a dashboard that answers again clears its row, even when the answer leaves
   await s.runner.pass();
   assert.equal(s.runs.length, 5, "nothing to sweep, so no client");
   assert.deepEqual(s.runner.state().problems, [], "the dashboard answered, so the row is gone");
+  // ⛔ Seen through what a settled head cannot hide: the count starts again. Kept past the answer, the next exit 5
+  // would be the sixth in a row, at the cap at once, with its row; started again, it is the first, with a minute's wait.
+  s.items = [{ watchId: "w1" }];
+  s.folders[0].head = H2;
+  s.exits = [down5];
+  await s.runner.pass();
+  assert.equal(s.runs.length, 6);
+  assert.deepEqual(s.runner.state().problems, [], "a first exit 5 after an answer is not yet a problem");
+  s.at += MINUTE;
+  s.exits = [{}];
+  await s.runner.pass();
+  assert.equal(s.runs.length, 7, "and it waits a minute, not 16");
 });
 
 test("only an outcome that carries the dashboard's answer ends a wait for it: a dirty tree does not, a re-read does", async () => {
@@ -586,4 +599,31 @@ test("a stop at one head is gone once the folder is back at a head already settl
   folder.folders[0].head = H1;
   await folder.runner.pass();
   assert.deepEqual(folder.runner.state().stopped, ["p1"]);
+});
+
+test("back at a settled head, nothing will run, so nothing is promised; a new head is tried and clears it", async () => {
+  // The bug (dashboard-senior-dev, on aed0fac): settle A, five exit 5s then exit 1 at B, back to A. The stop at B was
+  // retired and the kept wait for the dashboard was shown again, promising a retry, while A, already settled, is
+  // never run. A new head C is the control: it runs and clears the row.
+  const down = { code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" };
+  const H3 = "3".repeat(40);
+  const s = setUp({ exits: [{}, down, down, down, down, down, { code: 1, error: "incomplete batch\n" }, {}] });
+  await s.runner.pass();
+  s.folders[0].head = H2;
+  for (let i = 0; i < 6; i += 1) {
+    await s.runner.pass();
+    s.at += DIRTY_WAIT_MAX_MS;
+  }
+  assert.equal(s.runs.length, 7);
+  s.folders[0].head = H1;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 7, "A is settled");
+  assert.deepEqual(s.runner.state().problems, [], "so no retry is promised");
+  s.at += DIRTY_WAIT_MAX_MS;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 7, "and none happens");
+  s.folders[0].head = H3;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 8, "a new head is tried");
+  assert.deepEqual(s.runner.state().problems, [], "and its answer clears the wait");
 });
