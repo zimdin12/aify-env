@@ -128,7 +128,7 @@ test("B6: AN OPEN TURN carries its age when the body is built; a closed, unstart
   assert.equal(Object.hasOwn(open.turn, "ageMs"), false, "the caller's record is not changed");
   const changed = publisher.changes(all(agent("a", { state: "working", turn: open.turn })), first.view);
   assert.equal(changed.body.agents[0].turn.ageMs, 15_999, "changes carry it too");
-  for (const turn of [{ open: false, startedAtUs: 0, ageMs: 7 }, { open: true, startedAtUs: 0 }, { open: true, startedAtUs: 20_000_001 },
+  for (const turn of [{ open: false, startedAtUs: 0, ageMs: 7 }, { open: false, startedAtUs: 4_000_500, ageMs: 7 }, { open: true, startedAtUs: 0 },{ open: true, startedAtUs: 20_000_001 },
     { open: true, startedAtUs: "4000500" }]) {
     const body = publisher.snapshot(all(agent("a", { turn }))).body;
     assert.equal(Object.hasOwn(body.agents[0].turn, "ageMs"), false, `${JSON.stringify(turn)} carries an age`);
