@@ -177,6 +177,19 @@ test("a refusal runs again, and three in a row at one head stop that folder with
   assert.equal(s.runs.length, 4, "an edited section lifts the stop");
 });
 
+test("refusals stop one head, not the folder: a new head is swept with the configuration unchanged", async () => {
+  // The bug (dashboard-senior-dev, on c312f5c): three transient refusals at H1 latched the folder, so a usable H2 was
+  // never swept until someone edited the configuration or restarted aify-env.
+  const s = setUp({ exits: [{ code: 2 }, { code: 2 }, { code: 2 }] });
+  for (let i = 0; i < 3; i += 1) await s.runner.pass();
+  assert.equal(s.runs.length, 3);
+  assert.match(s.problems(), /refused 3 times in a row at 1{40}/);
+  s.folders[0].head = H2;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 4, "the new head is swept");
+  assert.deepEqual(s.runner.state().problems, [], "and the old head's row is gone with it");
+});
+
 test("a bug stops the folder with a row, a stale sweep settles the head, and the key never reaches a row", async () => {
   const b = setUp({ exits: [{ code: 1, error: `POST refused for x-api-key ${KEY}` }] });
   await b.runner.pass();
