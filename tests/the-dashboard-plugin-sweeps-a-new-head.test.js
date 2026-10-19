@@ -377,7 +377,12 @@ test("through the plugin: a sweep kill not confirmed is still said after a yield
     return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
   };
   const runs = [];
-  const runChild = async (args) => { runs.push(args); return { code: null, signal: null, timedOut: true, stopped: false, error: "", unconfirmed: marker }; };
+  // Killed once, then a clean run: a client that timed out every time would be retried every 25 ms for the whole test,
+  // a hot loop beside the timing-sensitive tests the suite runs in parallel.
+  const runChild = async (args) => {
+    runs.push(args);
+    return runs.length === 1 ? { code: null, signal: null, timedOut: true, stopped: false, error: "", unconfirmed: marker } : { code: 0, signal: null, timedOut: false, stopped: false, error: "" };
+  };
   let other = false;
   const make = () => createDashboardPlugin({
     name: "aify-dashboard", endpoint: "http://127.0.0.1:9", service: { name: "aify-dashboard", endpoint: "http://127.0.0.1:9" }, machineId: "win32:h",
@@ -489,11 +494,11 @@ test("a dashboard that answers again clears its row, even when the answer leaves
   assert.deepEqual(s.runner.state().problems, [], "the dashboard answered, so the row is gone");
 });
 
-test("only an outcome that carries the dashboard's answer ends a wait for it: a dirty tree does not, a refusal does", async () => {
+test("only an outcome that carries the dashboard's answer ends a wait for it: a dirty tree does not, a re-read does", async () => {
   // A dirty tree (4) is decided before the client asks the dashboard anything, so it says nothing about whether the
   // dashboard is up; a refusal (6) or a re-read (2) is the dashboard answering.
   const down = { code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" };
-  const s = setUp({ exits: [down, down, down, down, down, { code: 4 }, { code: 6, error: "REFUSED 401 unauthenticated: no\n" }] });
+  const s = setUp({ exits: [down, down, down, down, down, { code: 4 }, { code: 2, error: "REFUSED 409 stale_baseline: moved\n" }, {}] });
   for (let i = 0; i < 5; i += 1) {
     await s.runner.pass();
     s.at += DIRTY_WAIT_MAX_MS;
@@ -505,6 +510,80 @@ test("only an outcome that carries the dashboard's answer ends a wait for it: a 
   s.at += DIRTY_WAIT_MAX_MS;
   await s.runner.pass();
   assert.equal(s.runs.length, 7);
-  assert.doesNotMatch(s.problems(), /has not answered/, "a refusal is an answer");
-  assert.match(s.problems(), /was refused at 1{40} \(REFUSED 401 unauthenticated: no\)/);
+  assert.doesNotMatch(s.problems(), /has not answered/, "a re-read is the dashboard answering");
+  // ⛔ Observed through what a stop cannot hide: a 2 is retried next pass, and a wait for the dashboard kept past it
+  // would hold that retry back for up to 16 minutes. (A 6 stops the head, which hides the row either way.)
+  await s.runner.pass();
+  assert.equal(s.runs.length, 8, "retried on the next pass, not held back by a wait that ended");
+});
+
+test("the promise of a retry every 16 minutes stands only while a retry can still happen", async () => {
+  // The bug (dashboard-senior-dev, REVISE of 2087409, P3 1): after five exit 5s, a stop or a removed folder ended
+  // every retry, and the row still promised one every 16 minutes. The waits are kept; only the promise follows
+  // whether a retry is still possible.
+  const down = { code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" };
+  const PROMISE = /tried again every 16 minutes/;
+  const fiveDown = async (s) => {
+    for (let i = 0; i < 5; i += 1) {
+      await s.runner.pass();
+      s.at += DIRTY_WAIT_MAX_MS;
+    }
+    assert.match(s.problems(), PROMISE);
+  };
+
+  const headStop = setUp({ exits: [down, down, down, down, down, { code: 1, error: "incomplete batch\n" }] });
+  await fiveDown(headStop);
+  await headStop.runner.pass();
+  assert.equal(headStop.runs.length, 6);
+  assert.match(headStop.problems(), /stopped with exit 1 \(its own bug\) at 1{40}/);
+  assert.doesNotMatch(headStop.problems(), PROMISE, "that head is stopped, so nothing is tried in 16 minutes");
+  headStop.at += DIRTY_WAIT_MAX_MS;
+  await headStop.runner.pass();
+  assert.equal(headStop.runs.length, 6, "and nothing is");
+  assert.doesNotMatch(headStop.problems(), PROMISE);
+
+  const folderStop = setUp({ exits: [down, down, down, down, down, { code: 7 }] });
+  await fiveDown(folderStop);
+  await folderStop.runner.pass();
+  assert.match(folderStop.problems(), /stopped with exit 7 \(a bug\)/);
+  assert.doesNotMatch(folderStop.problems(), PROMISE);
+
+  const removed = setUp({ exits: [down, down, down, down, down] });
+  await fiveDown(removed);
+  removed.folders = [];
+  await removed.runner.pass();
+  assert.doesNotMatch(removed.problems(), PROMISE, "a folder no longer watched is not tried at all");
+});
+
+test("a stop at one head is gone once the folder is back at a head already settled", async () => {
+  // The bug (dashboard-senior-dev, REVISE of 2087409, P3 2): settle A, stop B with exit 1, return to A. The settled
+  // shortcut ran before the stop at B was retired, so the plugin still said p1 was stopped, with B's row.
+  const s = setUp({ exits: [{}, { code: 1, error: "incomplete batch\n" }] });
+  await s.runner.pass();
+  s.folders[0].head = H2;
+  await s.runner.pass();
+  assert.deepEqual(s.runner.state().stopped, ["p1"]);
+  s.folders[0].head = H1;
+  await s.runner.pass();
+  assert.equal(s.runs.length, 2, "A is settled, so nothing runs");
+  assert.deepEqual(s.runner.state().stopped, [], "and the stop at B is retired");
+  assert.deepEqual(s.runner.state().problems, []);
+
+  // A folder no longer watched is not tried, so its stop at a head is not said either.
+  const gone = setUp({ exits: [{ code: 1, error: "incomplete batch\n" }] });
+  await gone.runner.pass();
+  assert.deepEqual(gone.runner.state().stopped, ["p1"]);
+  gone.folders = [];
+  await gone.runner.pass();
+  assert.deepEqual(gone.runner.state().stopped, []);
+  assert.deepEqual(gone.runner.state().problems, []);
+
+  // Control: a stop of the whole folder is kept whatever head it is at.
+  const folder = setUp({ exits: [{}, { code: 7 }] });
+  await folder.runner.pass();
+  folder.folders[0].head = H2;
+  await folder.runner.pass();
+  folder.folders[0].head = H1;
+  await folder.runner.pass();
+  assert.deepEqual(folder.runner.state().stopped, ["p1"]);
 });
