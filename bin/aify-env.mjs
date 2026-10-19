@@ -674,7 +674,7 @@ server.listen(port, HOST, async () => {
     // One sender per population: this daemon's own (managed) key now, the residents' key while it holds the role.
     const sendFor = ({ instance, generation, ...population }) => new AgentStateSender({
       identity: { machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
-        exists: existsSync, isWsl: hostIsWsl() }).machineId, instance, generation },
+        exists: existsSync, isWsl: hostIsWsl() }).machineId, instance, generation, build: BUILD },
       definitions: definitionStore, lifecycle: agentState.lifecycle,
       observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
       readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"), credentialOptions: credentialReading, report: logLine, ...population,

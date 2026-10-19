@@ -100,6 +100,44 @@ test("THE SAME BODY HAS THE SAME DIGEST, and a body is a copy the caller cannot 
   }
 });
 
+test("B6: THE BUILD this process loaded is on every body kind when well formed, and omitted otherwise", () => {
+  const publisher = new AgentStatePublisher({ ...identity, build: "a1b2c3d4" });
+  const snapshot = publisher.snapshot(all(agent("a")));
+  const changes = publisher.changes(all(agent("a", { state: "working" })), snapshot.view);
+  const unavailable = publisher.snapshot({ complete: false, reason: "lock held" });
+  assert.deepEqual([snapshot, changes, unavailable].map((p) => [p.body.kind, p.body.build]),
+    [["snapshot", "a1b2c3d4"], ["changes", "a1b2c3d4"], ["unavailable", "a1b2c3d4"]]);
+  // The receiver's grammar, both edges: printable ASCII with no space, 1-200 characters.
+  for (const build of ["!", "~", "x".repeat(200)]) {
+    assert.equal(new AgentStatePublisher({ ...identity, build }).snapshot(all()).body.build, build, `CONTROL: ${build.length}`);
+  }
+  for (const build of [null, undefined, "", "a b", "x".repeat(201), "é", "a\tb", 42]) {
+    const body = new AgentStatePublisher({ ...identity, build }).snapshot(all(agent("a"))).body;
+    assert.equal(Object.hasOwn(body, "build"), false, `${JSON.stringify(build)} was sent`);
+  }
+});
+
+test("B6: AN OPEN TURN carries its age when the body is built; a closed, unstarted or future turn carries none", () => {
+  let now = 10_000;
+  const publisher = new AgentStatePublisher({ ...identity, nowMs: () => now });
+  const open = agent("a", { turn: { open: true, startedAtUs: 4_000_500, lastEventAtUs: 4_000_500 } });
+  const first = publisher.snapshot(all(open));
+  assert.equal(first.body.agents[0].turn.ageMs, 5999, "floor(10000 - 4000.5)");
+  now = 20_000;
+  assert.equal(publisher.snapshot(all(open)).body.agents[0].turn.ageMs, 15_999, "taken at the body, not at construction");
+  assert.equal(Object.hasOwn(open.turn, "ageMs"), false, "the caller's record is not changed");
+  const changed = publisher.changes(all(agent("a", { state: "working", turn: open.turn })), first.view);
+  assert.equal(changed.body.agents[0].turn.ageMs, 15_999, "changes carry it too");
+  for (const turn of [{ open: false, startedAtUs: 0, ageMs: 7 }, { open: true, startedAtUs: 0 }, { open: true, startedAtUs: 20_000_001 },
+    { open: true, startedAtUs: "4000500" }]) {
+    const body = publisher.snapshot(all(agent("a", { turn }))).body;
+    assert.equal(Object.hasOwn(body.agents[0].turn, "ageMs"), false, `${JSON.stringify(turn)} carries an age`);
+  }
+  assert.equal(publisher.snapshot(all(agent("a", { turn: { open: true, startedAtUs: 20_000_000 } }))).body.agents[0].turn.ageMs, 0,
+    "CONTROL: a turn that started this millisecond is age 0");
+  assert.equal(publisher.snapshot(all(agent("a", { turn: null }))).body.agents[0].turn, null, "no turn stays no turn");
+});
+
 test("G6 nullable lifetime is a row, never a fabricated removal, and inputs stay on every envelope kind", () => {
   const publisher = new AgentStatePublisher(identity);
   const inputs = { operatorStop: "not-tracked" };

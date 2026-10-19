@@ -114,6 +114,15 @@ test("real token ending and recreation removes only actual selected tokens, neve
   assert.deepEqual(f.calls[3].body.removed, []); envelope(f.calls[3].body);
 });
 
+test("B6: an open turn's age is taken on the sender's clock when the body is built; no build is sent when none was given", async (t) => {
+  const f = await fixture(t, { nowMs: () => AT / 1000 + 2500 }); await f.tick();
+  f.host.applyEvent({ agentId: "lead", lifetime: L, kind: "turn-start", firedAtUs: AT + 1 });
+  await f.tick();
+  const lead = f.calls[1].body.agents.find((r) => r.agentId === "lead");
+  assert.deepEqual([f.calls[1].body.kind, lead.turn.open, lead.turn.startedAtUs, lead.turn.ageMs], ["changes", true, AT + 1, 2499]);
+  assert.equal(Object.hasOwn(f.calls[0].body, "build"), false, "an identity with no build sends none");
+});
+
 test("initial, 59999 and 60000 quiet snapshots use boot epochs and changes cannot postpone them", async (t) => {
   const f = await fixture(t); await f.tick(); f.time(59_999); await f.tick(); assert.equal(f.calls.length, 1);
   f.time(60_000); await f.tick(); assert.equal(f.calls[1].body.kind, "snapshot");

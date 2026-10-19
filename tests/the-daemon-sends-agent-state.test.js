@@ -97,6 +97,7 @@ test("successful serving/durable boot wires actual sender and fixed 60s evaluati
     assert.equal(call.url, "http://fixture.invalid/state");
     assert.equal(call.body.kind, "snapshot", "the sender reaches the real stop reader");
     assert.deepEqual(call.body.inputs, { operatorStop: "tracked" });
+    assert.equal(call.body.build, "fixture-build", "B6: every population publishes the build this daemon loaded");
   }
   assert.equal(f.intervals.length, 1); assert.equal(f.intervals[0].ms, 60_000); assert.equal(f.intervals[0].unreferenced, true);
   const sweep = section("const SWEEP_MS", "// ── telling"); let swept = 0, evaluated = 0;
