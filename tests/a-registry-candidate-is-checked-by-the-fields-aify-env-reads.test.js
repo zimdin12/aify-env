@@ -72,10 +72,39 @@ test("every accepted reference is asked of the store, and a state other than ok 
   assert.deepEqual(answer.problems.map((p) => `${p.code}:${p.service}:${p.field}`), ["credential-store:d:secretsCredentialRef"]);
 });
 
-test("check takes exactly one file or --stdin", () => {
+test("--service scopes the store to one service: another's missing file warns, its own is refused", async () => {
+  const text = registry({ comms, d: { endpoint: "http://h", credentialRef: "d.key" } });
+  const states = { "aify-comms.key": CREDENTIAL_MISSING, "d.key": CREDENTIAL_OK };
+  const readState = async (ref) => ({ state: states[ref], detail: "" });
+  const scoped = await checkRegistry(text, readState, { service: "d" });
+  assert.equal(scoped.ok, true);
+  assert.deepEqual(scoped.problems, []);
+  assert.deepEqual(scoped.warnings.map((w) => `${w.code}:${w.service}:${w.field}`), ["credential-store:comms:credentialRef"]);
+  const own = await checkRegistry(text, readState, { service: "comms" });
+  assert.deepEqual(own.problems.map((p) => `${p.code}:${p.service}`), ["credential-store:comms"]);
+  assert.deepEqual(own.warnings, []);
+  // CONTROL: without --service every reference must be in the store, the doctor-style check.
+  assert.deepEqual((await checkRegistry(text, readState)).problems.map((p) => p.code), ["credential-store"]);
+});
+
+test("--service still refuses another service's collision, and a name the candidate does not hold", async () => {
+  const ok = async () => ({ state: CREDENTIAL_OK, detail: "" });
+  const colliding = registry({ comms, dash: { endpoint: "http://h", secretsCredentialRef: "AIFY-COMMS.key" } });
+  const scoped = await checkRegistry(colliding, ok, { service: "comms" });
+  assert.deepEqual(scoped.problems.map((p) => `${p.code}:${p.service}`), ["credential-ref-collision:dash"]);
+  // A TYPO MUST NOT TURN EVERY STORE FAULT INTO A WARNING. An empty services object holds no name either.
+  for (const text of [registry({ comms }), registry({})]) {
+    assert.deepEqual((await checkRegistry(text, ok, { service: "comm" })).problems.map((p) => p.code), ["service-absent"]);
+  }
+});
+
+test("check takes exactly one file or --stdin, and --service takes a name", () => {
   assert.equal(parseRegistryArgs(["check", "f.json"]).problem, "");
   assert.equal(parseRegistryArgs(["check", "--stdin"]).problem, "");
-  for (const argv of [[], ["check"], ["check", "a", "b"], ["check", "a", "--stdin"], ["check", "--json"], ["verify", "a"]]) {
+  assert.equal(parseRegistryArgs(["check", "f.json", "--service", "aify-dashboard"]).service, "aify-dashboard");
+  assert.equal(parseRegistryArgs(["check", "--stdin", "--service=-odd"]).service, "-odd");
+  for (const argv of [[], ["check"], ["check", "a", "b"], ["check", "a", "--stdin"], ["check", "--json"], ["verify", "a"],
+    ["check", "a", "--service"], ["check", "a", "--service="], ["check", "a", "--service", "--stdin"]]) {
     assert.notEqual(parseRegistryArgs(argv).problem, "", argv.join(" "));
   }
 });
@@ -118,10 +147,19 @@ test("through the dispatcher: a staged key set by `credential set --ref` checks 
   assert.equal(missing.code, 65);
   assert.deepEqual(JSON.parse(missing.stdout).problems.map((p) => p.code), ["credential-store"]);
 
+  // CONNECTING ONE SERVICE is not blocked by another's missing file: exit 0, and the other's fault is a warning.
+  const both = registry({ "aify-dashboard": { endpoint: "http://127.0.0.1:9700", credentialRef: staged },
+    comms: { endpoint: "http://127.0.0.1:8800", credentialRef: "never-stored.key" } });
+  const scoped = await run([DISPATCHER, "registry", "check", "--stdin", "--service", "aify-dashboard"], { home, input: both });
+  assert.equal(scoped.code, 0, scoped.stderr);
+  assert.deepEqual(JSON.parse(scoped.stdout).warnings.map((w) => `${w.code}:${w.service}`), ["credential-store:comms"]);
+  const named = await run([DISPATCHER, "registry", "check", "--stdin", "--service", "comms"], { home, input: both });
+  assert.equal(named.code, 65);
+
   const usage = await run([DISPATCHER, "registry", "check"], { home });
   assert.equal(usage.code, 64);
 
-  for (const out of [ok, viaStdin, missing, usage]) {
+  for (const out of [ok, viaStdin, missing, scoped, named, usage]) {
     assert.ok(!(out.stdout + out.stderr).includes(CANARY), "a stored key reached the command's output");
   }
 });
