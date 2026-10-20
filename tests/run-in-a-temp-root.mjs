@@ -72,7 +72,11 @@ fs.mkdirSync(home);
 const env = { ...inherited, HOME: home, USERPROFILE: home, TMPDIR: root, TEMP: root, TMP: root, AIFY_HOST_SECRET_FILE: path.join(root, 'host-secret'),
   AIFY_SERVICE_REGISTRY: path.join(root, 'no-such-services.json') };
 
-const files = fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map((f) => path.join('tests', f));
+// FILES NAMED ON THE COMMAND LINE run alone, under the same root (`npm test -- tests/x.test.js`). A targeted run
+// started as `node --test tests/x.test.js` gets none of the above: on 2026-10-20 this host's Temp held about 2,200
+// fixture directories from such runs, 218 of them from one file in one day, while every full run left nothing.
+const named = process.argv.slice(2);
+const files = named.length > 0 ? named : fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map((f) => path.join('tests', f));
 
 // THE TIMEOUT IS LOAD-BEARING and is kept here verbatim. Without it a hang in this suite once left
 // a test process and two daemons alive for two and a half hours; a runner that dropped the flag

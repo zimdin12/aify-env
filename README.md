@@ -383,7 +383,11 @@ The plan it is built against lives in the aify-comms repo at
 ```bash
 npm install    # node-pty is an OPTIONAL dependency; without it one test fails, on purpose
 npm test
+npm test -- tests/one.test.js    # one file, under the same throwaway TEMP and HOME
 ```
+
+Run a single file through `npm test --`, not `node --test`. The runner points TEMP and HOME at a directory it deletes,
+and a file started directly leaves its fixtures in the real Temp.
 
 **`npm install` first, and the reason is the design rather than an oversight.** `pty-real.test.js`
 FAILS rather than skips on a host with no terminal support, because "the terminal path works" must not

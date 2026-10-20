@@ -70,7 +70,7 @@ The command creates and focuses one workspace, validates its foreground shell th
 Run focused checks with:
 
 ```text
-node --test tests/herdr-client.test.js
+npm test -- tests/herdr-client.test.js
 node tests/manual/herdr-stage0.mjs C:/path/to/complete/herdr.exe
 ```
 
