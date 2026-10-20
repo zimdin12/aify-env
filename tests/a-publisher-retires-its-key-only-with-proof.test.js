@@ -46,19 +46,19 @@ function senderFixture(t, { population = "managed", answer = () => new Response(
   host.boot();
   let services = { x: target() };
   let registryHold = null;
-  const calls = [], reports = [];
+  const calls = [], reports = [], credentialTargets = [];
   let credentialReads = 0;
   const sender = new AgentStateSender({ identity: IDENTITY, stateHost: host, definitions: new DefinitionStore({ dir: path.join(dir, "defs") }),
     lifecycle: { stopFacts: () => new Map() }, observedHarnesses: async () => new Set(["claude"]),
     readRegistry: async () => { if (registryHold) await registryHold; return JSON.stringify({ version: 1, services }); },
-    credential: async () => { credentialReads++; return { state: CREDENTIAL_ABSENT }; },
+    credential: async (credentialTarget) => { credentialReads++; credentialTargets.push(credentialTarget); return { state: CREDENTIAL_ABSENT }; },
     nowMs: () => 0, setTimeoutImpl: () => 0, clearTimeoutImpl: () => {},
     fetchImpl: (url, options) => { const body = JSON.parse(options.body); calls.push({ url, body, signal: options.signal }); return answer(url, body, options); },
     report: (line) => reports.push(line) });
   t.after(() => sender.stop());
   const start = (lifetime = L1) => host.startManaged({ agentId: "lead", lifetime, instance: IDENTITY.instance, pid: 41, handle: "fixture" });
   const tick = async () => { await sender.tick(); await flush(); await flush(); };
-  return { host, sender, calls, reports, start, tick, credentialReads: () => credentialReads,
+  return { host, sender, calls, reports, start, tick, credentialReads: () => credentialReads, credentialTargets,
     holdRegistry: (promise) => { registryHold = promise; },
     services: (value) => { services = value; } };
 }
@@ -230,6 +230,56 @@ test("transport_only_terminal_and_still_registered: a destination gone or change
   assert.deepEqual([outcome.outcome, outcome.reason], ["unconfirmed", "destination-not-authorized"]);
 });
 
+test("transport_only_terminal_and_still_registered: a name kept with a changed URL or credential identity is not authorized", async (t) => {
+  const f = senderFixture(t);
+  const before = {
+    x: target(),
+    url: target("http://url-before.invalid/mcp/sse"),
+    keyEnv: { ...target("http://key-env.invalid/mcp/sse"), keyEnv: ["KEY_BEFORE"] },
+    ref: { endpoint: "http://ref.invalid/mcp/sse", agentState: { path: "/api/v1/agent-state", credentialRef: "ref-before" } },
+  };
+  f.services(before);
+  f.start();
+  await f.tick();
+  assert.equal(new Set(f.calls.map((call) => new URL(call.url).host)).size, 4, "CONTROL: all four were sent a body");
+  f.host.endManaged(L1);
+  f.sender.stop();
+  // The same four NAMES, three of them now a different destination: another URL, another key variable, another ref.
+  f.services({ x: target(), url: target("http://url-after.invalid/mcp/sse"),
+    keyEnv: { ...target("http://key-env.invalid/mcp/sse"), keyEnv: ["KEY_AFTER"] },
+    ref: { endpoint: "http://ref.invalid/mcp/sse", agentState: { path: "/api/v1/agent-state", credentialRef: "ref-after" } } });
+  const reads = f.credentialTargets.length;
+  const outcome = await f.sender.retire();
+  const retired = f.calls.filter((call) => call.body.kind === "retired").map((call) => new URL(call.url).host);
+  assert.deepEqual(retired, ["fixture.invalid"], "a changed destination was sent the retirement under its old identity");
+  assert.deepEqual(f.credentialTargets.slice(reads).map((target) => target.name), ["x"], "a credential was read for a changed destination");
+  assert.deepEqual([outcome.outcome, outcome.reason, outcome.destinations], ["unconfirmed", "destination-not-authorized", { x: "confirmed" }]);
+});
+
+test("an expired deadline at entry ends the retirement before any credential read or post", async (t) => {
+  const f = senderFixture(t);
+  f.start();
+  await f.tick();
+  f.host.endManaged(L1);
+  f.sender.stop();
+  const reads = f.credentialReads(), posts = f.calls.length;
+  const expired = new AbortController();
+  expired.abort();
+  const outcome = await f.sender.retire({ signal: expired.signal });
+  await flush(); await flush(); await flush();
+  assert.equal(f.credentialReads() - reads, 0, "a credential was read after the deadline had passed");
+  assert.equal(f.calls.length - posts, 0, "a retirement was posted after the deadline had passed");
+  assert.deepEqual([outcome.outcome, outcome.reason], ["unconfirmed", "deadline"]);
+
+  const control = senderFixture(t);
+  control.start();
+  await control.tick();
+  control.host.endManaged(L1);
+  const live = await control.sender.retire({ signal: new AbortController().signal });
+  assert.equal(live.outcome, "confirmed", "CONTROL: a live deadline lets the same retirement reach a 204");
+  assert.equal(control.calls.at(-1).body.kind, "retired");
+});
+
 test("transport_ignores_occupancy_and_never_reopens: an aborted request in flight neither delays nor is released", async (t) => {
   const never = defer();
   let first = true;
@@ -239,8 +289,17 @@ test("transport_ignores_occupancy_and_never_reopens: an aborted request in fligh
   await f.tick();
   f.host.endManaged(L1);
   f.sender.stop();
-  const outcome = await f.sender.retire();
-  assert.equal(outcome.outcome, "confirmed", "the retirement waited on, or was refused by, the occupied request");
+  // BOUNDED: the retirement must settle while the earlier request is still occupied. The cleanup releases that request
+  // whatever happened, so a retirement that waits on occupancy fails at this assertion instead of hanging the file.
+  const retiring = f.sender.retire();
+  const outcome = await Promise.race([retiring, new Promise((resolve) => setTimeout(() => resolve("still waiting"), 1000))]);
+  try {
+    assert.notEqual(outcome, "still waiting", "the retirement waited for the occupied request to settle");
+    assert.equal(outcome.outcome, "confirmed", "the retirement was refused by the occupied request");
+  } finally {
+    never.resolve(new Response(null, { status: 204 }));
+    await retiring.catch(() => {});
+  }
   const sent = f.calls.length, reads = f.credentialReads();
   await f.tick();
   assert.equal(f.calls.length, sent, "tick() after the retirement published again");
@@ -270,9 +329,14 @@ test("retirement_one_deadline_then_unconditional_exit: a post that never answers
 
   for (const slot of [() => { throw new Error("thrown"); }, () => Promise.reject(new Error("rejected"))]) {
     const exits = [];
-    await createShutdown({ runner: { list: () => [], stop: async () => {} }, clearOwned: () => {}, exit: (code) => exits.push(code),
-      afterStops: slot, setTimer: () => 0, clearTimer: () => {} })("SIGTERM");
+    // The shutdown's own result is captured apart, so a slot error that escapes still reaches the exit assertion.
+    let escaped = null;
+    try {
+      await createShutdown({ runner: { list: () => [], stop: async () => {} }, clearOwned: () => {}, exit: (code) => exits.push(code),
+        afterStops: slot, setTimer: () => 0, clearTimer: () => {} })("SIGTERM");
+    } catch (error) { escaped = error; }
     assert.deepEqual(exits, [0], "a slot that threw or rejected held the exit");
+    assert.equal(escaped, null, "the slot's error escaped the shutdown");
   }
 
   const second = [];
