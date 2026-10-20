@@ -408,6 +408,8 @@ const shutdown = createShutdown(daemonShutdownHooks({
   }),
   exit: (code) => process.exit(code),
   write: (line) => process.stderr.write(line),
+  // B5: the managed key's sender, retired once its workers are stopped (lib/agent-state-sender.mjs retire).
+  retireAgentState: ({ signal }) => agentStateSender?.retire({ signal }),
 }));
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) {
   try {
