@@ -82,7 +82,7 @@ import { ServicePlugins } from "../lib/service-plugins.mjs";
 import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
 import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
-import { AgentStateSender } from "../lib/agent-state-sender.mjs";
+import { AgentStateSender, REPORT_EVERY_MS } from "../lib/agent-state-sender.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
 import { advertisementPathFor, pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
@@ -685,7 +685,7 @@ server.listen(port, HOST, async () => {
     agentStateSender = sendFor({ instance: agentState.instance, generation: agentState.generation, stateHost: agentState.host });
     agentState.residents.attachSender(sendFor);
     evaluateAgentState();
-    stateEvaluationTimer = setInterval(evaluateAgentState, 60_000);
+    stateEvaluationTimer = setInterval(evaluateAgentState, REPORT_EVERY_MS);
     stateEvaluationTimer.unref();
   }
 

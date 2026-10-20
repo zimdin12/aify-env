@@ -8,13 +8,14 @@ import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
 import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
-let AgentStateSender;
-try { ({ AgentStateSender } = await import("../lib/agent-state-sender.mjs")); }
+let AgentStateSender, REPORT_EVERY_MS;
+try { ({ AgentStateSender, REPORT_EVERY_MS } = await import("../lib/agent-state-sender.mjs")); }
 catch (e) { if (e.code !== "ERR_MODULE_NOT_FOUND") throw e; }
 const source = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const RESIDENTS_KEY = /^residents-[0-9a-f]{12}$/;
+const TIMER_PROBE_MS = 45_000;
 /** The two populations compose concurrently and queue on the definition store, so the second post can lag a flush. */
 async function posted(f, count) {
   for (const end = Date.now() + 5000; f.calls.length < count && Date.now() < end;) await new Promise((r) => setTimeout(r, 10));
@@ -25,7 +26,7 @@ function section(start, end) {
   return source.slice(a, b);
 }
 async function boot(t, { context = null, viewOnly = false, failBoot = false, failReady = false, failLifecycle = false } = {}) {
-  assert.match(source, /import \{ AgentStateSender \} from "\.\.\/lib\/agent-state-sender\.mjs"/, "daemon must wire the sender, not a test-only owner");
+  assert.match(source, /import \{ AgentStateSender, REPORT_EVERY_MS \} from "\.\.\/lib\/agent-state-sender\.mjs"/, "daemon must wire the sender and its one cadence, not a test-only owner");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "g7b-daemon-"));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   if (failLifecycle) {
@@ -68,6 +69,8 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
     startDaemonView: async () => ({ stop() {}, ownsScreen: false }), shutdown: () => {}, NOTICES: {}, NO_DASHBOARD: true,
     setInterval: (fn, ms) => { const timer = { fn, ms, unref() { this.unreferenced = true; } }; intervals.push(timer); return timer; },
     clearInterval: (id) => cancelled.push(id), viewOnly, stateSendingStopped: false,
+    // Not the real cadence: the timer must take whatever the sender exports, so a restored literal reads 60_000 here.
+    REPORT_EVERY_MS: TIMER_PROBE_MS,
   };
   // No import.meta value is needed by fake pane creation. Replace only that syntactic argument.
   const code = `let agentState=null, agentStateSender=null, stateEvaluationTimer=null, inputSocketServer=null, inputSocketAddress='', followServices=null, stopDashboard=()=>{}, dashboardOwnsScreen=false;
@@ -81,7 +84,7 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
   await flush(); return { actual, error, events, calls, intervals, cancelled, lifecycle, shared, constructions };
 }
 
-test("successful serving/durable boot wires actual sender and fixed 60s evaluation independent of sweep", async (t) => {
+test("successful serving/durable boot wires actual sender and its exported evaluation cadence independent of sweep", async (t) => {
   const f = await boot(t); assert.equal(f.error, null, String(f.error));
   assert.equal(f.constructions, 1, "the actual daemon bootstrap must construct one lifecycle owner");
   assert.strictEqual(f.shared.agents.lifecycle, f.lifecycle.lifecycle, "plugins share the actual executor");
@@ -98,8 +101,10 @@ test("successful serving/durable boot wires actual sender and fixed 60s evaluati
     assert.equal(call.body.kind, "snapshot", "the sender reaches the real stop reader");
     assert.deepEqual(call.body.inputs, { operatorStop: "tracked" });
     assert.equal(call.body.build, "fixture-build", "B6: every population publishes the build this daemon loaded");
+    assert.equal(call.body.reportEveryMs, REPORT_EVERY_MS, "decision 2: every population announces the sender's one cadence");
   }
-  assert.equal(f.intervals.length, 1); assert.equal(f.intervals[0].ms, 60_000); assert.equal(f.intervals[0].unreferenced, true);
+  assert.equal(f.intervals.length, 1); assert.equal(f.intervals[0].unreferenced, true);
+  assert.equal(f.intervals[0].ms, TIMER_PROBE_MS, "decision 2: the evaluation timer takes the cadence the sender exports, no literal of its own");
   const sweep = section("const SWEEP_MS", "// ── telling"); let swept = 0, evaluated = 0;
   const run = new Function("process", "setInterval", "reaper", "evaluateAgentState", `let unknown; ${sweep}`);
   let sweepTimer;
