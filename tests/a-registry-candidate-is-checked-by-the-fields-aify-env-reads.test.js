@@ -163,3 +163,34 @@ test("through the dispatcher: a staged key set by `credential set --ref` checks 
     assert.ok(!(out.stdout + out.stderr).includes(CANARY), "a stored key reached the command's output");
   }
 });
+
+test("--candidate-only checks the candidate alone: refs nobody stored pass, its rules still refuse, and the store is never opened", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "aify-regcand-"));
+  // A STORE THAT FAILS IF ANYTHING READS IT: `.aify/credentials` is a FILE, so every store read reports a fault.
+  fs.mkdirSync(path.join(home, ".aify"));
+  fs.writeFileSync(path.join(home, ".aify", "credentials"), "not a directory");
+  const unstored = registry({ "aify-dashboard": { endpoint: "http://127.0.0.1:9700", credentialRef: "staged-later.key" } });
+
+  const pure = await run([DISPATCHER, "registry", "check", "--stdin", "--candidate-only"], { home, input: unstored });
+  assert.equal(pure.code, 0, pure.stderr);
+  const answer = JSON.parse(pure.stdout);
+  assert.equal(answer.ok, true);
+  assert.deepEqual(answer.references, [{ service: "aify-dashboard", field: "credentialRef", ref: "staged-later.key", store: null }]);
+  assert.deepEqual(answer.warnings, []);
+
+  // CONTROL: the same candidate with the store asked fails, so passing above is the store not being opened.
+  const full = await run([DISPATCHER, "registry", "check", "--stdin"], { home, input: unstored });
+  assert.equal(full.code, 65);
+  assert.deepEqual(JSON.parse(full.stdout).problems.map((p) => p.code), ["credential-store"]);
+
+  const refused = await run([DISPATCHER, "registry", "check", "--stdin", "--candidate-only"],
+    { home, input: registry({ d: { endpoint: "http://h", credentialRef: "../x" } }) });
+  assert.equal(refused.code, 65);
+  assert.deepEqual(JSON.parse(refused.stdout).problems.map((p) => p.code), ["credential-ref-invalid"]);
+
+  const both = await run([DISPATCHER, "registry", "check", "--stdin", "--candidate-only", "--service", "d"], { home, input: unstored });
+  assert.equal(both.code, 64);
+  assert.equal(both.stdout, "", "a usage error prints no JSON");
+  assert.equal(parseRegistryArgs(["check", "f", "--candidate-only"]).problem, "");
+  assert.notEqual(parseRegistryArgs(["check", "f", "--service=d", "--candidate-only"]).problem, "");
+});

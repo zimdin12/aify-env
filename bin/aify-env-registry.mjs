@@ -16,8 +16,15 @@
  * collisions and advertising stay refusals for every service, since they are about this candidate, not the store.
  * Without `--service` every reference must be in the store, which is the doctor-style full check.
  *
- * Output is one JSON document on stdout, `{check, ok, references, problems, warnings}`. Exit 0 when ok, 65 when not,
- * 64 for a usage error. Warnings never change the exit. The candidate comes from a file argument or `--stdin`.
+ * THE CANDIDATE ALONE, WHEN ASKED (`--candidate-only`). Connect's prepare step does no credential I/O, so it needs
+ * the rules without the store: grammar, version, collisions and advertising, and the credential store is never
+ * opened. Each reference's `store` is then null, meaning not asked. `--service` scopes the store, so the two together
+ * are a usage error.
+ *
+ * A CANDIDATE THAT WAS EVALUATED is answered with one JSON document on stdout,
+ * `{check, ok, references, problems, warnings}`: exit 0 when ok, 65 when not, and warnings never change the exit.
+ * A usage error (exit 64) and a candidate that could not be read (exit 65) print to stderr only, with no JSON.
+ * The candidate comes from a file argument or `--stdin`.
  */
 
 import fs from "node:fs/promises";
@@ -37,16 +44,18 @@ export const MAX_REGISTRY_BYTES = 1024 * 1024;
 const EOL = String.fromCharCode(10);
 const USAGE = [
   "usage:",
-  "  aify-env registry check <file> [--service <name>]",
-  "  aify-env registry check --stdin [--service <name>]",
-  "Prints {check, ok, references, problems, warnings} as JSON. Exit 0 ok, 65 problems, 64 usage.",
+  "  aify-env registry check <file|--stdin> [--service <name>]",
+  "  aify-env registry check <file|--stdin> --candidate-only",
+  "An evaluated candidate prints {check, ok, references, problems, warnings} as JSON: exit 0 ok, 65 problems.",
+  "A usage error (64) or an unreadable candidate (65) prints to stderr only.",
   "--service requires only that service's references to be in the store; others' missing files are warnings.",
+  "--candidate-only checks the candidate alone and never opens the credential store.",
 ].join(EOL);
 
 /** argv into an intent. PURE. */
 export function parseRegistryArgs(argv) {
   const args = Array.isArray(argv) ? argv.map(String) : [];
-  const options = { action: args[0] || "", file: "", stdin: false, service: "", problem: "" };
+  const options = { action: args[0] || "", file: "", stdin: false, service: "", candidateOnly: false, problem: "" };
   if (options.action !== "check") {
     options.problem = options.action ? `unknown action '${options.action}'` : "no action given";
     return options;
@@ -55,6 +64,7 @@ export function parseRegistryArgs(argv) {
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
     if (arg === "--stdin") options.stdin = true;
+    else if (arg === "--candidate-only") options.candidateOnly = true;
     else if (arg === "--service" || arg.startsWith("--service=")) {
       // The = form is one token, so a name beginning with - has an exact spelling. Empty is refused, never "all".
       options.service = arg === "--service" ? String(rest[++i] ?? "") : arg.slice("--service=".length);
@@ -67,6 +77,9 @@ export function parseRegistryArgs(argv) {
     else options.file = arg;
   }
   if (options.stdin === Boolean(options.file)) options.problem = "check needs one file or --stdin";
+  else if (options.candidateOnly && options.service) {
+    options.problem = "--candidate-only opens no store, so --service has nothing to scope";
+  }
   return options;
 }
 
@@ -106,6 +119,13 @@ export async function checkRegistry(text, readState, { service = "" } = {}) {
   return { check: REGISTRY_CHECK_VERSION, ok: problems.length === 0, references: checked, problems, warnings };
 }
 
+/** The candidate alone: the pure rules and nothing else, in the same shape. Never opens the store. PURE. */
+export function checkCandidate(text) {
+  const { references, problems } = registryCandidateProblems(text);
+  return { check: REGISTRY_CHECK_VERSION, ok: problems.length === 0,
+    references: references.map((reference) => ({ ...reference, store: null })), problems, warnings: [] };
+}
+
 async function main() {
   const options = parseRegistryArgs(process.argv.slice(2));
   if (options.problem) {
@@ -126,8 +146,9 @@ async function main() {
     process.exitCode = EXIT_FAILED;
     return;
   }
-  const root = credentialRoot();
-  const answer = await checkRegistry(text, (ref) => readCredentialFile({ root, ref }), { service: options.service });
+  const answer = options.candidateOnly
+    ? checkCandidate(text)
+    : await checkRegistry(text, (ref) => readCredentialFile({ root: credentialRoot(), ref }), { service: options.service });
   process.stdout.write(`${JSON.stringify(answer, null, 2)}${EOL}`);
   process.exitCode = answer.ok ? EXIT_OK : EXIT_FAILED;
 }

@@ -361,6 +361,12 @@ What `--help` does not say, and belongs here:
   had there: `env-processes`, `context-window` and `managed-orphans` (from the aify-comms plugin, when
   aify-comms is registered), `claude-login`, and `code-current` (`current`, `stale`, `unknown`), which
   answers what `env-code-currency` asked. A row that does not apply here passes with code `skipped`.
+- **`aify-env registry check <file|--stdin>`** is what a registry writer asks before publishing: it checks the
+  fields aify-env reads that aify-wrapper's parser drops (every `*CredentialRef`, cross-service collisions,
+  `advertise`) and, unless `--candidate-only` is given, each reference's file in the store; `--service <name>` makes
+  another service's missing file a warning. A candidate it evaluated gets one JSON document,
+  `{check, ok, references, problems, warnings}`, with exit 0 or 65. A usage error (64) or a candidate it could not
+  read (65) prints to stderr only, with no JSON.
 - **`aify-env tui --once` renders one frame and exits** -- what a test or a status line wants.
 - **`aify-env --port 0` asks the OS for a free port**, which is how the suite runs without touching a
   live environment.
