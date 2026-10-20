@@ -79,7 +79,7 @@ test("the usage text names every subcommand and every key", () => {
   // It is the ONLY place a user can learn these. The operator ran the view, could not work out how
   // to switch between agents, and was told -- wrongly -- that it was not possible; the bindings
   // existed and were written down nowhere a person could reach.
-  for (const word of ["tui", "attach", "doctor", "run", "credential"]) {
+  for (const word of ["tui", "attach", "doctor", "run", "credential", "registry"]) {
     assert.match(USAGE, new RegExp(`aify-env ${word}`), `usage does not mention \`aify-env ${word}\``);
   }
   for (const key of ["1-9", "Ctrl\\+\\]", "Enter", "g "]) {

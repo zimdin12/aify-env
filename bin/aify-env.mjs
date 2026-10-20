@@ -175,6 +175,7 @@ const SUBCOMMANDS = {
   // that started it. `claude-aify --shared` is one line calling this.
   run: "./aify-env-run.mjs",
   credential: "./aify-env-credential.mjs",
+  registry: "./aify-env-registry.mjs",
   herdr: "./aify-env-herdr.mjs",
   agents: "./aify-env-agents.mjs",
 };
