@@ -222,3 +222,13 @@ test("the first outcome wins: a close after a timeout does not resolve twice", a
   handlers.close();
   assert.equal(await pending, false);
 });
+
+import { waitBounded } from "../lib/kill-tree.mjs";
+
+test("waitBounded settles with the promise when it comes first, and at the bound when it never comes", async () => {
+  assert.equal(await waitBounded(Promise.resolve("exited"), 5000), "exited");
+  const from = Date.now();
+  assert.equal(await waitBounded(new Promise(() => {}), 50), undefined);
+  assert.ok(Date.now() - from < 1000, "the bound did not end the wait");
+  assert.equal(await waitBounded(null, 5000), undefined, "no promise waits for nothing");
+});
