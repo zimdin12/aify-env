@@ -59,7 +59,7 @@ test('Runner.stop true-live attempts fake effects but registry release does not 
   const f = await managed(t, () => true), raw = f.host.rawIdentity('a'), phases = [];
   await f.runner.stop(f.handle.id, { phase: p => phases.push(p) });
   assert.deepEqual(f.probes, [f.child.pid]); assert.deepEqual(f.effects, ['child', 'tree']);
-  assert.deepEqual(phases, ['console-kill', 'tree-kill', 'done']);
+  assert.deepEqual(phases, ['console-kill', 'tree-kill', 'exit-wait', 'done']);
   assert.deepEqual(f.runner.list(), []); assert.equal(f.runner.canStream(f.handle.id), false);
   assert.deepEqual(f.host.rawIdentity('a'), raw);
 });

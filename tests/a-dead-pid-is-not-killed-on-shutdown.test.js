@@ -79,7 +79,7 @@ test("stop() checks liveness BEFORE either kill", async () => {
   assert.deepEqual(await stopped(false), [["alive", DEAD_PID]], "a dead pid reaches neither kill");
   assert.deepEqual(await stopped(true), [
     ["alive", DEAD_PID], ["console-kill"], ["child-kill"],
-    ["tree-kill"], ["kill-tree", DEAD_PID], ["done"],
+    ["tree-kill"], ["kill-tree", DEAD_PID], ["exit-wait"], ["done"],
   ], "the engaged guard precedes both reachable kills and their announcements");
 });
 

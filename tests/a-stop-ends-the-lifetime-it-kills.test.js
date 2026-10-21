@@ -55,3 +55,11 @@ test("a stop whose child never exits still returns at the bound, and the lifetim
   assert.ok(Date.now() - from < 1500, "the stop waited past its bound");
   assert.equal(f.host.retirementProof([lifetime]).holds, false, "an exit never observed was taken as an end");
 });
+
+test("the wait is announced as its own phase, after the tree-kill and before done", async (t) => {
+  const f = fixture(t, { exitAfterKillMs: 20, stopExitWaitMs: 2000 });
+  const { handle } = await f.start();
+  const phases = [];
+  await f.runner.stop(handle.id, { phase: (name) => phases.push(name) });
+  assert.deepEqual(phases, ["console-kill", "tree-kill", "exit-wait", "done"]);
+});
