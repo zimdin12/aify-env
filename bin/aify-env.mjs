@@ -678,7 +678,7 @@ server.listen(port, HOST, async () => {
     const sendFor = ({ instance, generation, ...population }) => new AgentStateSender({
       identity: { machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
         exists: existsSync, isWsl: hostIsWsl() }).machineId, instance, generation, build: BUILD },
-      definitions: definitionStore, lifecycle: agentState.lifecycle,
+      definitions: definitionStore, lifecycle: agentState.lifecycle, cwdRoots: CWD_ROOTS,
       observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
       readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"), credentialOptions: credentialReading, report: logLine, ...population,
     });
