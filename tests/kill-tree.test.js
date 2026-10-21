@@ -232,3 +232,13 @@ test("waitBounded settles with the promise when it comes first, and at the bound
   assert.ok(Date.now() - from < 1000, "the bound did not end the wait");
   assert.equal(await waitBounded(null, 5000), undefined, "no promise waits for nothing");
 });
+
+test("waitBounded reads a null or missing bound as the default wait, never as no wait", async () => {
+  for (const ms of [null, undefined]) {
+    let settled = false;
+    const waiting = waitBounded(new Promise((resolve) => setTimeout(() => resolve("exited"), 100)), ms).then((v) => { settled = true; return v; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(settled, false, `a ${ms} bound returned at once`);
+    assert.equal(await waiting, "exited");
+  }
+});
