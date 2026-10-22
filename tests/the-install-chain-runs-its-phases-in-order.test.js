@@ -13,7 +13,7 @@ const COMMS = "aify-comms=http://comms.test:8800";
 const plan = (...extra) => parseChainArgs(["--connect", COMMS, "--client", "claude", "--secret", "aify-comms.credentialRef=/k", ...extra]);
 
 /** Fake ports that record every call in order. */
-function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, pkgAssets = null } = {}) {
+function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, assetsExit = 0, pkgAssets = null } = {}) {
   const calls = [];
   const registry = { bytes: "R1" };
   const io = {
@@ -23,7 +23,7 @@ function host({ present = [], published = false, connectExit = 0, env = {}, inst
     publishedKey: async (name) => { calls.push(["publishedKey", name]); return published; },
     ensurePackages: async () => { calls.push(["ensurePackages"]); return true; },
     approvedInstaller: async (name) => { calls.push(["approvedInstaller", name]); return installer; },
-    runInstaller: async (file, args) => { calls.push(["installer", file, ...args]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return 0; },
+    runInstaller: async (file, args) => { calls.push(["installer", file, ...args]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return args[0] === "--assets-only" ? assetsExit : 0; },
     connect: async (c) => { calls.push(["connect", c.name, c.keys.map((k) => `${k.field}=${k.file}`).join()]); return connectExit; },
     render: async (client, url) => { calls.push(["render", client, url]); return 0; },
     cliPresent: (client) => present.includes(client),
@@ -61,6 +61,17 @@ test("an assets step that writes the registry fails the run, naming both hashes"
   const { exit, report } = await new InstallChain(plan("--no-prompt"), io).run();
   assert.equal(exit, EXIT_REFUSED);
   assert.match(report.problems[0], /assets changed the registry \(R1 -> R2\)/);
+});
+
+test("a package's assets bin that exits non-zero is a reported problem, never a skip", async () => {
+  const bin = { command: "/node", args: ["/pkg/bin/aify-dashboard-assets.mjs"] };
+  const { io, calls } = host({ present: ["claude"], published: true, installer: null, pkgAssets: bin, assetsExit: 1 });
+  const dash = parseChainArgs(["--connect", "aify-dashboard=http://dash.test:9700", "--client", "claude", "--no-prompt"]);
+  const { exit, report } = await new InstallChain(dash, io).run();
+  assert.deepEqual(calls.find((c) => c[0] === "installer"), ["installer", bin, "--assets-only", "--client", "claude", "http://dash.test:9700"]);
+  assert.equal(exit, EXIT_REFUSED);
+  assert.deepEqual(report.problems, ["assets aify-dashboard for claude failed"]);
+  assert.ok(io.said.includes("chain: not complete"));
 });
 
 test("without --no-prompt a pending client is reported, not failed", async () => {
