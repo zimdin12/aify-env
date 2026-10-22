@@ -212,16 +212,17 @@ test("THE LOCK: a live holder waits then fails; a dead one on this host is taken
   fs.writeFileSync(lockPath, JSON.stringify({ pid: dead, atMs: 1, nonce: "elsewhere", host: "another-host" }));
   await assert.rejects(store.list(), (error) => error.holderAlive === false && /aify-env agents unlock/.test(error.message));
   assert.equal(JSON.parse(fs.readFileSync(lockPath, "utf8")).nonce, "elsewhere", "another host's lock is not taken");
-  // A torn lock names no live holder: a lock is linked into place whole, so only a writer that died (or a
-  // version before that rule) leaves one. The empty one is what a test daemon killed mid-write left on
-  // 2026-10-14, which refused every call until an operator ran unlock.
+  // A torn lock is still refused: an aify-env from before locks were linked whole may be between its open and
+  // its write, and would act under a successor's lock (review of 18624c3). The refusal names the recovery. The
+  // empty one is what a test daemon killed mid-write left on 2026-10-14.
   for (const torn of ["", "{\"pid\": "]) {
     fs.writeFileSync(lockPath, torn);
-    assert.equal((await store.list()).definitions.length, 1, `a torn lock ${JSON.stringify(torn)} is taken over`);
-    assert.equal(fs.existsSync(lockPath), false, "and the taking call releases it");
+    await assert.rejects(store.list(), (error) => error instanceof DefinitionStoreError
+      && /lock is torn/.test(error.message) && /`aify-env agents unlock`/.test(error.message));
+    assert.equal(fs.readFileSync(lockPath, "utf8"), torn, `a torn lock ${JSON.stringify(torn)} is left as found`);
+    assert.deepEqual(DefinitionStore.unlock({ dir }), { torn }, "and the operator's unlock clears it");
   }
-  fs.writeFileSync(lockPath, "");
-  assert.deepEqual(DefinitionStore.unlock({ dir }), { torn: "" }, "the operator's unlock clears one too");
+  assert.equal((await store.list()).definitions.length, 1);
 });
 
 test("A LOCK IS NEVER TORN: a writer that fails while writing its lock leaves none behind", async () => {
