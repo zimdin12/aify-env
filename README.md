@@ -22,6 +22,18 @@ cd aify-env
 npm install
 ```
 
+**On a new PC, install and connect everything in one run** (guided install S2):
+
+```bash
+./install.sh --connect aify-comms=http://<host>:8800 --client claude --secret aify-comms.credentialRef=<key file>
+```
+
+It installs aify-env and aify-wrapper, then for each `--connect`: acquires the service's approved artifact,
+connects it (`aify-wrapper-connect`), renders each `--client`'s launcher once, applies the service's assets for
+clients whose CLI is present, and reports what is pending. Keys come from a file or `--secret-stdin`, never argv.
+A tuple the catalogue does not approve is refused with the `--approve <digest>` that approves it. `aify-env-install`
+is the same chain on its own; aify-comms' installer hands off to it.
+
 **Start it from the folder that contains your workspaces.** It starts work only in that folder and below
 (`C:\` covers the whole `C:` drive on Windows; another drive or a network share needs its own start), and
 refuses every other start. Started too narrowly, it names each managed agent it cannot start in a warning at
