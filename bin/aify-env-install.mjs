@@ -17,7 +17,7 @@ import { createInterface } from "node:readline/promises";
 
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
-import { approvedInstaller, gitCheckout, hasPublishedKey, packageAssets, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const plan = parseChainArgs(process.argv.slice(2));
 if (plan.problem) process.stderr.write(`aify-env install: ${plan.problem}\n${USAGE}\n`);
@@ -67,9 +67,10 @@ async function runChain(plan) {
       sources: path.join(path.dirname(registry), "sources"),
     }),
     // An install.sh runs under bash; a package's assets entry is `{command, args}`.
-    runInstaller: (installer, args) => (typeof installer === "string"
-      ? runMarked(bash, [installer, ...args], { env })
-      : runMarked(installer.command, [...installer.args, ...args], { env })),
+    runInstaller: (installer, args, { without = [] } = {}) => (typeof installer === "string"
+      ? runMarked(bash, [installer, ...args], { env: envWithout(env, without) })
+      : runMarked(installer.command, [...installer.args, ...args], { env: envWithout(env, without) })),
+    keyEnv: async (names) => registryKeyEnv(registry, names),
     packageAssets: (name, url) => packageAssets(name, url, { ...wrapper, packageRoot: path.join(home, ".aify", "packages") }),
     connect: ({ name, url, keys, stdin, approve, noPrompt }) => {
       const args = [path.join(wrapperRoot, "bin", "aify-wrapper-connect.mjs"), name, url, "--registry", registry];

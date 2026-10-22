@@ -7,13 +7,13 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { CHAIN_MARK, CLIENTS, EXIT_OK, EXIT_REFUSED, InstallChain, LAUNCHER_SERVICE, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
-import { approvedInstaller, gitCheckout, hasPublishedKey, packageAssets, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const COMMS = "aify-comms=http://comms.test:8800";
 const plan = (...extra) => parseChainArgs(["--connect", COMMS, "--client", "claude", "--secret", "aify-comms.credentialRef=/k", ...extra]);
 
 /** Fake ports that record every call in order. */
-function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, assetsExit = 0, pkgAssets = null } = {}) {
+function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, assetsExit = 0, pkgAssets = null, keyEnv = { "aify-comms": ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"] } } = {}) {
   const calls = [];
   const registry = { bytes: "R1" };
   const io = {
@@ -23,12 +23,13 @@ function host({ present = [], published = false, connectExit = 0, env = {}, inst
     publishedKey: async (name) => { calls.push(["publishedKey", name]); return published; },
     ensurePackages: async () => { calls.push(["ensurePackages"]); return true; },
     approvedInstaller: async (name) => { calls.push(["approvedInstaller", name]); return installer; },
-    runInstaller: async (file, args) => { calls.push(["installer", file, ...args]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return args[0] === "--assets-only" ? assetsExit : 0; },
+    runInstaller: async (file, args, opts = {}) => { calls.push(["installer", file, ...args]); if (args[0] === "--assets-only") calls.push(["without", ...(opts.without ?? [])]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return args[0] === "--assets-only" ? assetsExit : 0; },
     connect: async (c) => { calls.push(["connect", c.name, c.keys.map((k) => `${k.field}=${k.file}`).join()]); return connectExit; },
     render: async (client, url) => { calls.push(["render", client, url]); return 0; },
     cliPresent: (client) => present.includes(client),
     packageAssets: async (name) => { calls.push(["packageAssets", name]); return pkgAssets; },
     registryHash: async () => { calls.push(["registryHash"]); return registry.bytes; },
+    keyEnv: async (names) => { if (keyEnv instanceof Error) throw keyEnv; return names.flatMap((n) => keyEnv[n] ?? []); },
   };
   return { io, calls };
 }
@@ -52,8 +53,23 @@ test("control: the same run with the CLI present applies assets after render and
   const order = calls.map((c) => c[0]);
   assert.equal(exit, EXIT_OK);
   assert.ok(order.lastIndexOf("installer") > order.indexOf("render"));
-  assert.deepEqual(calls.at(-2), ["installer", "/src/install.sh", "--assets-only", "--client", "claude", "http://comms.test:8800"]);
+  assert.deepEqual(calls.at(-3), ["installer", "/src/install.sh", "--assets-only", "--client", "claude", "http://comms.test:8800"]);
   assert.ok(io.said.includes("registry before assets: R1") && io.said.includes("registry after assets: R1"));
+});
+
+test("every assets installer starts without the key variables any connected service names", async () => {
+  const { io, calls } = host({ present: ["claude"] });
+  const { exit } = await new InstallChain(plan("--no-prompt"), io).run();
+  assert.equal(exit, EXIT_OK);
+  assert.deepEqual(calls.filter((c) => c[0] === "without"), [["without", "CLAUDE_MCP_API_KEY", "AIFY_API_KEY"]]);
+});
+
+test("a registry whose key variables cannot be read stops assets, never runs them with the key inherited", async () => {
+  const { io, calls } = host({ present: ["claude"], keyEnv: new Error("unreadable") });
+  const { exit, report } = await new InstallChain(plan("--no-prompt"), io).run();
+  assert.equal(exit, EXIT_REFUSED);
+  assert.match(report.problems[0], /assets: the key variables to withhold could not be read: unreadable/);
+  assert.ok(!calls.some((c) => c[0] === "installer" && c[2] === "--assets-only"));
 });
 
 test("an assets step that writes the registry fails the run, naming both hashes", async () => {
@@ -61,6 +77,21 @@ test("an assets step that writes the registry fails the run, naming both hashes"
   const { exit, report } = await new InstallChain(plan("--no-prompt"), io).run();
   assert.equal(exit, EXIT_REFUSED);
   assert.match(report.problems[0], /assets changed the registry \(R1 -> R2\)/);
+});
+
+test("envWithout drops the named variables whatever their case, and keeps the rest", () => {
+  const env = { Path: "p", aify_api_key: "k1", CLAUDE_MCP_API_KEY: "k2", HOME: "h" };
+  assert.deepEqual(envWithout(env, ["AIFY_API_KEY", "CLAUDE_MCP_API_KEY"]), { Path: "p", HOME: "h" });
+  assert.deepEqual(envWithout(env, []), env, "CONTROL: nothing named, nothing dropped");
+});
+
+test("registryKeyEnv reads each connected service's keyEnv from the registry, and refuses one it cannot parse", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chain-keyenv-"));
+  const file = path.join(dir, "services.json");
+  fs.writeFileSync(file, JSON.stringify({ version: 1, services: { "aify-comms": { keyEnv: ["AIFY_API_KEY"] }, other: { keyEnv: ["OTHER_KEY"] } } }));
+  assert.deepEqual(registryKeyEnv(file, ["aify-comms"]), ["AIFY_API_KEY"]);
+  fs.writeFileSync(file, "{not json");
+  assert.throws(() => registryKeyEnv(file, ["aify-comms"]));
 });
 
 test("a package's assets bin that exits non-zero is a reported problem, never a skip", async () => {
