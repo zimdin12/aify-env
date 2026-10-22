@@ -7,13 +7,13 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { CHAIN_MARK, CLIENTS, EXIT_OK, EXIT_REFUSED, InstallChain, LAUNCHER_SERVICE, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
-import { approvedInstaller, gitCheckout, hasPublishedKey, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, gitCheckout, hasPublishedKey, packageAssets, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const COMMS = "aify-comms=http://comms.test:8800";
 const plan = (...extra) => parseChainArgs(["--connect", COMMS, "--client", "claude", "--secret", "aify-comms.credentialRef=/k", ...extra]);
 
 /** Fake ports that record every call in order. */
-function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false } = {}) {
+function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, pkgAssets = null } = {}) {
   const calls = [];
   const registry = { bytes: "R1" };
   const io = {
@@ -27,6 +27,7 @@ function host({ present = [], published = false, connectExit = 0, env = {}, inst
     connect: async (c) => { calls.push(["connect", c.name, c.keys.map((k) => `${k.field}=${k.file}`).join()]); return connectExit; },
     render: async (client, url) => { calls.push(["render", client, url]); return 0; },
     cliPresent: (client) => present.includes(client),
+    packageAssets: async (name) => { calls.push(["packageAssets", name]); return pkgAssets; },
     registryHash: async () => { calls.push(["registryHash"]); return registry.bytes; },
   };
   return { io, calls };
@@ -246,4 +247,45 @@ test("an installer runs under the chain's mark; a checkout is read back at its r
   const failing = gitCheckout("o/r", "e".repeat(40), path.join(dir, "co2"), { run: () => ({ status: 128, stderr: "no such repo" }) });
   assert.deepEqual(failing, { ok: false, problem: "no such repo" });
   assert.equal(typeof wrapperModules, "function");
+});
+
+test("a package's own assets entry runs after its connect, in assets-only mode with the url", async () => {
+  const entry = { command: "/node", args: ["/pk/assets.mjs"] };
+  const { io, calls } = host({ present: ["claude"], installer: null, pkgAssets: entry });
+  const dash = parseChainArgs(["--connect", "aify-dashboard=http://d.test:7000", "--client", "claude", "--secret", "aify-dashboard.credentialRef=/k"]);
+  const { exit } = await new InstallChain(dash, io).run();
+  assert.equal(exit, EXIT_OK);
+  const order = calls.map((c) => c[0]);
+  assert.ok(order.indexOf("packageAssets") > order.indexOf("connect"));
+  assert.deepEqual(calls.find((c) => c[0] === "installer"), ["installer", entry, "--assets-only", "--client", "claude", "http://d.test:7000"]);
+  const none = host({ present: ["claude"], installer: null });
+  await new InstallChain(dash, none.io).run();
+  assert.ok(none.io.said.includes("assets: aify-dashboard declares no assets entry"));
+  const bad = host({ present: ["claude"], installer: null, pkgAssets: { problem: "two packages" } });
+  const out = await new InstallChain(dash, bad.io).run();
+  assert.match(out.report.problems[0], /assets entry of aify-dashboard: two packages/);
+  const given = host({ present: ["claude"] });
+  await new InstallChain(plan(), given.io).run();
+  assert.ok(!given.calls.some((c) => c[0] === "packageAssets"), "an installer the service already has is not replaced");
+});
+
+test("a package's assets entry is the bin named <service>-assets in the package connect installed", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chain-pkg-"));
+  const rev = "f".repeat(40);
+  const art = { id: "dashboard-bridge", kind: "package", source: { git: { repo: "o/r", revision: rev } }, entries: ["aify-dashboard-bridge"] };
+  const p = { fetchSpec: async () => ({ artifacts: [art] }), validateSpec: (spec) => ({ ok: true, errors: [], spec }), packageRoot: root, execPath: "/node" };
+  const modules = path.join(root, "aify-dashboard", "dashboard-bridge", rev, "node_modules");
+  assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /not installed under/);
+  const pkg = path.join(modules, "@scope", "aify-dashboard");
+  fs.mkdirSync(pkg, { recursive: true });
+  fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-bridge": "bin/b.mjs" } }));
+  assert.equal(await packageAssets("aify-dashboard", "http://d", p), null, "no declared entry is no assets");
+  fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-assets": "bin/assets.mjs" } }));
+  assert.deepEqual(await packageAssets("aify-dashboard", "http://d", p), { command: "/node", args: [path.join(pkg, "bin", "assets.mjs")] });
+  fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-assets": "../../../x.mjs" } }));
+  assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /outside its package/);
+  fs.mkdirSync(path.join(modules, "second"));
+  assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /holds 2 packages/);
+  assert.match((await packageAssets("aify-dashboard", "http://d", { ...p, validateSpec: () => ({ ok: false, errors: ["name"] }) })).problem, /refused: name/);
+  assert.equal(await packageAssets("aify-dashboard", "http://d", { ...p, fetchSpec: async () => ({ artifacts: [{ ...art, kind: "file-set" }] }) }), null);
 });

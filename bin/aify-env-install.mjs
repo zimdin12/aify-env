@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
-import { approvedInstaller, gitCheckout, hasPublishedKey, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, gitCheckout, hasPublishedKey, packageAssets, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const plan = parseChainArgs(process.argv.slice(2));
 if (plan.problem) {
@@ -62,7 +62,11 @@ const io = {
     checkout: (repo, revision, dir) => gitCheckout(repo, revision, dir, { base: env.AIFY_INSTALL_GIT_BASE || undefined }),
     sources: path.join(path.dirname(registry), "sources"),
   }),
-  runInstaller: (installer, args) => runMarked("bash", [installer, ...args], { env }),
+  // An install.sh runs under bash; a package's assets entry is `{command, args}`.
+  runInstaller: (installer, args) => (typeof installer === "string"
+    ? runMarked("bash", [installer, ...args], { env })
+    : runMarked(installer.command, [...installer.args, ...args], { env })),
+  packageAssets: (name, url) => packageAssets(name, url, { ...wrapper, packageRoot: path.join(home, ".aify", "packages") }),
   connect: ({ name, url, keys, stdin, approve, noPrompt }) => {
     const args = [path.join(wrapperRoot, "bin", "aify-wrapper-connect.mjs"), name, url, "--registry", registry];
     for (const key of keys) args.push(...(key.field === "credentialRef" ? ["--key-file", key.file] : ["--secret-file", `${key.field}=${key.file}`]));
