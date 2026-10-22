@@ -31,7 +31,7 @@ npm install
 It installs aify-env and aify-wrapper, then for each `--connect`: acquires the service's approved artifact,
 connects it (`aify-wrapper-connect`), renders each `--client`'s launcher once, applies the service's assets for
 clients whose CLI is present, and reports what is pending. Keys come from a file or `--secret-stdin`, never argv.
-A tuple the catalogue does not approve is refused with the `--approve <digest>` that approves it. `aify-env-install`
+A tuple the catalogue does not approve is refused with the `--approve <digest>` that approves it. `aify-env install`
 is the same chain on its own; aify-comms' installer hands off to it.
 
 **Start it from the folder that contains your workspaces.** It starts work only in that folder and below

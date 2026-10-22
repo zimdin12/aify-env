@@ -5,8 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "aify-env": "./bin/aify-env.mjs",
-    "aify-env-install": "./bin/aify-env-install.mjs"
+    "aify-env": "./bin/aify-env.mjs"
   },
   "files": [
     "lib/",
