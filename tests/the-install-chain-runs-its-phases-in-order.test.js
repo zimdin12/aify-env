@@ -51,7 +51,7 @@ test("control: the same run with the CLI present applies assets after render and
   const order = calls.map((c) => c[0]);
   assert.equal(exit, EXIT_OK);
   assert.ok(order.lastIndexOf("installer") > order.indexOf("render"));
-  assert.deepEqual(calls.at(-2), ["installer", "/src/install.sh", "--assets-only", "--client", "claude"]);
+  assert.deepEqual(calls.at(-2), ["installer", "/src/install.sh", "--assets-only", "--client", "claude", "http://comms.test:8800"]);
   assert.ok(io.said.includes("registry before assets: R1") && io.said.includes("registry after assets: R1"));
 });
 
