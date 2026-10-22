@@ -175,3 +175,46 @@ test("createWhole puts the whole text in place or nothing, and never replaces an
   assert.equal(fs.readFileSync(target, "utf8"), "first", "an existing file is kept");
   assert.deepEqual(fs.readdirSync(dir), [".lock"], "and no temporary is left");
 });
+
+// fs is patched in place: lock-break.mjs calls through the same `fs` object, so these reach createWhole's own calls.
+function patched(name, replacement, body) {
+  const real = fs[name];
+  fs[name] = replacement(real);
+  try { return body(); } finally { fs[name] = real; }
+}
+
+test("createWhole writes every byte through short writes, and refuses before the link when no byte is written", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-defs-whole-"));
+  const text = JSON.stringify({ pid: 1, host: "h", nonce: "ü-multibyte" });
+  // A writeSync that writes and reports 3 bytes the first time, without throwing (review of 18624c3, F2).
+  let calls = 0;
+  patched("writeSync", (real) => (fd, data, ...rest) => {
+    if (calls++ > 0) return real(fd, data, ...rest);
+    const bytes = Buffer.isBuffer(data) ? data.subarray(rest[0] ?? 0) : Buffer.from(String(data));
+    return real(fd, bytes, 0, 3);
+  }, () => createWhole(path.join(dir, "short"), text));
+  assert.equal(fs.readFileSync(path.join(dir, "short"), "utf8"), text, "the whole text is in place");
+  assert.ok(calls > 1, "the control: the first write really was short");
+  assert.throws(() => patched("writeSync", () => () => 0, () => createWhole(path.join(dir, "none"), text)), /no byte written/);
+  assert.deepEqual(fs.readdirSync(dir), ["short"], "a write that makes no progress publishes nothing and leaves no temporary");
+});
+
+test("createWhole: a temporary that will not go away never undoes a link that happened, nor hides the failure before one", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-defs-whole-"));
+  const target = path.join(dir, ".lock");
+  const failingRm = (real) => (file, ...rest) => {
+    if (String(file).endsWith(".tmp")) throw Object.assign(new Error("temporary cleanup failed"), { code: "EBUSY" });
+    return real(file, ...rest);
+  };
+  // After the link (review of 18624c3, F3): the file is in place, and that is the result.
+  patched("rmSync", failingRm, () => createWhole(target, "held"));
+  assert.equal(fs.readFileSync(target, "utf8"), "held");
+  // Before it: the link's own EEXIST is what is thrown, and the existing file is byte-identical.
+  assert.throws(() => patched("rmSync", failingRm, () => createWhole(target, "other")), { code: "EEXIST" });
+  assert.equal(fs.readFileSync(target, "utf8"), "held", "an existing target is kept intact");
+  // And a failed write is what is thrown, not the cleanup's failure.
+  assert.throws(() => patched("rmSync", failingRm, () => patched("writeSync",
+    () => () => { throw Object.assign(new Error("the write failed"), { code: "EIO" }); },
+    () => createWhole(path.join(dir, "never"), "x"))), { code: "EIO" });
+  assert.equal(fs.existsSync(path.join(dir, "never")), false);
+});

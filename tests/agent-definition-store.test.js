@@ -339,3 +339,22 @@ test("A LOCK TAKEN FROM A RUNNING OPERATION stops it at the next step, and the n
   const listed = await storeIn(dir).list();
   assert.deepEqual(listed.recovered.map((r) => [r.arm, r.outcome]), [["3", "unknown"]]);
 });
+
+test("A LOCK WHOSE TEMPORARY WILL NOT GO AWAY is still this call's: it is used and released, never left unowned", async () => {
+  const dir = tempDir();
+  const store = storeIn(dir);
+  await store.set("a", agent(), { installed: ALL });
+  const realRmSync = fs.rmSync;
+  fs.rmSync = (file, ...rest) => {
+    if (String(file).endsWith(".tmp")) throw Object.assign(new Error("temporary cleanup failed"), { code: "EBUSY" });
+    return realRmSync(file, ...rest);
+  };
+  let listed;
+  try {
+    listed = await store.list();
+  } finally {
+    fs.rmSync = realRmSync;
+  }
+  assert.equal(listed.definitions.length, 1, "the call ran under the lock it linked");
+  assert.equal(fs.existsSync(path.join(dir, ".lock")), false, "and released it, so no running pid's lock is left behind");
+});
