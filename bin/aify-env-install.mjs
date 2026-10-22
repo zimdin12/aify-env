@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
+import { resolveExecutable } from "../lib/interpreter.mjs";
 import { approvedInstaller, gitCheckout, hasPublishedKey, packageAssets, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const plan = parseChainArgs(process.argv.slice(2));
@@ -27,6 +28,8 @@ const env = process.env;
 const home = os.homedir();
 const registry = registryPath(env, home);
 const windows = process.platform === "win32";
+// Git Bash by its path: a bare `bash` on Windows can be WSL's, which cannot open a C: path (lib/interpreter.mjs).
+const bash = resolveExecutable("bash");
 const say = (line) => process.stdout.write(`[aify-env] ${line}\n`);
 const stdinKey = plan.secretStdin ? fs.readFileSync(0, "utf8") : undefined;
 
@@ -64,7 +67,7 @@ const io = {
   }),
   // An install.sh runs under bash; a package's assets entry is `{command, args}`.
   runInstaller: (installer, args) => (typeof installer === "string"
-    ? runMarked("bash", [installer, ...args], { env })
+    ? runMarked(bash, [installer, ...args], { env })
     : runMarked(installer.command, [...installer.args, ...args], { env })),
   packageAssets: (name, url) => packageAssets(name, url, { ...wrapper, packageRoot: path.join(home, ".aify", "packages") }),
   connect: ({ name, url, keys, stdin, approve, noPrompt }) => {
@@ -83,7 +86,7 @@ const io = {
     }
     return runMarked(process.execPath, args, { env, input: stdin ? stdinKey : undefined });
   },
-  render: (client, url) => runMarked("bash", [path.join(wrapperRoot, "install.sh"), "--client", client, "--endpoint", url, "--registry", registry], { env }),
+  render: (client, url) => runMarked(bash, [path.join(wrapperRoot, "install.sh"), "--client", client, "--endpoint", url, "--registry", registry], { env }),
   registryHash: () => {
     try { return createHash("sha256").update(fs.readFileSync(registry)).digest("hex"); } catch { return "absent"; }
   },
