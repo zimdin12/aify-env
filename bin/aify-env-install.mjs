@@ -59,7 +59,7 @@ async function runChain(plan) {
         if (npm.status !== 0) return false;
       }
       wrapper = await wrapperModules(wrapperRoot);
-      return true;
+      return wrapper.problem ? wrapper : true;
     },
     approvedInstaller: (name, url, approve) => approvedInstaller(name, url, {
       ...wrapper, approve,
@@ -67,25 +67,21 @@ async function runChain(plan) {
       sources: path.join(path.dirname(registry), "sources"),
     }),
     // An install.sh runs under bash; a package's assets entry is `{command, args}`.
-    runInstaller: (installer, args, { without = [] } = {}) => (typeof installer === "string"
-      ? runMarked(bash, [installer, ...args], { env: envWithout(env, without) })
-      : runMarked(installer.command, [...installer.args, ...args], { env: envWithout(env, without) })),
+    runInstaller: (installer, args, { without = [], quiet = false } = {}) => (typeof installer === "string"
+      ? runMarked(bash, [installer, ...args], { env: envWithout(env, without), quiet })
+      : runMarked(installer.command, [...installer.args, ...args], { env: envWithout(env, without), quiet })),
     keyEnv: async (names) => registryKeyEnv(registry, names),
-    packageAssets: (name, url) => packageAssets(name, url, { ...wrapper, packageRoot: path.join(home, ".aify", "packages") }),
+    packageAssets: (name, url) => packageAssets(name, url, {
+      ...wrapper, packageRoot: path.join(home, ".aify", "packages"),
+      npmLs: (prefix) => JSON.parse(wrapper.npmTool(wrapper.npmCliBeside(process.execPath), env, Error)(["ls", "--prefix", prefix, "--json", "--long", "--depth=0"]) || "{}"),
+    }),
     connect: ({ name, url, keys, stdin, approve, noPrompt }) => {
       const args = [path.join(wrapperRoot, "bin", "aify-wrapper-connect.mjs"), name, url, "--registry", registry];
       for (const key of keys) args.push(...(key.field === "credentialRef" ? ["--key-file", key.file] : ["--secret-file", `${key.field}=${key.file}`]));
       if (stdin?.field === "credentialRef") args.push("--key-stdin");
       for (const digest of approve) args.push("--approve", digest);
       if (noPrompt) args.push("--no-prompt");
-      if (stdin && stdin.field !== "credentialRef") {
-        // connect reads only the service key from stdin; any other field goes through a private file.
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-env-install-"));
-        const file = path.join(dir, stdin.field);
-        fs.writeFileSync(file, stdinKey, { mode: 0o600 });
-        args.push("--secret-file", `${stdin.field}=${file}`);
-        try { return runMarked(process.execPath, args, { env }); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-      }
+      // Only a service's key comes on stdin (parseChainArgs refuses any other field), so nothing is written to a file.
       return runMarked(process.execPath, args, { env, input: stdin ? stdinKey : undefined });
     },
     render: (client, url) => runMarked(bash, [path.join(wrapperRoot, "install.sh"), "--client", client, "--endpoint", url, "--registry", registry], { env }),

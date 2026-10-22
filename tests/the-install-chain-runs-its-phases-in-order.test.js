@@ -13,7 +13,7 @@ const COMMS = "aify-comms=http://comms.test:8800";
 const plan = (...extra) => parseChainArgs(["--connect", COMMS, "--client", "claude", "--secret", "aify-comms.credentialRef=/k", ...extra]);
 
 /** Fake ports that record every call in order. */
-function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, assetsExit = 0, pkgAssets = null, keyEnv = { "aify-comms": ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"] } } = {}) {
+function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, assetsExit = 0, pkgAssets = null, keyEnv = { "aify-comms": ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"] }, packages = true } = {}) {
   const calls = [];
   const registry = { bytes: "R1" };
   const io = {
@@ -21,9 +21,9 @@ function host({ present = [], published = false, connectExit = 0, env = {}, inst
     say(line) { this.said.push(line); },
     ask: async () => "",
     publishedKey: async (name) => { calls.push(["publishedKey", name]); return published; },
-    ensurePackages: async () => { calls.push(["ensurePackages"]); return true; },
+    ensurePackages: async () => { calls.push(["ensurePackages"]); return packages; },
     approvedInstaller: async (name) => { calls.push(["approvedInstaller", name]); return installer; },
-    runInstaller: async (file, args, opts = {}) => { calls.push(["installer", file, ...args]); if (args[0] === "--assets-only") calls.push(["without", ...(opts.without ?? [])]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return args[0] === "--assets-only" ? assetsExit : 0; },
+    runInstaller: async (file, args, opts = {}) => { calls.push(["installer", file, ...args]); if (args[0] === "--assets-only") calls.push(["without", ...(opts.without ?? [])]); calls.push(["quiet", args[0], opts.quiet === true]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return args[0] === "--assets-only" ? assetsExit : 0; },
     connect: async (c) => { calls.push(["connect", c.name, c.keys.map((k) => `${k.field}=${k.file}`).join()]); return connectExit; },
     render: async (client, url) => { calls.push(["render", client, url]); return 0; },
     cliPresent: (client) => present.includes(client),
@@ -40,7 +40,7 @@ test("render comes after connect, and a selected client whose CLI is absent fail
   const order = calls.map((c) => c[0]);
   assert.ok(order.indexOf("connect") < order.indexOf("render"), `render before connect: ${order}`);
   assert.ok(order.indexOf("installer") < order.indexOf("connect"), "acquire before connect");
-  assert.deepEqual(calls.find((c) => c[0] === "installer"), ["installer", "/src/install.sh", "--acquire-only"]);
+  assert.deepEqual(calls.find((c) => c[0] === "installer"), ["installer", "/src/install.sh", "--acquire-only", "http://comms.test:8800"]);
   assert.deepEqual(report.pending, ["claude: pending (CLI absent)"]);
   assert.equal(exit, EXIT_REFUSED);
   assert.ok(io.said.includes("pending: claude: pending (CLI absent)"));
@@ -53,7 +53,7 @@ test("control: the same run with the CLI present applies assets after render and
   const order = calls.map((c) => c[0]);
   assert.equal(exit, EXIT_OK);
   assert.ok(order.lastIndexOf("installer") > order.indexOf("render"));
-  assert.deepEqual(calls.at(-3), ["installer", "/src/install.sh", "--assets-only", "--client", "claude", "http://comms.test:8800"]);
+  assert.deepEqual(calls.at(-4), ["installer", "/src/install.sh", "--assets-only", "--client", "claude", "http://comms.test:8800"]);
   assert.ok(io.said.includes("registry before assets: R1") && io.said.includes("registry after assets: R1"));
 });
 
@@ -70,6 +70,37 @@ test("a registry whose key variables cannot be read stops assets, never runs the
   assert.equal(exit, EXIT_REFUSED);
   assert.match(report.problems[0], /assets: the key variables to withhold could not be read: unreadable/);
   assert.ok(!calls.some((c) => c[0] === "installer" && c[2] === "--assets-only"));
+});
+
+test("every installer the chain runs is told it may not ask: stdin closed and the no-prompt contract set", async () => {
+  const { io, calls } = host({ present: ["claude"] });
+  await new InstallChain(plan(), io).run();
+  assert.deepEqual(calls.filter((c) => c[0] === "quiet"), [["quiet", "--acquire-only", true], ["quiet", "--assets-only", true]]);
+  const runs = [];
+  const run = (command, args, options) => { runs.push(options); return { status: 0 }; };
+  runMarked("bash", ["/x/install.sh", "--acquire-only"], { env: { A: "1" }, run, quiet: true });
+  assert.equal(runs[0].stdio[0], "ignore");
+  assert.equal(runs[0].env.AIFY_NO_PROMPT, "1");
+  runMarked("bash", ["/x"], { env: {}, run });
+  assert.equal(runs[1].stdio[0], "inherit", "CONTROL: a run not marked quiet keeps its terminal");
+  assert.equal(runs[1].env.AIFY_NO_PROMPT, undefined);
+});
+
+test("an installed aify-wrapper that lacks what the chain needs is a reported refusal with guidance, not a crash", async () => {
+  const { io, calls } = host({ present: ["claude"], packages: { problem: "the installed aify-wrapper at /g/aify-wrapper lacks lib/package-install.mjs" } });
+  const { exit, report } = await new InstallChain(plan("--no-prompt"), io).run();
+  assert.equal(exit, EXIT_REFUSED);
+  assert.deepEqual(report.problems, ["acquire: the installed aify-wrapper at /g/aify-wrapper lacks lib/package-install.mjs"]);
+  assert.ok(!calls.some((c) => c[0] === "connect"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chain-wrapper-"));
+  fs.mkdirSync(path.join(root, "lib"));
+  for (const rel of ["connect-http.mjs", "service-spec.mjs", "path-lookup.mjs"]) fs.writeFileSync(path.join(root, "lib", rel), "export const x = 1;\n");
+  fs.writeFileSync(path.join(root, "lib", "artifact-catalogue.json"), JSON.stringify({ approved: [] }));
+  const missing = await wrapperModules(root);
+  assert.match(missing.problem, /lacks lib\/package-install\.mjs/);
+  assert.match(missing.problem, /npm install -g .*aify-wrapper.*git pull/s);
+  fs.writeFileSync(path.join(root, "lib", "package-install.mjs"), "export const x = 1;\n");
+  assert.equal((await wrapperModules(root)).problem, undefined, "CONTROL: every module present loads");
 });
 
 test("an assets step that writes the registry fails the run, naming both hashes", async () => {
@@ -213,10 +244,11 @@ test("arguments: keys never in argv, every name checked, usage names the flags",
   assert.match(parseChainArgs(["--connect", COMMS, "--secret-stdin", "aify-comms.credentialRef", "--secret", "aify-comms.credentialRef=/k"]).problem, /given twice/);
   assert.match(parseChainArgs(["--connect", COMMS, "--installer", "other=/x"]).problem, /not connected/);
   assert.match(parseChainArgs(["--connect", COMMS, "--frob"]).problem, /unknown option/);
-  const ok = parseChainArgs(["--connect", COMMS, "--client", "claude", "--client", "claude", "--secret-stdin", "aify-comms.secretsCredentialRef", "--approve", "d1"]);
+  assert.match(parseChainArgs(["--connect", COMMS, "--secret-stdin", "aify-comms.secretsCredentialRef"]).problem, /--secret-stdin carries only a service's key \(credentialRef\)/);
+  const ok = parseChainArgs(["--connect", COMMS, "--client", "claude", "--client", "claude", "--secret-stdin", "aify-comms.credentialRef", "--approve", "d1"]);
   assert.equal(ok.problem, "");
   assert.deepEqual(ok.clients, ["claude"]);
-  assert.deepEqual(ok.secretStdin, { service: "aify-comms", field: "secretsCredentialRef" });
+  assert.deepEqual(ok.secretStdin, { service: "aify-comms", field: "credentialRef" });
   for (const flag of ["--connect", "--client", "--secret", "--secret-stdin", "--approve", "--installer", "--no-prompt"]) assert.ok(USAGE.includes(flag), flag);
   assert.deepEqual(CLIENTS, ["claude", "codex", "hermes"]);
 });
@@ -311,23 +343,42 @@ test("a package's own assets entry runs after its connect, in assets-only mode w
   assert.ok(!given.calls.some((c) => c[0] === "packageAssets"), "an installer the service already has is not replaced");
 });
 
-test("a package's assets entry is the bin named <service>-assets in the package connect installed", async () => {
+test("a package's assets entry is the <service>-assets bin of the one package npm installed directly, beside its dependencies", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "chain-pkg-"));
   const rev = "f".repeat(40);
   const art = { id: "dashboard-bridge", kind: "package", source: { git: { repo: "o/r", revision: rev } }, entries: ["aify-dashboard-bridge"] };
-  const p = { fetchSpec: async () => ({ artifacts: [art] }), validateSpec: (spec) => ({ ok: true, errors: [], spec }), packageRoot: root, execPath: "/node" };
-  const modules = path.join(root, "aify-dashboard", "dashboard-bridge", rev, "node_modules");
+  const prefix = path.join(root, "aify-dashboard", "dashboard-bridge", rev);
+  let listed = { dependencies: { "@scope/aify-dashboard": { resolved: `git+ssh://git@github.com/o/r.git#${rev}` } } };
+  // The aify-wrapper contract (lib/package-install.mjs installedCommit, binFiles), in miniature.
+  const installedCommit = (ls) => {
+    const deps = Object.entries(ls?.dependencies ?? {});
+    if (deps.length !== 1) return { problem: `npm reports ${deps.length} packages in the artifact's prefix, not 1` };
+    return { name: deps[0][0], commit: /#([0-9a-f]{40})$/.exec(deps[0][1].resolved)?.[1], problem: "" };
+  };
+  const binFiles = (pkg, entries) => {
+    const file = String(pkg.bin?.[entries[0]] ?? "");
+    return /(^|\/)\.\.(\/|$)|^\//.test(file) ? { files: {}, problems: [`${entries[0]}'s bin ${file} leaves the package`] } : { files: { [entries[0]]: file }, problems: [] };
+  };
+  const p = { fetchSpec: async () => ({ artifacts: [art] }), validateSpec: (spec) => ({ ok: true, errors: [], spec }), packageRoot: root, execPath: "/node", npmLs: () => listed, installedCommit, binFiles };
   assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /not installed under/);
-  const pkg = path.join(modules, "@scope", "aify-dashboard");
+  const pkg = path.join(prefix, "node_modules", "@scope", "aify-dashboard");
   fs.mkdirSync(pkg, { recursive: true });
+  fs.mkdirSync(path.join(prefix, "node_modules", "a-hoisted-dependency"), { recursive: true });
+  fs.mkdirSync(path.join(pkg, "bin"));
+  fs.writeFileSync(path.join(pkg, "bin", "assets.mjs"), "");
   fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-bridge": "bin/b.mjs" } }));
   assert.equal(await packageAssets("aify-dashboard", "http://d", p), null, "no declared entry is no assets");
   fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-assets": "bin/assets.mjs" } }));
-  assert.deepEqual(await packageAssets("aify-dashboard", "http://d", p), { command: "/node", args: [path.join(pkg, "bin", "assets.mjs")] });
+  assert.deepEqual(await packageAssets("aify-dashboard", "http://d", p), { command: "/node", args: [path.join(pkg, "bin", "assets.mjs")] }, "a hoisted dependency beside it is not a second candidate");
   fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-assets": "../../../x.mjs" } }));
-  assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /outside its package/);
-  fs.mkdirSync(path.join(modules, "second"));
-  assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /holds 2 packages/);
+  assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /leaves the package/);
+  fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-assets": "bin/gone.mjs" } }));
+  assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /not on disk/);
+  fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-assets": "bin/assets.mjs" } }));
+  listed = { dependencies: { "@scope/aify-dashboard": { resolved: `git+ssh://git@github.com/o/r.git#${"e".repeat(40)}` } } };
+  assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /not the spec's revision/);
+  listed = { dependencies: {} };
+  assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /npm reports 0 packages/);
   assert.match((await packageAssets("aify-dashboard", "http://d", { ...p, validateSpec: () => ({ ok: false, errors: ["name"] }) })).problem, /refused: name/);
   assert.equal(await packageAssets("aify-dashboard", "http://d", { ...p, fetchSpec: async () => ({ artifacts: [{ ...art, kind: "file-set" }] }) }), null);
 });

@@ -24,6 +24,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# A relative --secret/--installer path names a file where the CALLER stands; it is made absolute before the cd below.
+CALLER="$(pwd)"
 cd "$HERE"
 
 PLAN_ONLY=false
@@ -35,7 +37,12 @@ while [ $# -gt 0 ]; do
     --no-prompt) NO_PROMPT=true; CHAIN+=("$1") ;;
     --connect|--client|--secret|--secret-stdin|--approve|--installer)
       [ $# -ge 2 ] || { echo "aify-env install: $1 needs a value" >&2; exit 64; }
-      CHAIN+=("$1" "$2"); shift ;;
+      value="$2"
+      case "$1=$2" in
+        --secret=*=/*|--installer=*=/*|--secret=*=[A-Za-z]:[\\/]*|--installer=*=[A-Za-z]:[\\/]*) ;;
+        --secret=*=*|--installer=*=*) value="${2%%=*}=$CALLER/${2#*=}" ;;
+      esac
+      CHAIN+=("$1" "$value"); shift ;;
     -h|--help) sed -n '2,23p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "aify-env install: unknown option '$1'" >&2; exit 64 ;;
   esac
