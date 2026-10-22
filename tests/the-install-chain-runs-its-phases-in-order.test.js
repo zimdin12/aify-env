@@ -7,13 +7,13 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { CHAIN_MARK, CLIENTS, EXIT_OK, EXIT_REFUSED, InstallChain, LAUNCHER_SERVICE, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
-import { approvedInstaller, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
+import { acceptedPackages, approvedInstaller, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, runMarkedCapture, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const COMMS = "aify-comms=http://comms.test:8800";
 const plan = (...extra) => parseChainArgs(["--connect", COMMS, "--client", "claude", "--secret", "aify-comms.credentialRef=/k", ...extra]);
 
 /** Fake ports that record every call in order. */
-function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, assetsExit = 0, pkgAssets = null, keyEnv = { "aify-comms": ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"] }, packages = true } = {}) {
+function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, assetsExit = 0, pkgAssets = null, installed = {}, keyEnv = { "aify-comms": ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"] }, packages = true } = {}) {
   const calls = [];
   const registry = { bytes: "R1" };
   const io = {
@@ -24,10 +24,10 @@ function host({ present = [], published = false, connectExit = 0, env = {}, inst
     ensurePackages: async () => { calls.push(["ensurePackages"]); return packages; },
     approvedInstaller: async (name) => { calls.push(["approvedInstaller", name]); return installer; },
     runInstaller: async (file, args, opts = {}) => { calls.push(["installer", file, ...args]); if (args[0] === "--assets-only") calls.push(["without", ...(opts.without ?? [])]); calls.push(["quiet", args[0], opts.quiet === true]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return args[0] === "--assets-only" ? assetsExit : 0; },
-    connect: async (c) => { calls.push(["connect", c.name, c.keys.map((k) => `${k.field}=${k.file}`).join()]); return connectExit; },
+    connect: async (c) => { calls.push(["connect", c.name, c.keys.map((k) => `${k.field}=${k.file}`).join()]); return { status: connectExit, installed: installed[c.name] ?? {} }; },
     render: async (client, url) => { calls.push(["render", client, url]); return 0; },
     cliPresent: (client) => present.includes(client),
-    packageAssets: async (name) => { calls.push(["packageAssets", name]); return pkgAssets; },
+    packageAssets: async (name, url, approve, accepted) => { calls.push(["packageAssets", name, accepted]); return pkgAssets; },
     registryHash: async () => { calls.push(["registryHash"]); return registry.bytes; },
     keyEnv: async (names) => { if (keyEnv instanceof Error) throw keyEnv; return names.flatMap((n) => keyEnv[n] ?? []); },
   };
@@ -388,11 +388,10 @@ test("a package's assets entry is the <service>-assets bin of the one package np
     return /(^|\/)\.\.(\/|$)|^\//.test(file) ? { files: {}, problems: [`${entries[0]}'s bin ${file} leaves the package`] } : { files: { [entries[0]]: file }, problems: [] };
   };
   const tupleDigest = (a) => `${a.kind}:${a.source.git.repo}`;
-  const entryAt = (dir) => ({ mcp: [{ name: "aify-dashboard", command: "/node", args: [`${dir.split(path.sep).join("/")}/bin/b.mjs`] }] });
   const p = {
     fetchSpec: async () => ({ artifacts: [art] }), validateSpec: (spec) => ({ ok: true, errors: [], spec }), packageRoot: root, execPath: "/node",
     npmLs: () => listed, installedCommit, binFiles, tupleDigest, catalogue: [], approve: ["package:o/r"],
-    registryEntry: entryAt(path.join(root, "aify-dashboard", "dashboard-bridge", rev, "node_modules", "@scope", "aify-dashboard")),
+    accepted: { "dashboard-bridge": path.join(root, "aify-dashboard", "dashboard-bridge", rev, "node_modules", "@scope", "aify-dashboard").split(path.sep).join("/") },
   };
   assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /not installed under/);
   const pkg = path.join(prefix, "node_modules", "@scope", "aify-dashboard");
@@ -442,15 +441,63 @@ test("assets run only from the package connect installed, at a tuple approved no
     },
     binFiles: (pkg, entries) => ({ files: { [entries[0]]: pkg.bin[entries[0]] }, problems: [] }),
     tupleDigest: (art) => `${art.kind}:${art.source.git.repo}`, catalogue: [], approve: ["package:o/r"],
-    // What connect published: the bridge from A's package.
-    registryEntry: { mcp: [{ name: "aify-dashboard", command: "/node", args: [`${a.pkg.split(path.sep).join("/")}/bin/b.mjs`] }] },
+    // What connect reported installing in this run: A's package, nothing else.
+    accepted: { "dashboard-bridge": a.pkg.split(path.sep).join("/") },
+    // Registry text that must not count: a row NAMED after B's directory whose arguments run A, and a stale row a
+    // differently named earlier connect left behind, pointing into B (connect's mergeEntry keeps such rows).
+    registryEntry: { mcp: [
+      { name: `aify-dashboard ${b.pkg.split(path.sep).join("/")}`, command: "/node", args: [`${a.pkg.split(path.sep).join("/")}/bin/b.mjs`] },
+      { name: "an-older-bridge", command: "/node", args: [`${b.pkg.split(path.sep).join("/")}/bin/b.mjs`] },
+    ] },
   };
   const stable = await packageAssets("aify-dashboard", "http://d", { ...p, fetchSpec: async () => ({ artifacts: [artA] }) });
   assert.deepEqual(stable, { command: "/node", args: [path.join(a.pkg, "bin", "assets.mjs")] }, "CONTROL: A, connected and approved, beside a hoisted dependency");
   const swapped = await packageAssets("aify-dashboard", "http://d", { ...p, fetchSpec: async () => ({ artifacts: [artB] }) });
   assert.match(swapped.problem ?? "", /is not approved/, "B's repository was never approved for this run, and its package ran");
   const approvedButNotConnected = await packageAssets("aify-dashboard", "http://d", { ...p, approve: ["package:o/r", "package:evil/other"], fetchSpec: async () => ({ artifacts: [artB] }) });
-  assert.match(approvedButNotConnected.problem ?? "", /is not the package connect installed/, "B was approved but connect published A; B's package ran");
-  const noEntry = await packageAssets("aify-dashboard", "http://d", { ...p, registryEntry: undefined, fetchSpec: async () => ({ artifacts: [artA] }) });
-  assert.match(noEntry.problem ?? "", /is not the package connect installed/, "with no published entry, nothing ties the package to connect");
+  assert.match(approvedButNotConnected.problem ?? "", /is not the package connect installed in this run/, "B was approved, named in a row and in a stale row, but connect installed A; B's package ran");
+  const nothingAccepted = await packageAssets("aify-dashboard", "http://d", { ...p, accepted: {}, fetchSpec: async () => ({ artifacts: [artA] }) });
+  assert.match(nothingAccepted.problem ?? "", /is not the package connect installed in this run/, "connect reported installing nothing, and a package ran");
+});
+
+test("an approved package without an assets bin is no assets, even with no MCP row and nothing reported for it", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chain-pkg-plain-"));
+  const rev = "c".repeat(40);
+  const art = { id: "plain", kind: "package", source: { git: { repo: "o/plain", revision: rev } }, entries: ["plain-bridge"] };
+  const prefix = path.join(root, "svc", "plain", rev);
+  const pkg = path.join(prefix, "node_modules", "plain");
+  fs.mkdirSync(path.join(pkg, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "plain", bin: { "plain-bridge": "bin/b.mjs" } }));
+  const out = await packageAssets("svc", "http://s", {
+    fetchSpec: async () => ({ artifacts: [art] }), validateSpec: (spec) => ({ ok: true, errors: [], spec }), packageRoot: root, execPath: "/node",
+    npmLs: () => ({ dependencies: { plain: { resolved: `git+ssh://git@github.com/o/plain.git#${rev}` } } }),
+    installedCommit: (ls) => ({ name: "plain", commit: /#([0-9a-f]{40})$/.exec(ls.dependencies.plain.resolved)[1], problem: "" }),
+    binFiles: () => { throw new Error("binFiles was asked about a package with no assets bin"); },
+    tupleDigest: () => "package:o/plain", catalogue: ["package:o/plain"], approve: [], accepted: {}, registryEntry: { mcp: [] },
+  });
+  assert.equal(out, null);
+});
+
+test("connect's report of what it installed this run is read line by line, and reaches the assets lookup", async () => {
+  const report = [
+    "connected aify-dashboard at http://d.test:7000: committed",
+    "  dashboard-bridge: installed at /home/u/.aify/packages/aify-dashboard/dashboard-bridge/" + "a".repeat(40) + "/node_modules/aify-dashboard",
+    "  other-pkg: already installed at C:/Users/u/.aify/packages/aify-dashboard/other-pkg/" + "b".repeat(40) + "/node_modules/@s/o",
+    "  mcp aify-dashboard: no entry written -- installed at /not/a/package/line",
+  ].join("\n");
+  assert.deepEqual(acceptedPackages(report), {
+    "dashboard-bridge": `/home/u/.aify/packages/aify-dashboard/dashboard-bridge/${"a".repeat(40)}/node_modules/aify-dashboard`,
+    "other-pkg": `C:/Users/u/.aify/packages/aify-dashboard/other-pkg/${"b".repeat(40)}/node_modules/@s/o`,
+  });
+  const echoed = [];
+  const run = () => ({ status: 0, stdout: `${report}\n` });
+  const captured = runMarkedCapture("node", ["connect"], { env: {}, run, write: (t) => echoed.push(t) });
+  assert.equal(captured.status, 0);
+  assert.equal(captured.stdout, `${report}\n`);
+  assert.deepEqual(echoed, [`${report}\n`], "the operator still sees connect's report");
+  const accepted = { "dashboard-bridge": "/p/a" };
+  const { io, calls } = host({ present: ["claude"], installer: null, installed: { "aify-dashboard": accepted } });
+  const dash = parseChainArgs(["--connect", "aify-dashboard=http://d.test:7000", "--client", "claude", "--secret", "aify-dashboard.credentialRef=/k"]);
+  await new InstallChain(dash, io).run();
+  assert.deepEqual(calls.find((c) => c[0] === "packageAssets"), ["packageAssets", "aify-dashboard", accepted]);
 });

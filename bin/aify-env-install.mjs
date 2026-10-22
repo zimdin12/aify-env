@@ -17,7 +17,7 @@ import { createInterface } from "node:readline/promises";
 
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
-import { approvedInstaller, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
+import { acceptedPackages, approvedInstaller, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, runMarkedCapture, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const plan = parseChainArgs(process.argv.slice(2));
 if (plan.problem) process.stderr.write(`aify-env install: ${plan.problem}\n${USAGE}\n`);
@@ -71,9 +71,8 @@ async function runChain(plan) {
       ? runMarked(bash, [installer, ...args], { env: envWithout(env, without), quiet })
       : runMarked(installer.command, [...installer.args, ...args], { env: envWithout(env, without), quiet })),
     keyEnv: async (names) => registryKeyEnv(registry, names),
-    packageAssets: (name, url, approve) => packageAssets(name, url, {
-      ...wrapper, approve, packageRoot: path.join(home, ".aify", "packages"),
-      registryEntry: JSON.parse(fs.readFileSync(registry, "utf8"))?.services?.[name],
+    packageAssets: (name, url, approve, accepted) => packageAssets(name, url, {
+      ...wrapper, approve, accepted, packageRoot: path.join(home, ".aify", "packages"),
       npmLs: (prefix) => JSON.parse(wrapper.npmTool(wrapper.npmCliBeside(process.execPath), env, Error)(["ls", "--prefix", prefix, "--json", "--long", "--depth=0"]) || "{}"),
     }),
     connect: ({ name, url, keys, stdin, approve, noPrompt }) => {
@@ -83,7 +82,8 @@ async function runChain(plan) {
       for (const digest of approve) args.push("--approve", digest);
       if (noPrompt) args.push("--no-prompt");
       // Only a service's key comes on stdin (parseChainArgs refuses any other field), so nothing is written to a file.
-      return runMarked(process.execPath, args, { env, input: stdin ? stdinKey : undefined });
+      const { status, stdout } = runMarkedCapture(process.execPath, args, { env, input: stdin ? stdinKey : undefined });
+      return { status, installed: acceptedPackages(stdout) };
     },
     render: (client, url) => runMarked(bash, [path.join(wrapperRoot, "install.sh"), "--client", client, "--endpoint", url, "--registry", registry], { env }),
     registryHash: () => {
