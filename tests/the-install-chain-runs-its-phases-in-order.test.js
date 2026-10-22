@@ -1,0 +1,249 @@
+// Guided install S2: the chain's order and rules (lib/install-chain.mjs), against fake host ports. The container
+// witnesses of the plan's table run the real installers; these pin each rule where it is decided.
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+
+import { CHAIN_MARK, CLIENTS, EXIT_OK, EXIT_REFUSED, InstallChain, LAUNCHER_SERVICE, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
+import { approvedInstaller, gitCheckout, hasPublishedKey, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
+
+const COMMS = "aify-comms=http://comms.test:8800";
+const plan = (...extra) => parseChainArgs(["--connect", COMMS, "--client", "claude", "--secret", "aify-comms.credentialRef=/k", ...extra]);
+
+/** Fake ports that record every call in order. */
+function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false } = {}) {
+  const calls = [];
+  const registry = { bytes: "R1" };
+  const io = {
+    env, said: [],
+    say(line) { this.said.push(line); },
+    ask: async () => "",
+    publishedKey: async (name) => { calls.push(["publishedKey", name]); return published; },
+    ensurePackages: async () => { calls.push(["ensurePackages"]); return true; },
+    approvedInstaller: async (name) => { calls.push(["approvedInstaller", name]); return installer; },
+    runInstaller: async (file, args) => { calls.push(["installer", file, ...args]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return 0; },
+    connect: async (c) => { calls.push(["connect", c.name, c.keys.map((k) => `${k.field}=${k.file}`).join()]); return connectExit; },
+    render: async (client, url) => { calls.push(["render", client, url]); return 0; },
+    cliPresent: (client) => present.includes(client),
+    registryHash: async () => { calls.push(["registryHash"]); return registry.bytes; },
+  };
+  return { io, calls };
+}
+
+test("render comes after connect, and a selected client whose CLI is absent fails a --no-prompt run, named", async () => {
+  const { io, calls } = host();
+  const { exit, report } = await new InstallChain(plan("--no-prompt"), io).run();
+  const order = calls.map((c) => c[0]);
+  assert.ok(order.indexOf("connect") < order.indexOf("render"), `render before connect: ${order}`);
+  assert.ok(order.indexOf("installer") < order.indexOf("connect"), "acquire before connect");
+  assert.deepEqual(calls.find((c) => c[0] === "installer"), ["installer", "/src/install.sh", "--acquire-only"]);
+  assert.deepEqual(report.pending, ["claude: pending (CLI absent)"]);
+  assert.equal(exit, EXIT_REFUSED);
+  assert.ok(io.said.includes("pending: claude: pending (CLI absent)"));
+  assert.ok(!calls.some((c) => c[0] === "installer" && c.includes("--assets-only")), "assets ran for an absent CLI");
+});
+
+test("control: the same run with the CLI present applies assets after render and completes", async () => {
+  const { io, calls } = host({ present: ["claude"] });
+  const { exit } = await new InstallChain(plan("--no-prompt"), io).run();
+  const order = calls.map((c) => c[0]);
+  assert.equal(exit, EXIT_OK);
+  assert.ok(order.lastIndexOf("installer") > order.indexOf("render"));
+  assert.deepEqual(calls.at(-2), ["installer", "/src/install.sh", "--assets-only", "--client", "claude"]);
+  assert.ok(io.said.includes("registry before assets: R1") && io.said.includes("registry after assets: R1"));
+});
+
+test("an assets step that writes the registry fails the run, naming both hashes", async () => {
+  const { io } = host({ present: ["claude"], assetsWrite: true });
+  const { exit, report } = await new InstallChain(plan("--no-prompt"), io).run();
+  assert.equal(exit, EXIT_REFUSED);
+  assert.match(report.problems[0], /assets changed the registry \(R1 -> R2\)/);
+});
+
+test("without --no-prompt a pending client is reported, not failed", async () => {
+  const { io } = host();
+  const { exit, report } = await new InstallChain(plan(), io).run();
+  assert.equal(exit, EXIT_OK);
+  assert.deepEqual(report.pending, ["claude: pending (CLI absent)"]);
+});
+
+test("a missing key stops the run before anything is acquired, connected or rendered, naming it", async () => {
+  const { io, calls } = host();
+  const bare = parseChainArgs(["--connect", COMMS, "--client", "claude", "--no-prompt"]);
+  const { exit, report } = await new InstallChain(bare, io).run();
+  assert.equal(exit, EXIT_REFUSED);
+  assert.match(report.problems[0], /missing aify-comms\.credentialRef/);
+  assert.deepEqual(calls.map((c) => c[0]), ["publishedKey"]);
+});
+
+test("a key already published on this host is reused, so a reconnect needs none supplied", async () => {
+  const { io, calls } = host({ present: ["claude"], published: true });
+  const bare = parseChainArgs(["--connect", COMMS, "--client", "claude", "--no-prompt"]);
+  const { exit } = await new InstallChain(bare, io).run();
+  assert.equal(exit, EXIT_OK);
+  assert.ok(calls.some((c) => c[0] === "connect"));
+});
+
+test("a failed connect stops the chain before render", async () => {
+  const { io, calls } = host({ present: ["claude"], connectExit: 78 });
+  const { exit, report } = await new InstallChain(plan("--no-prompt"), io).run();
+  assert.equal(exit, EXIT_REFUSED);
+  assert.match(report.problems[0], /connect aify-comms: exit 78/);
+  assert.ok(!calls.some((c) => c[0] === "render"));
+});
+
+test("an unknown publish outcome is named as such", async () => {
+  const { io } = host({ present: ["claude"], connectExit: 75 });
+  const { report } = await new InstallChain(plan("--no-prompt"), io).run();
+  assert.match(report.problems[0], /outcome unknown/);
+});
+
+test("entered once: under the chain's own mark it refuses to start, and its installers run only in their two modes", async () => {
+  const marked = host({ env: { [CHAIN_MARK]: "1" } });
+  const { exit, report } = await new InstallChain(plan(), marked.io).run();
+  assert.equal(exit, EXIT_REFUSED);
+  assert.match(report.problems[0], /entered once/);
+  assert.deepEqual(marked.calls, []);
+  const { io, calls } = host({ present: ["claude"] });
+  await new InstallChain(plan(), io).run();
+  const modes = calls.filter((c) => c[0] === "installer").map((c) => c[2]);
+  assert.deepEqual(modes, ["--acquire-only", "--assets-only"]);
+  assert.equal(io.said.filter((l) => l.startsWith("chain: entered")).length, 1);
+});
+
+test("PATH is not selection: a CLI on PATH that nobody selected gets no assets", async () => {
+  const { io, calls } = host({ present: ["claude", "codex"] });
+  await new InstallChain(plan(), io).run();
+  assert.ok(!calls.some((c) => c.includes("codex")), "codex was touched");
+  assert.ok(calls.some((c) => c.includes("claude")), "CONTROL: the selected client was set up");
+});
+
+test("with no --client, --no-prompt refuses rather than reading PATH; an asked run takes the answer", async () => {
+  const { io, calls } = host({ present: ["codex"] });
+  const none = parseChainArgs(["--connect", COMMS, "--no-prompt", "--secret", "aify-comms.credentialRef=/k"]);
+  const { exit, report } = await new InstallChain(none, io).run();
+  assert.equal(exit, EXIT_REFUSED);
+  assert.match(report.problems[0], /PATH is never a selection/);
+  assert.deepEqual(calls, []);
+  const asked = host({ present: ["hermes"] });
+  asked.io.ask = async () => "hermes";
+  const open = parseChainArgs(["--connect", COMMS, "--secret", "aify-comms.credentialRef=/k"]);
+  await new InstallChain(open, asked.io).run();
+  assert.ok(asked.calls.some((c) => c[0] === "render" && c[1] === "hermes"));
+});
+
+test("an installer given by the entry point is used as is; a service without one acquires nothing", async () => {
+  const given = host({ present: ["claude"] });
+  await new InstallChain(plan("--installer", "aify-comms=/entry/install.sh"), given.io).run();
+  assert.ok(!given.calls.some((c) => c[0] === "approvedInstaller"));
+  assert.ok(given.calls.some((c) => c[0] === "installer" && c[1] === "/entry/install.sh"));
+  const none = host({ present: ["claude"], installer: null });
+  const { exit } = await new InstallChain(plan(), none.io).run();
+  assert.equal(exit, EXIT_OK);
+  assert.ok(!none.calls.some((c) => c[0] === "installer"));
+  const refused = host({ installer: { problem: "not approved" } });
+  const out = await new InstallChain(plan(), refused.io).run();
+  assert.match(out.report.problems[0], /acquire aify-comms: not approved/);
+  assert.ok(!refused.calls.some((c) => c[0] === "connect"));
+});
+
+test(`only ${LAUNCHER_SERVICE} renders launchers`, async () => {
+  const { io, calls } = host({ present: ["claude"] });
+  const dash = parseChainArgs(["--connect", "aify-dashboard=http://d.test:7000", "--client", "claude", "--secret", "aify-dashboard.credentialRef=/k"]);
+  await new InstallChain(dash, io).run();
+  assert.ok(!calls.some((c) => c[0] === "render"));
+  assert.ok(io.said.some((l) => /no launcher rendered/.test(l)));
+});
+
+test("arguments: keys never in argv, every name checked, usage names the flags", () => {
+  assert.match(parseChainArgs(["--connect", COMMS, "--key=abc"]).problem, /would put a key in argv/);
+  assert.match(parseChainArgs(["--connect", COMMS, "--secret=x"]).problem, /would put a key in argv/);
+  assert.match(parseChainArgs(["--client", "claude"]).problem, /at least one --connect/);
+  assert.match(parseChainArgs(["--connect", COMMS, "--client", "vim"]).problem, /unknown client/);
+  assert.match(parseChainArgs(["--connect", "aify-comms=ftp://x"]).problem, /not an http/);
+  assert.match(parseChainArgs(["--connect", "aify-comms=http://u:p@x"]).problem, /without credentials/);
+  assert.match(parseChainArgs(["--connect", COMMS, "--connect", COMMS]).problem, /connected twice/);
+  assert.match(parseChainArgs(["--connect", COMMS, "--secret", "other.credentialRef=/k"]).problem, /not connected/);
+  assert.match(parseChainArgs(["--connect", COMMS, "--secret", "aify-comms.apiKey=/k"]).problem, /credential reference field/);
+  assert.match(parseChainArgs(["--connect", COMMS, "--secret-stdin", "aify-comms.credentialRef", "--secret", "aify-comms.credentialRef=/k"]).problem, /given twice/);
+  assert.match(parseChainArgs(["--connect", COMMS, "--installer", "other=/x"]).problem, /not connected/);
+  assert.match(parseChainArgs(["--connect", COMMS, "--frob"]).problem, /unknown option/);
+  const ok = parseChainArgs(["--connect", COMMS, "--client", "claude", "--client", "claude", "--secret-stdin", "aify-comms.secretsCredentialRef", "--approve", "d1"]);
+  assert.equal(ok.problem, "");
+  assert.deepEqual(ok.clients, ["claude"]);
+  assert.deepEqual(ok.secretStdin, { service: "aify-comms", field: "secretsCredentialRef" });
+  for (const flag of ["--connect", "--client", "--secret", "--secret-stdin", "--approve", "--installer", "--no-prompt"]) assert.ok(USAGE.includes(flag), flag);
+  assert.deepEqual(CLIENTS, ["claude", "codex", "hermes"]);
+});
+
+const SPEC = (artifacts) => ({ artifacts });
+const GIT = { id: "comms-bridge", kind: "file-set", source: { git: { repo: "zimdin12/aify-comms", revision: "a".repeat(40) } }, sha256: "b".repeat(64), entries: ["server.js"] };
+function ports(over = {}) {
+  const sources = fs.mkdtempSync(path.join(os.tmpdir(), "chain-src-"));
+  const seen = [];
+  return {
+    seen,
+    fetchSpec: async () => SPEC([GIT]),
+    validateSpec: (spec) => ({ ok: true, errors: [], spec }),
+    tupleDigest: () => "D",
+    catalogue: [],
+    approve: ["D"],
+    sources,
+    checkout: (repo, revision, dir) => { seen.push([repo, revision]); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, "install.sh"), ""); return { ok: true, head: revision }; },
+    ...over,
+  };
+}
+
+test("a service's installer runs only from an approved tuple, checked out at its exact revision", async () => {
+  const p = ports();
+  const out = await approvedInstaller("aify-comms", "http://c", p);
+  assert.equal(out.path, path.join(p.sources, "aify-comms", "a".repeat(40), "install.sh"));
+  assert.deepEqual(p.seen, [["zimdin12/aify-comms", "a".repeat(40)]]);
+
+  const unapproved = ports({ approve: [] });
+  assert.match((await approvedInstaller("aify-comms", "http://c", unapproved)).problem, /not approved; .*--approve D/);
+  assert.deepEqual(unapproved.seen, [], "an unapproved tuple was checked out");
+  assert.ok((await approvedInstaller("aify-comms", "http://c", ports({ approve: [], catalogue: ["D"] }))).path, "the catalogue approves");
+
+  const moved = ports({ checkout: () => ({ ok: true, head: "c".repeat(40) }) });
+  assert.match((await approvedInstaller("aify-comms", "http://c", moved)).problem, /not .*aaaa/);
+  assert.match((await approvedInstaller("aify-comms", "http://c", ports({ validateSpec: () => ({ ok: false, errors: ["wrong name"] }) }))).problem, /refused: wrong name/);
+  assert.match((await approvedInstaller("aify-comms", "http://c", ports({ fetchSpec: async () => { throw new Error("302"); } }))).problem, /could not be read: 302/);
+  assert.equal(await approvedInstaller("aify-comms", "http://c", ports({ fetchSpec: async () => SPEC([{ ...GIT, kind: "package" }]) })), null);
+  assert.match((await approvedInstaller("aify-comms", "http://c", ports({ fetchSpec: async () => SPEC([{ ...GIT, source: { git: { repo: "x", revision: "main" } } }]) }))).problem, /no exact repo/);
+  assert.match((await approvedInstaller("aify-comms", "http://c", ports({ fetchSpec: async () => SPEC([GIT, { ...GIT, id: "two" }]) }))).problem, /more than one/);
+});
+
+test("a key counts as published only when the registry names a reference the store can read", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chain-reg-"));
+  const registry = path.join(dir, "services.json");
+  fs.writeFileSync(registry, JSON.stringify({ version: 1, services: { "aify-comms": { endpoint: "http://c", credentialRef: "aify-comms.key" } } }));
+  const ok = async ({ ref }) => ({ state: ref === "aify-comms.key" ? "ok" : "missing" });
+  assert.equal(await hasPublishedKey("aify-comms", { registry, read: ok, root: dir }), true);
+  assert.equal(await hasPublishedKey("aify-comms", { registry, read: async () => ({ state: "missing" }), root: dir }), false);
+  assert.equal(await hasPublishedKey("aify-comms", { registry, read: async () => { throw new Error("EACCES"); }, root: dir }), false);
+  assert.equal(await hasPublishedKey("aify-dashboard", { registry, read: ok, root: dir }), false);
+  assert.equal(await hasPublishedKey("aify-comms", { registry: path.join(dir, "none.json"), read: ok, root: dir }), false);
+  assert.equal(registryPath({ AIFY_SERVICE_REGISTRY: "/r.json" }, "/h"), "/r.json");
+  assert.equal(registryPath({}, "/h"), path.join("/h", ".aify", "services.json"));
+});
+
+test("an installer runs under the chain's mark; a checkout is read back at its revision", () => {
+  const runs = [];
+  const run = (command, args, options) => { runs.push({ command, args, options }); return { status: 3 }; };
+  assert.equal(runMarked("bash", ["/x/install.sh", "--acquire-only"], { env: { A: "1" }, run }), 3);
+  assert.equal(runs[0].options.env[CHAIN_MARK], "1");
+  assert.equal(runs[0].options.env.A, "1");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chain-git-"));
+  const gits = [];
+  const git = (cmd, args) => { gits.push(args[0] === "-c" ? args[2] : args[0]); return { status: 0, stdout: args[0] === "rev-parse" ? `${"e".repeat(40)}\n` : "" }; };
+  const out = gitCheckout("o/r", "e".repeat(40), path.join(dir, "co"), { run: git, base: "https://github.com/" });
+  assert.deepEqual(out, { ok: true, head: "e".repeat(40), problem: undefined });
+  assert.deepEqual(gits, ["clone", "checkout", "rev-parse"]);
+  const failing = gitCheckout("o/r", "e".repeat(40), path.join(dir, "co2"), { run: () => ({ status: 128, stderr: "no such repo" }) });
+  assert.deepEqual(failing, { ok: false, problem: "no such repo" });
+  assert.equal(typeof wrapperModules, "function");
+});
