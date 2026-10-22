@@ -212,11 +212,32 @@ test("THE LOCK: a live holder waits then fails; a dead one on this host is taken
   fs.writeFileSync(lockPath, JSON.stringify({ pid: dead, atMs: 1, nonce: "elsewhere", host: "another-host" }));
   await assert.rejects(store.list(), (error) => error.holderAlive === false && /aify-env agents unlock/.test(error.message));
   assert.equal(JSON.parse(fs.readFileSync(lockPath, "utf8")).nonce, "elsewhere", "another host's lock is not taken");
-  // A torn lock may be a live writer between open and write: never taken.
-  fs.writeFileSync(lockPath, "{\"pid\": ");
-  await assert.rejects(store.list(), /aify-env agents unlock/);
-  assert.equal(fs.readFileSync(lockPath, "utf8"), "{\"pid\": ", "a torn lock is not taken");
-  assert.ok(DefinitionStore.unlock({ dir }), "the operator's unlock still clears what the store will not take");
+  // A torn lock names no live holder: a lock is linked into place whole, so only a writer that died (or a
+  // version before that rule) leaves one. The empty one is what a test daemon killed mid-write left on
+  // 2026-10-14, which refused every call until an operator ran unlock.
+  for (const torn of ["", "{\"pid\": "]) {
+    fs.writeFileSync(lockPath, torn);
+    assert.equal((await store.list()).definitions.length, 1, `a torn lock ${JSON.stringify(torn)} is taken over`);
+    assert.equal(fs.existsSync(lockPath), false, "and the taking call releases it");
+  }
+  fs.writeFileSync(lockPath, "");
+  assert.deepEqual(DefinitionStore.unlock({ dir }), { torn: "" }, "the operator's unlock clears one too");
+});
+
+test("A LOCK IS NEVER TORN: a writer that fails while writing its lock leaves none behind", async () => {
+  const dir = tempDir();
+  const store = storeIn(dir);
+  await store.set("a", agent(), { installed: ALL });
+  const lockPath = path.join(dir, ".lock");
+  const realWriteSync = fs.writeSync;
+  fs.writeSync = () => { throw Object.assign(new Error("killed while writing the lock"), { code: "EIO" }); };
+  try {
+    await assert.rejects(store.list(), /killed while writing the lock/, "the control: the write really failed");
+  } finally {
+    fs.writeSync = realWriteSync;
+  }
+  assert.equal(fs.existsSync(lockPath), false, "no empty lock is left for the next call to refuse");
+  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.startsWith(".lock")), [], "nor a temporary beside it");
   assert.equal((await store.list()).definitions.length, 1);
 });
 

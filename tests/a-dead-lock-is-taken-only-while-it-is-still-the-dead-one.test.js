@@ -15,7 +15,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
-import { guardFor, removeIfStill, sweepDeadGuards } from "../lib/lock-break.mjs";
+import { createWhole, guardFor, removeIfStill, sweepDeadGuards } from "../lib/lock-break.mjs";
 
 const installed = new Set(["claude"]);
 const agent = (name) => ({ name, role: "coder", harness: "claude", mode: "managed", workspace: "C:/work", model: "",
@@ -164,4 +164,14 @@ test("removeIfStill deletes only the judged text; sweepDeadGuards removes only g
   fs.writeFileSync(guardFor(lockPath, "b"), liveRecord());
   assert.equal(sweepDeadGuards(dir, { processAlive: alive }), 1);
   assert.deepEqual(fs.readdirSync(dir), [path.basename(guardFor(lockPath, "b"))], "the running holder's guard stays");
+});
+
+test("createWhole puts the whole text in place or nothing, and never replaces an existing file", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-defs-whole-"));
+  const target = path.join(dir, ".lock");
+  createWhole(target, "first");
+  assert.equal(fs.readFileSync(target, "utf8"), "first");
+  assert.throws(() => createWhole(target, "second"), { code: "EEXIST" });
+  assert.equal(fs.readFileSync(target, "utf8"), "first", "an existing file is kept");
+  assert.deepEqual(fs.readdirSync(dir), [".lock"], "and no temporary is left");
 });
