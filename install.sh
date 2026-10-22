@@ -39,7 +39,9 @@ while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || { echo "aify-env install: $1 needs a value" >&2; exit 64; }
       value="$2"
       case "$1=$2" in
-        --secret=*=/*|--installer=*=/*|--secret=*=[A-Za-z]:[\\/]*|--installer=*=[A-Za-z]:[\\/]*) ;;
+        # Kept as given: absolute (slash, drive letter, a \\host UNC path), and an empty value the chain refuses.
+        --secret=*=|--installer=*=|--secret=*=/*|--installer=*=/*) ;;
+        --secret=*=[A-Za-z]:[\\/]*|--installer=*=[A-Za-z]:[\\/]*|--secret=*=\\\\*|--installer=*=\\\\*) ;;
         --secret=*=*|--installer=*=*) value="${2%%=*}=$CALLER/${2#*=}" ;;
       esac
       CHAIN+=("$1" "$value"); shift ;;

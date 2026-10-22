@@ -47,3 +47,13 @@ test("absolute paths, and values the chain will refuse, pass through unchanged",
   assert.ok(windows.chain.includes("--secret aify-comms.credentialRef=C:\\k\\key"), windows.chain);
   assert.ok(windows.chain.includes("--installer aify-comms=D:/s/install.sh"), windows.chain);
 });
+
+test("an empty right-hand side reaches the chain's parser empty, and a UNC path is kept absolute", () => {
+  const caller = fs.mkdtempSync(path.join(os.tmpdir(), "entry-caller-"));
+  const empty = entry(["--connect", "aify-comms=http://c.test:8800", "--client", "claude", "--secret", "aify-comms.credentialRef=", "--installer", "aify-comms="], caller);
+  assert.ok(/--secret aify-comms\.credentialRef=( |$)/.test(empty.chain), `an empty key path was given a directory: ${empty.chain}`);
+  assert.ok(/--installer aify-comms=( |$)/.test(empty.chain), `an empty installer path was given a directory: ${empty.chain}`);
+  const unc = entry(["--connect", "aify-comms=http://c.test:8800", "--client", "claude", "--secret", "aify-comms.credentialRef=\\\\host\\share\\key", "--installer", "aify-comms=//host/share/install.sh"], caller);
+  assert.ok(unc.chain.includes("--secret aify-comms.credentialRef=\\\\host\\share\\key"), `a UNC path was made relative: ${unc.chain}`);
+  assert.ok(unc.chain.includes("--installer aify-comms=//host/share/install.sh"), unc.chain);
+});

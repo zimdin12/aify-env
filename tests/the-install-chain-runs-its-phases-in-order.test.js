@@ -92,15 +92,43 @@ test("an installed aify-wrapper that lacks what the chain needs is a reported re
   assert.equal(exit, EXIT_REFUSED);
   assert.deepEqual(report.problems, ["acquire: the installed aify-wrapper at /g/aify-wrapper lacks lib/package-install.mjs"]);
   assert.ok(!calls.some((c) => c[0] === "connect"));
+});
+
+// The interface the chain calls, module by module: a wrapper whose files exist but lack one of these is as unusable
+// as one missing the file (an undefined validateSpec escaped approvedInstaller's catch as a crash).
+const WRAPPER_EXPORTS = {
+  "connect-http.mjs": ["fetchSpec"],
+  "service-spec.mjs": ["validateSpec", "tupleDigest"],
+  "path-lookup.mjs": ["resolveOnPath"],
+  "package-install.mjs": ["installedCommit", "binFiles", "npmTool", "npmCliBeside"],
+};
+function fakeWrapper({ skipFile = "", skipExport = "", catalogue = { approved: ["d1"] } } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "chain-wrapper-"));
   fs.mkdirSync(path.join(root, "lib"));
-  for (const rel of ["connect-http.mjs", "service-spec.mjs", "path-lookup.mjs"]) fs.writeFileSync(path.join(root, "lib", rel), "export const x = 1;\n");
-  fs.writeFileSync(path.join(root, "lib", "artifact-catalogue.json"), JSON.stringify({ approved: [] }));
-  const missing = await wrapperModules(root);
-  assert.match(missing.problem, /lacks lib\/package-install\.mjs/);
-  assert.match(missing.problem, /npm install -g .*aify-wrapper.*git pull/s);
-  fs.writeFileSync(path.join(root, "lib", "package-install.mjs"), "export const x = 1;\n");
-  assert.equal((await wrapperModules(root)).problem, undefined, "CONTROL: every module present loads");
+  for (const [file, names] of Object.entries(WRAPPER_EXPORTS)) {
+    if (file === skipFile) continue;
+    const body = names.filter((n) => n !== skipExport).map((n) => `export function ${n}() { return "${n}"; }`).join("\n");
+    fs.writeFileSync(path.join(root, "lib", file), `${body}\n`);
+  }
+  fs.writeFileSync(path.join(root, "lib", "artifact-catalogue.json"), JSON.stringify(catalogue));
+  return root;
+}
+
+test("a wrapper module is usable only with the functions and catalogue the chain calls, each checked", async () => {
+  const usable = await wrapperModules(fakeWrapper());
+  assert.equal(usable.problem, undefined, "CONTROL: a wrapper with every export loads");
+  for (const [name, fn] of Object.entries(usable)) if (name !== "catalogue") assert.equal(fn(), name, `${name} is not the wrapper's own`);
+  assert.deepEqual(usable.catalogue, ["d1"]);
+  const noFile = await wrapperModules(fakeWrapper({ skipFile: "package-install.mjs" }));
+  assert.match(noFile.problem, /lacks lib\/package-install\.mjs/);
+  assert.match(noFile.problem, /npm install -g .*aify-wrapper.*git pull/s);
+  for (const missing of ["validateSpec", "binFiles", "fetchSpec"]) {
+    const noExport = await wrapperModules(fakeWrapper({ skipExport: missing }));
+    assert.match(noExport.problem ?? "", new RegExp(`does not export ${missing}`), `a wrapper without ${missing} passed`);
+    assert.match(noExport.problem, /npm install -g .*aify-wrapper.*git pull/s);
+  }
+  const badCatalogue = await wrapperModules(fakeWrapper({ catalogue: { approved: "d1" } }));
+  assert.match(badCatalogue.problem ?? "", /artifact-catalogue\.json holds no approved list/);
 });
 
 test("an assets step that writes the registry fails the run, naming both hashes", async () => {
@@ -359,7 +387,13 @@ test("a package's assets entry is the <service>-assets bin of the one package np
     const file = String(pkg.bin?.[entries[0]] ?? "");
     return /(^|\/)\.\.(\/|$)|^\//.test(file) ? { files: {}, problems: [`${entries[0]}'s bin ${file} leaves the package`] } : { files: { [entries[0]]: file }, problems: [] };
   };
-  const p = { fetchSpec: async () => ({ artifacts: [art] }), validateSpec: (spec) => ({ ok: true, errors: [], spec }), packageRoot: root, execPath: "/node", npmLs: () => listed, installedCommit, binFiles };
+  const tupleDigest = (a) => `${a.kind}:${a.source.git.repo}`;
+  const entryAt = (dir) => ({ mcp: [{ name: "aify-dashboard", command: "/node", args: [`${dir.split(path.sep).join("/")}/bin/b.mjs`] }] });
+  const p = {
+    fetchSpec: async () => ({ artifacts: [art] }), validateSpec: (spec) => ({ ok: true, errors: [], spec }), packageRoot: root, execPath: "/node",
+    npmLs: () => listed, installedCommit, binFiles, tupleDigest, catalogue: [], approve: ["package:o/r"],
+    registryEntry: entryAt(path.join(root, "aify-dashboard", "dashboard-bridge", rev, "node_modules", "@scope", "aify-dashboard")),
+  };
   assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /not installed under/);
   const pkg = path.join(prefix, "node_modules", "@scope", "aify-dashboard");
   fs.mkdirSync(pkg, { recursive: true });
@@ -381,4 +415,42 @@ test("a package's assets entry is the <service>-assets bin of the one package np
   assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /npm reports 0 packages/);
   assert.match((await packageAssets("aify-dashboard", "http://d", { ...p, validateSpec: () => ({ ok: false, errors: ["name"] }) })).problem, /refused: name/);
   assert.equal(await packageAssets("aify-dashboard", "http://d", { ...p, fetchSpec: async () => ({ artifacts: [{ ...art, kind: "file-set" }] }) }), null);
+});
+
+test("assets run only from the package connect installed, at a tuple approved now: a later spec naming another repository is refused", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chain-pkg-ab-"));
+  const revA = "a".repeat(40), revB = "b".repeat(40);
+  const artA = { id: "dashboard-bridge", kind: "package", source: { git: { repo: "o/r", revision: revA } }, entries: ["aify-dashboard-bridge"] };
+  const artB = { id: "dashboard-bridge", kind: "package", source: { git: { repo: "evil/other", revision: revB } }, entries: ["aify-dashboard-bridge"] };
+  // Both installed, each a valid package with an assets bin beside a hoisted dependency: B by an earlier, separate run.
+  const install = (art, rev) => {
+    const prefix = path.join(root, "aify-dashboard", art.id, rev);
+    const pkg = path.join(prefix, "node_modules", "aify-dashboard");
+    fs.mkdirSync(path.join(pkg, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(prefix, "node_modules", "hoisted-dependency"), { recursive: true });
+    fs.writeFileSync(path.join(pkg, "bin", "assets.mjs"), "");
+    fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-bridge": "bin/b.mjs", "aify-dashboard-assets": "bin/assets.mjs" } }));
+    return { prefix, pkg, listed: { dependencies: { "aify-dashboard": { resolved: `git+ssh://git@github.com/${art.source.git.repo}.git#${rev}` } } } };
+  };
+  const a = install(artA, revA), b = install(artB, revB);
+  const byPrefix = { [a.prefix]: a.listed, [b.prefix]: b.listed };
+  const p = {
+    validateSpec: (spec) => ({ ok: true, errors: [], spec }), packageRoot: root, execPath: "/node",
+    npmLs: (prefix) => byPrefix[prefix], installedCommit: (ls) => {
+      const [[name, dep]] = Object.entries(ls.dependencies);
+      return { name, commit: /#([0-9a-f]{40})$/.exec(dep.resolved)[1], problem: "" };
+    },
+    binFiles: (pkg, entries) => ({ files: { [entries[0]]: pkg.bin[entries[0]] }, problems: [] }),
+    tupleDigest: (art) => `${art.kind}:${art.source.git.repo}`, catalogue: [], approve: ["package:o/r"],
+    // What connect published: the bridge from A's package.
+    registryEntry: { mcp: [{ name: "aify-dashboard", command: "/node", args: [`${a.pkg.split(path.sep).join("/")}/bin/b.mjs`] }] },
+  };
+  const stable = await packageAssets("aify-dashboard", "http://d", { ...p, fetchSpec: async () => ({ artifacts: [artA] }) });
+  assert.deepEqual(stable, { command: "/node", args: [path.join(a.pkg, "bin", "assets.mjs")] }, "CONTROL: A, connected and approved, beside a hoisted dependency");
+  const swapped = await packageAssets("aify-dashboard", "http://d", { ...p, fetchSpec: async () => ({ artifacts: [artB] }) });
+  assert.match(swapped.problem ?? "", /is not approved/, "B's repository was never approved for this run, and its package ran");
+  const approvedButNotConnected = await packageAssets("aify-dashboard", "http://d", { ...p, approve: ["package:o/r", "package:evil/other"], fetchSpec: async () => ({ artifacts: [artB] }) });
+  assert.match(approvedButNotConnected.problem ?? "", /is not the package connect installed/, "B was approved but connect published A; B's package ran");
+  const noEntry = await packageAssets("aify-dashboard", "http://d", { ...p, registryEntry: undefined, fetchSpec: async () => ({ artifacts: [artA] }) });
+  assert.match(noEntry.problem ?? "", /is not the package connect installed/, "with no published entry, nothing ties the package to connect");
 });

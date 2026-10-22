@@ -71,8 +71,9 @@ async function runChain(plan) {
       ? runMarked(bash, [installer, ...args], { env: envWithout(env, without), quiet })
       : runMarked(installer.command, [...installer.args, ...args], { env: envWithout(env, without), quiet })),
     keyEnv: async (names) => registryKeyEnv(registry, names),
-    packageAssets: (name, url) => packageAssets(name, url, {
-      ...wrapper, packageRoot: path.join(home, ".aify", "packages"),
+    packageAssets: (name, url, approve) => packageAssets(name, url, {
+      ...wrapper, approve, packageRoot: path.join(home, ".aify", "packages"),
+      registryEntry: JSON.parse(fs.readFileSync(registry, "utf8"))?.services?.[name],
       npmLs: (prefix) => JSON.parse(wrapper.npmTool(wrapper.npmCliBeside(process.execPath), env, Error)(["ls", "--prefix", prefix, "--json", "--long", "--depth=0"]) || "{}"),
     }),
     connect: ({ name, url, keys, stdin, approve, noPrompt }) => {
