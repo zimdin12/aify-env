@@ -87,7 +87,15 @@ const files = named.length > 0 ? named : fs.readdirSync('tests').filter((f) => f
 // while the same commit's next run passed with its slowest file at 40.6 s. The cancellations followed the
 // host's load (59% then 41%), which is a correlation observed twice, not a proof that load was the only cause.
 // Splitting files only moved that edge.
-const child = spawn(process.execPath, ['--test', '--test-timeout=180000', ...files], { env, stdio: 'inherit' });
+//
+// 600 s, NOT 180 (2026-10-22). The flag bounds each FILE as a whole, not each test: under process isolation the
+// file is itself a test, so the bound covers the SUM of its tests (node 22.20, measured: three 1.5 s tests under a
+// 2.5 s bound fail the file). In six sequential full runs on main ed9ebe5, the git-heavy
+// the-dashboard-plugin-reads-no-object-store-out-of-the-grant.test.js summed 85.8 to 175.6 s in the runs it passed
+// and was cancelled at 180 s in the other two; the-dashboard-plugin-reports-commits.test.js reached 164.9 s and was
+// cancelled once. That is a bound at its own normal cost, not above a hang. 600 s is 3.4 times the slowest passing
+// file measured and still ends a hang in minutes, not hours.
+const child = spawn(process.execPath, ['--test', '--test-timeout=600000', ...files], { env, stdio: 'inherit' });
 
 child.on('exit', (code, signal) => {
   try {
