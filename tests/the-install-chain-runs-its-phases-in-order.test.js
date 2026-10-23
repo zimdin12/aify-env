@@ -501,6 +501,11 @@ test("the receipt is connect's record of this run, written to a fresh private fi
   assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record("{not json") }), { status: 0, installed: {} }, "an unreadable record is nothing installed");
   const odd = { ...real, installed: [{ id: "x", at: 7 }, "y", { id: "dashboard-bridge", at: "/p/a" }] };
   assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record(JSON.stringify(odd)) }).installed, { "dashboard-bridge": "/p/a" }, "only well-formed rows count");
+  // A legal artifact id can be `__proto__`: it stays this run's own key, and the receipt keeps its ordinary prototype.
+  const proto = { ...real, installed: [{ id: "__proto__", at: "/p/proto" }] };
+  const own = connectRecorded("node", ["connect.mjs"], { env: {}, run: record(JSON.stringify(proto)) }).installed;
+  assert.equal(Object.hasOwn(own, "__proto__") ? own.__proto__ : undefined, "/p/proto", "an id of __proto__ is an own key");
+  assert.equal(Object.getPrototypeOf(own), Object.prototype, "the id did not replace the receipt's prototype");
   const accepted = { "dashboard-bridge": "/p/a" };
   const { io, calls } = host({ present: ["claude"], installer: null, installed: { "aify-dashboard": accepted } });
   const dash = parseChainArgs(["--connect", "aify-dashboard=http://d.test:7000", "--client", "claude", "--secret", "aify-dashboard.credentialRef=/k"]);
