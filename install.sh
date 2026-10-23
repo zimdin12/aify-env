@@ -18,21 +18,40 @@
 #   ./install.sh                 install or update, asking for anything missing
 #   ./install.sh --no-prompt     never ask; report and fail if something is missing
 #   ./install.sh --plan-only     say what would happen; install nothing, ask nothing
+#   ./install.sh --connect <service>=<url> --client <runtime> [--secret <service>.<field>=<file>] ...
+#                                then run the guided-install chain (bin/aify-env-install.mjs): acquire, connect,
+#                                render, assets, report. Its keys are connect's, so the credential step is skipped.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# A relative --secret/--installer path names a file where the CALLER stands; it is made absolute before the cd below.
+CALLER="$(pwd)"
 cd "$HERE"
 
 PLAN_ONLY=false
 NO_PROMPT=false
-for arg in "$@"; do
-  case "$arg" in
+CHAIN=()
+while [ $# -gt 0 ]; do
+  case "$1" in
     --plan-only) PLAN_ONLY=true ;;
-    --no-prompt) NO_PROMPT=true ;;
-    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "aify-env install: unknown option '$arg'" >&2; exit 64 ;;
+    --no-prompt) NO_PROMPT=true; CHAIN+=("$1") ;;
+    --connect|--client|--secret|--secret-stdin|--approve|--installer)
+      [ $# -ge 2 ] || { echo "aify-env install: $1 needs a value" >&2; exit 64; }
+      value="$2"
+      case "$1=$2" in
+        # Kept as given: absolute (slash, drive letter, a \\host UNC path), and an empty value the chain refuses.
+        --secret=*=|--installer=*=|--secret=*=/*|--installer=*=/*) ;;
+        --secret=*=[A-Za-z]:[\\/]*|--installer=*=[A-Za-z]:[\\/]*|--secret=*=\\\\*|--installer=*=\\\\*) ;;
+        --secret=*=*|--installer=*=*) value="${2%%=*}=$CALLER/${2#*=}" ;;
+      esac
+      CHAIN+=("$1" "$value"); shift ;;
+    -h|--help) sed -n '2,23p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "aify-env install: unknown option '$1'" >&2; exit 64 ;;
   esac
+  shift
 done
+CHAIN_MODE=false
+for arg in ${CHAIN[@]+"${CHAIN[@]}"}; do [ "$arg" = "--connect" ] && CHAIN_MODE=true; done
 
 say() { echo "[aify-env] $*"; }
 
@@ -72,6 +91,12 @@ say "installed: $(command -v aify-env || echo 'NOT ON PATH -- check your npm glo
 # THE HOST'S TRANSPORT DEFAULT, written once into ~/.aify/config.json so the setting is discoverable.
 # A value already there is left alone: an operator who switched it off meant it.
 node scripts/install-host-config.mjs || true
+
+# THE CHAIN, when a service was named: it connects each one, storing its keys through connect, so the credential
+# step below would only ask again for what connect is about to set.
+if [ "$CHAIN_MODE" = true ]; then
+  exec node "$HERE/bin/aify-env-install.mjs" "${CHAIN[@]}"
+fi
 
 # AND THE CREDENTIALS, last, because the plan depends on what is registered on this host rather than
 # on what is in this checkout. Its exit status is this script's: a host that cannot claim work has

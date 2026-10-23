@@ -37,6 +37,14 @@ test("`aify-env doctor` runs the doctor", () => {
   assert.match(r.stdout + r.stderr, /unanswered|failed/, "and say what it could not determine");
 });
 
+test("`aify-env install` is the guided-install chain, not a second command", () => {
+  // No --connect: the chain refuses before it installs or connects anything, so this reaches no host state.
+  const r = run(["install"]);
+  assert.equal(r.status, 78, `${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /aify-env install: name at least one --connect/);
+  assert.doesNotMatch(r.stderr, /unknown subcommand/);
+});
+
 test("`aify-env doctor --strict` still acts on the answer", () => {
   const r = run(["doctor", "--strict"], { AIFY_ENV_ENDPOINT: "http://127.0.0.2:1" });
   assert.notEqual(r.status, 0, "--strict must exit non-zero when something failed or went unanswered");

@@ -178,6 +178,8 @@ const SUBCOMMANDS = {
   registry: "./aify-env-registry.mjs",
   herdr: "./aify-env-herdr.mjs",
   agents: "./aify-env-agents.mjs",
+  // THE GUIDED-INSTALL CHAIN (lib/install-chain.mjs). It installs and connects; it never starts the environment.
+  install: "./aify-env-install.mjs",
 };
 const firstArg = args[0];
 if (firstArg && !firstArg.startsWith("-")) {
