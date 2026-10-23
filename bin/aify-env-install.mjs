@@ -17,7 +17,7 @@ import { createInterface } from "node:readline/promises";
 
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
-import { acceptedPackages, approvedInstaller, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, runMarkedCapture, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, connectRecorded, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const plan = parseChainArgs(process.argv.slice(2));
 if (plan.problem) process.stderr.write(`aify-env install: ${plan.problem}\n${USAGE}\n`);
@@ -82,8 +82,7 @@ async function runChain(plan) {
       for (const digest of approve) args.push("--approve", digest);
       if (noPrompt) args.push("--no-prompt");
       // Only a service's key comes on stdin (parseChainArgs refuses any other field), so nothing is written to a file.
-      const { status, stdout } = runMarkedCapture(process.execPath, args, { env, input: stdin ? stdinKey : undefined });
-      return { status, installed: acceptedPackages(stdout) };
+      return connectRecorded(process.execPath, args, { env, input: stdin ? stdinKey : undefined });
     },
     render: (client, url) => runMarked(bash, [path.join(wrapperRoot, "install.sh"), "--client", client, "--endpoint", url, "--registry", registry], { env }),
     registryHash: () => {

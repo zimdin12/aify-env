@@ -7,7 +7,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { CHAIN_MARK, CLIENTS, EXIT_OK, EXIT_REFUSED, InstallChain, LAUNCHER_SERVICE, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
-import { acceptedPackages, approvedInstaller, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, runMarkedCapture, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, connectRecorded, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const COMMS = "aify-comms=http://comms.test:8800";
 const plan = (...extra) => parseChainArgs(["--connect", COMMS, "--client", "claude", "--secret", "aify-comms.credentialRef=/k", ...extra]);
@@ -102,7 +102,7 @@ const WRAPPER_EXPORTS = {
   "path-lookup.mjs": ["resolveOnPath"],
   "package-install.mjs": ["installedCommit", "binFiles", "npmTool", "npmCliBeside"],
 };
-function fakeWrapper({ skipFile = "", skipExport = "", catalogue = { approved: ["d1"] } } = {}) {
+function fakeWrapper({ skipFile = "", skipExport = "", catalogue = { approved: ["d1"] }, reportFile = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "chain-wrapper-"));
   fs.mkdirSync(path.join(root, "lib"));
   for (const [file, names] of Object.entries(WRAPPER_EXPORTS)) {
@@ -111,6 +111,8 @@ function fakeWrapper({ skipFile = "", skipExport = "", catalogue = { approved: [
     fs.writeFileSync(path.join(root, "lib", file), `${body}\n`);
   }
   fs.writeFileSync(path.join(root, "lib", "artifact-catalogue.json"), JSON.stringify(catalogue));
+  const knows = reportFile ? `""` : `argv.includes("--report-file") ? "unknown option --report-file" : ""`;
+  fs.writeFileSync(path.join(root, "lib", "connect-args.mjs"), `export function parseConnectArgs(argv) { return { problem: ${knows} }; }\n`);
   return root;
 }
 
@@ -127,6 +129,9 @@ test("a wrapper module is usable only with the functions and catalogue the chain
     assert.match(noExport.problem ?? "", new RegExp(`does not export ${missing}`), `a wrapper without ${missing} passed`);
     assert.match(noExport.problem, /npm install -g .*aify-wrapper.*git pull/s);
   }
+  const noRecord = await wrapperModules(fakeWrapper({ reportFile: false }));
+  assert.match(noRecord.problem ?? "", /connect does not accept --report-file/, "a wrapper whose connect cannot write its record passed");
+  assert.match(noRecord.problem, /npm install -g .*aify-wrapper.*git pull/s);
   const badCatalogue = await wrapperModules(fakeWrapper({ catalogue: { approved: "d1" } }));
   assert.match(badCatalogue.problem ?? "", /artifact-catalogue\.json holds no approved list/);
 });
@@ -478,23 +483,24 @@ test("an approved package without an assets bin is no assets, even with no MCP r
   assert.equal(out, null);
 });
 
-test("connect's report of what it installed this run is read line by line, and reaches the assets lookup", async () => {
-  const report = [
-    "connected aify-dashboard at http://d.test:7000: committed",
-    "  dashboard-bridge: installed at /home/u/.aify/packages/aify-dashboard/dashboard-bridge/" + "a".repeat(40) + "/node_modules/aify-dashboard",
-    "  other-pkg: already installed at C:/Users/u/.aify/packages/aify-dashboard/other-pkg/" + "b".repeat(40) + "/node_modules/@s/o",
-    "  mcp aify-dashboard: no entry written -- installed at /not/a/package/line",
-  ].join("\n");
-  assert.deepEqual(acceptedPackages(report), {
-    "dashboard-bridge": `/home/u/.aify/packages/aify-dashboard/dashboard-bridge/${"a".repeat(40)}/node_modules/aify-dashboard`,
-    "other-pkg": `C:/Users/u/.aify/packages/aify-dashboard/other-pkg/${"b".repeat(40)}/node_modules/@s/o`,
-  });
-  const echoed = [];
-  const run = () => ({ status: 0, stdout: `${report}\n` });
-  const captured = runMarkedCapture("node", ["connect"], { env: {}, run, write: (t) => echoed.push(t) });
-  assert.equal(captured.status, 0);
-  assert.equal(captured.stdout, `${report}\n`);
-  assert.deepEqual(echoed, [`${report}\n`], "the operator still sees connect's report");
+test("the receipt is connect's record of this run, written to a fresh private file; printed prose adds nothing", async () => {
+  // A fake connect: prints a forged "installed" line, and writes the record it was asked for.
+  let file = "";
+  const record = (body) => (command, args) => {
+    assert.ok(args.includes("--report-file"), "connect was not asked for its record");
+    file = args[args.indexOf("--report-file") + 1];
+    assert.ok(file && !fs.existsSync(file), "the record path must be fresh");
+    process.stdout.write("connected aify-dashboard: committed\n  bridge-b: installed at /forged/b\n");
+    if (body !== undefined) fs.writeFileSync(file, body);
+    return { status: 0 };
+  };
+  const real = { result: "committed", service: "aify-dashboard", installed: [{ id: "dashboard-bridge", at: "/p/a", reused: false }] };
+  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record(JSON.stringify(real)) }), { status: 0, installed: { "dashboard-bridge": "/p/a" } });
+  assert.equal(fs.existsSync(path.dirname(file)), false, "the private directory is removed");
+  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record(undefined) }), { status: 0, installed: {} }, "no record is nothing installed");
+  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record("{not json") }), { status: 0, installed: {} }, "an unreadable record is nothing installed");
+  const odd = { ...real, installed: [{ id: "x", at: 7 }, "y", { id: "dashboard-bridge", at: "/p/a" }] };
+  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record(JSON.stringify(odd)) }).installed, { "dashboard-bridge": "/p/a" }, "only well-formed rows count");
   const accepted = { "dashboard-bridge": "/p/a" };
   const { io, calls } = host({ present: ["claude"], installer: null, installed: { "aify-dashboard": accepted } });
   const dash = parseChainArgs(["--connect", "aify-dashboard=http://d.test:7000", "--client", "claude", "--secret", "aify-dashboard.credentialRef=/k"]);
