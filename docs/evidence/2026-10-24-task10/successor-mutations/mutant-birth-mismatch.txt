@@ -1,0 +1,144 @@
+TAP version 13
+# Subtest: new explicit and automatic reservations durably record their daemon owner
+ok 1 - new explicit and automatic reservations durably record their daemon owner
+  ---
+  duration_ms: 88.5346
+  type: 'test'
+  ...
+# Subtest: a replacement settles a proven-dead prior-generation owner and admits the next start
+ok 2 - a replacement settles a proven-dead prior-generation owner and admits the next start
+  ---
+  duration_ms: 64.0433
+  type: 'test'
+  ...
+# Subtest: a live concurrent scope retains custody while another scope boots
+not ok 3 - a live concurrent scope retains custody while another scope boots
+  ---
+  duration_ms: 49.1798
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\lifecycle-owner-recovery.test.js:79:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'terminal'
+    - 'pending'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'pending'
+  actual: 'terminal'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/lifecycle-owner-recovery.test.js:91:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: nonexclusive prior owner: gone pid
+ok 4 - nonexclusive prior owner: gone pid
+  ---
+  duration_ms: 62.9866
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: reused pid
+ok 5 - nonexclusive prior owner: reused pid
+  ---
+  duration_ms: 59.9134
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: live owner
+not ok 6 - nonexclusive prior owner: live owner
+  ---
+  duration_ms: 55.844
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\lifecycle-owner-recovery.test.js:104:4'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      [
+    +   'done',
+    +   'start'
+    -   'refused',
+    -   'agent-reserved'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'refused'
+    1: 'agent-reserved'
+  actual:
+    0: 'done'
+    1: 'start'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/lifecycle-owner-recovery.test.js:109:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: nonexclusive prior owner: unknown owner
+ok 7 - nonexclusive prior owner: unknown owner
+  ---
+  duration_ms: 47.1449
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: missing birth time
+ok 8 - nonexclusive prior owner: missing birth time
+  ---
+  duration_ms: 48.6671
+  type: 'test'
+  ...
+# Subtest: an ownerless legacy reservation stays reserved despite a replacement boot
+ok 9 - an ownerless legacy reservation stays reserved despite a replacement boot
+  ---
+  duration_ms: 39.9935
+  type: 'test'
+  ...
+# Subtest: different default ports are different recovery scopes even with an earlier generation
+not ok 10 - different default ports are different recovery scopes even with an earlier generation
+  ---
+  duration_ms: 43.873
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\lifecycle-owner-recovery.test.js:122:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'terminal'
+    - 'pending'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'pending'
+  actual: 'terminal'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/lifecycle-owner-recovery.test.js:125:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: recovery rereads ownership under the lock after its process probe
+ok 11 - recovery rereads ownership under the lock after its process probe
+  ---
+  duration_ms: 44.2165
+  type: 'test'
+  ...
+# Subtest: recovery preserves a result completed while the process probe was running
+ok 12 - recovery preserves a result completed while the process probe was running
+  ---
+  duration_ms: 44.8304
+  type: 'test'
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 9
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 738.7369

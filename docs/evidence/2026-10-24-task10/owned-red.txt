@@ -1,0 +1,216 @@
+TAP version 13
+# Subtest: a second start takes over, and the first stops serving
+ok 1 - a second start takes over, and the first stops serving
+  ---
+  duration_ms: 2595.8108
+  type: 'test'
+  ...
+# Subtest: the predecessor's processes are reaped by the replacement, not stranded
+ok 2 - the predecessor's processes are reaped by the replacement, not stranded
+  ---
+  duration_ms: 853.6019
+  type: 'test'
+  ...
+# Subtest: something that is not an aify-env is left alone, and named
+ok 3 - something that is not an aify-env is left alone, and named
+  ---
+  duration_ms: 180.0635
+  type: 'test'
+  ...
+# Subtest: a stranger that serves a HEALTHY body with a pid is still left alone
+ok 4 - a stranger that serves a HEALTHY body with a pid is still left alone
+  ---
+  duration_ms: 214.7259
+  type: 'test'
+  ...
+# Subtest: bootstrap rejects a context changed while owner authorization is pending
+ok 5 - bootstrap rejects a context changed while owner authorization is pending
+  ---
+  duration_ms: 24.7246
+  type: 'test'
+  ...
+# Subtest: private ready publication is exclusive and transport-only
+ok 6 - private ready publication is exclusive and transport-only
+  ---
+  duration_ms: 9.4196
+  type: 'test'
+  ...
+# Subtest: two dedicated preparations can pass before the exclusive readiness claim
+ok 7 - two dedicated preparations can pass before the exclusive readiness claim
+  ---
+  duration_ms: 21.8044
+  type: 'test'
+  ...
+# Subtest: new explicit and automatic reservations durably record their daemon owner
+not ok 8 - new explicit and automatic reservations durably record their daemon owner
+  ---
+  duration_ms: 56.0667
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\lifecycle-owner-recovery.test.js:49:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+    + undefined
+    - {
+    -   createdAtUs: 200,
+    -   generation: 2000,
+    -   pid: 12,
+    -   scope: 'http://127.0.0.1:9999'
+    - }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    scope: 'http://127.0.0.1:9999'
+    generation: 2000
+    pid: 12
+    createdAtUs: 200
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/lifecycle-owner-recovery.test.js:57:16)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: an exclusive replacement settles its own prior generation and admits the next start
+not ok 9 - an exclusive replacement settles its own prior generation and admits the next start
+  ---
+  duration_ms: 44.9566
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\lifecycle-owner-recovery.test.js:68:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      [
+    +   'refused',
+    +   'agent-reserved'
+    -   'done',
+    -   'start'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'done'
+    1: 'start'
+  actual:
+    0: 'refused'
+    1: 'agent-reserved'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/lifecycle-owner-recovery.test.js:72:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: a live concurrent scope retains custody while another scope boots
+ok 10 - a live concurrent scope retains custody while another scope boots
+  ---
+  duration_ms: 50.6644
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: gone pid
+not ok 11 - nonexclusive prior owner: gone pid
+  ---
+  duration_ms: 42.6708
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\lifecycle-owner-recovery.test.js:104:4'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      [
+    +   'refused',
+    +   'agent-reserved'
+    -   'done',
+    -   'start'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'done'
+    1: 'start'
+  actual:
+    0: 'refused'
+    1: 'agent-reserved'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/lifecycle-owner-recovery.test.js:109:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: nonexclusive prior owner: reused pid
+not ok 12 - nonexclusive prior owner: reused pid
+  ---
+  duration_ms: 42.8739
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\lifecycle-owner-recovery.test.js:104:4'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      [
+    +   'refused',
+    +   'agent-reserved'
+    -   'done',
+    -   'start'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'done'
+    1: 'start'
+  actual:
+    0: 'refused'
+    1: 'agent-reserved'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/lifecycle-owner-recovery.test.js:109:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: nonexclusive prior owner: live owner
+ok 13 - nonexclusive prior owner: live owner
+  ---
+  duration_ms: 44.0965
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: unknown owner
+ok 14 - nonexclusive prior owner: unknown owner
+  ---
+  duration_ms: 45.2694
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: missing birth time
+ok 15 - nonexclusive prior owner: missing birth time
+  ---
+  duration_ms: 45.0815
+  type: 'test'
+  ...
+# Subtest: an ownerless legacy reservation stays reserved despite a replacement boot
+ok 16 - an ownerless legacy reservation stays reserved despite a replacement boot
+  ---
+  duration_ms: 39.7346
+  type: 'test'
+  ...
+# Subtest: different default ports are different recovery scopes even with an earlier generation
+ok 17 - different default ports are different recovery scopes even with an earlier generation
+  ---
+  duration_ms: 40.4753
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 13
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3917.9546

@@ -1,0 +1,6 @@
+{
+  "base_head": "34c31d02e9af81a6e128a2051d3856431828e614",
+  "candidate_test_sha256": "5bb7297803ceb93058c7d4049af8e7b59e099805cb5b32223b98d6c2ba59b12c",
+  "derived_test_sha256": "8427075d0567d08d459f946aa8d4ffe03873f6286e2f094f5d7db9eff9c77a7b",
+  "substitution": "only module import prefix ../lib/ to exact base file URI"
+}

@@ -1,0 +1,805 @@
+TAP version 13
+# Subtest: a second start takes over, and the first stops serving
+ok 1 - a second start takes over, and the first stops serving
+  ---
+  duration_ms: 3093.8776
+  type: 'test'
+  ...
+# Subtest: the predecessor's processes are reaped by the replacement, not stranded
+ok 2 - the predecessor's processes are reaped by the replacement, not stranded
+  ---
+  duration_ms: 2005.4452
+  type: 'test'
+  ...
+# Subtest: something that is not an aify-env is left alone, and named
+ok 3 - something that is not an aify-env is left alone, and named
+  ---
+  duration_ms: 174.5473
+  type: 'test'
+  ...
+# Subtest: a stranger that serves a HEALTHY body with a pid is still left alone
+ok 4 - a stranger that serves a HEALTHY body with a pid is still left alone
+  ---
+  duration_ms: 212.8354
+  type: 'test'
+  ...
+# Subtest: durable first result survives lost report and changed intent refuses
+ok 5 - durable first result survives lost report and changed intent refuses
+  ---
+  duration_ms: 43.72
+  type: 'test'
+  ...
+# Subtest: crashed intent stays unknown and reserves agent across executor instances
+ok 6 - crashed intent stays unknown and reserves agent across executor instances
+  ---
+  duration_ms: 19.1059
+  type: 'test'
+  ...
+# Subtest: malformed and unreadable journal fail closed
+ok 7 - malformed and unreadable journal fail closed
+  ---
+  duration_ms: 11.8441
+  type: 'test'
+  ...
+# Subtest: wrong machine refuses durably before effects
+ok 8 - wrong machine refuses durably before effects
+  ---
+  duration_ms: 22.8563
+  type: 'test'
+  ...
+# Subtest: wrong store refuses durably before effects
+ok 9 - wrong store refuses durably before effects
+  ---
+  duration_ms: 21.5914
+  type: 'test'
+  ...
+# Subtest: wrong incarnation refuses durably before effects
+ok 10 - wrong incarnation refuses durably before effects
+  ---
+  duration_ms: 19.6464
+  type: 'test'
+  ...
+# Subtest: wrong revision refuses durably before effects
+ok 11 - wrong revision refuses durably before effects
+  ---
+  duration_ms: 20.7481
+  type: 'test'
+  ...
+# Subtest: moved lifetime refuses durably before effects
+ok 12 - moved lifetime refuses durably before effects
+  ---
+  duration_ms: 23.326
+  type: 'test'
+  ...
+# Subtest: conflict refuses durably before effects
+ok 13 - conflict refuses durably before effects
+  ---
+  duration_ms: 21.3716
+  type: 'test'
+  ...
+# Subtest: unknown identity refuses durably before effects
+ok 14 - unknown identity refuses durably before effects
+  ---
+  duration_ms: 22.3184
+  type: 'test'
+  ...
+# Subtest: kill verifies death but does not produce stop fact
+ok 15 - kill verifies death but does not produce stop fact
+  ---
+  duration_ms: 19.8292
+  type: 'test'
+  ...
+# Subtest: survivor is unknown, not stopped, even after list release
+ok 16 - survivor is unknown, not stopped, even after list release
+  ---
+  duration_ms: 12.7884
+  type: 'test'
+  ...
+# Subtest: delete ends the matched lifetime first, then removes the definition under the same request id
+ok 17 - delete ends the matched lifetime first, then removes the definition under the same request id
+  ---
+  duration_ms: 31.0609
+  type: 'test'
+  ...
+# Subtest: delete whose worker survives removes nothing and stays unknown
+ok 18 - delete whose worker survives removes nothing and stays unknown
+  ---
+  duration_ms: 10.8587
+  type: 'test'
+  ...
+# Subtest: delete refused by the store after its stop says so, and the agent stays stopped
+ok 19 - delete refused by the store after its stop says so, and the agent stays stopped
+  ---
+  duration_ms: 27.1988
+  type: 'test'
+  ...
+# Subtest: spawn starts the existing definition like start
+ok 20 - spawn starts the existing definition like start
+  ---
+  duration_ms: 15.2064
+  type: 'test'
+  ...
+# Subtest: start refuses resident relaunch explicitly
+ok 21 - start refuses resident relaunch explicitly
+  ---
+  duration_ms: 14.0003
+  type: 'test'
+  ...
+# Subtest: spawn refuses resident relaunch explicitly
+ok 22 - spawn refuses resident relaunch explicitly
+  ---
+  duration_ms: 14.0643
+  type: 'test'
+  ...
+# Subtest: restart refuses resident relaunch explicitly
+ok 23 - restart refuses resident relaunch explicitly
+  ---
+  duration_ms: 14.9092
+  type: 'test'
+  ...
+# Subtest: start creates under lock and clears stop only on successful lifetime
+ok 24 - start creates under lock and clears stop only on successful lifetime
+  ---
+  duration_ms: 38.6346
+  type: 'test'
+  ...
+# Subtest: restart retains stop after failed start and never renews moved revision
+ok 25 - restart retains stop after failed start and never renews moved revision
+  ---
+  duration_ms: 23.0764
+  type: 'test'
+  ...
+# Subtest: a restart whose launch cannot be built after its stop says it stopped; a start says only why
+ok 26 - a restart whose launch cannot be built after its stop says it stopped; a start says only why
+  ---
+  duration_ms: 19.8187
+  type: 'test'
+  ...
+# Subtest: running matched start is no-op without second worker
+ok 27 - running matched start is no-op without second worker
+  ---
+  duration_ms: 14.9179
+  type: 'test'
+  ...
+# Subtest: identity is revalidated immediately before destructive effect
+ok 28 - identity is revalidated immediately before destructive effect
+  ---
+  duration_ms: 16.8802
+  type: 'test'
+  ...
+# Subtest: missing raw identity completeness refuses rather than inferring absence
+ok 29 - missing raw identity completeness refuses rather than inferring absence
+  ---
+  duration_ms: 13.8591
+  type: 'test'
+  ...
+# Subtest: bounded identifier constructor is not confused with object prototype
+ok 30 - bounded identifier constructor is not confused with object prototype
+  ---
+  duration_ms: 23.0374
+  type: 'test'
+  ...
+# Subtest: generic locked birth refuses identity becoming incomplete after preparation
+ok 31 - generic locked birth refuses identity becoming incomplete after preparation
+  ---
+  duration_ms: 15.6101
+  type: 'test'
+  ...
+# Subtest: explicit expected absence requires own typed complete raw fields
+ok 32 - explicit expected absence requires own typed complete raw fields
+  ---
+  duration_ms: 19.0246
+  type: 'test'
+  ...
+# Subtest: delete against the real definition store removes the file once; a replay changes nothing
+ok 33 - delete against the real definition store removes the file once; a replay changes nothing
+  ---
+  duration_ms: 89.8847
+  type: 'test'
+  ...
+# Subtest: a builder that throws before any effect refuses with its reason; a throw after the start stays unknown
+ok 34 - a builder that throws before any effect refuses with its reason; a throw after the start stays unknown
+  ---
+  duration_ms: 26.5984
+  type: 'test'
+  ...
+# Subtest: bootstrap rejects a context changed while owner authorization is pending
+ok 35 - bootstrap rejects a context changed while owner authorization is pending
+  ---
+  duration_ms: 27.3435
+  type: 'test'
+  ...
+# Subtest: private ready publication is exclusive and transport-only
+ok 36 - private ready publication is exclusive and transport-only
+  ---
+  duration_ms: 13.1143
+  type: 'test'
+  ...
+# Subtest: two dedicated preparations can pass before the exclusive readiness claim
+ok 37 - two dedicated preparations can pass before the exclusive readiness claim
+  ---
+  duration_ms: 29.8492
+  type: 'test'
+  ...
+# Subtest: ordinary stopped-defined automatic control has zero birth through shared host admission
+ok 38 - ordinary stopped-defined automatic control has zero birth through shared host admission
+  ---
+  duration_ms: 130.9266
+  type: 'test'
+  ...
+# Subtest: healthy defined automatic control engages the gate once with the exact supplied launch
+ok 39 - healthy defined automatic control engages the gate once with the exact supplied launch
+  ---
+  duration_ms: 130.6828
+  type: 'test'
+  ...
+# Subtest: completed explicit start invalidates an earlier cold automatic preflight before a second birth
+ok 40 - completed explicit start invalidates an earlier cold automatic preflight before a second birth
+  ---
+  duration_ms: 131.2025
+  type: 'test'
+  ...
+# Subtest: a named agent no definition here names is not born, by a complete reading (D8; 0.9 review F2)
+ok 41 - a named agent no definition here names is not born, by a complete reading (D8; 0.9 review F2)
+  ---
+  duration_ms: 53.4632
+  type: 'test'
+  ...
+# Subtest: defined automatic control refuses missing admitColdStart
+ok 42 - defined automatic control refuses missing admitColdStart
+  ---
+  duration_ms: 99.8193
+  type: 'test'
+  ...
+# Subtest: defined automatic control refuses missing rawIdentity
+ok 43 - defined automatic control refuses missing rawIdentity
+  ---
+  duration_ms: 94.5033
+  type: 'test'
+  ...
+# Subtest: incomplete local reading cannot classify a launch as legacy undefined
+ok 44 - incomplete local reading cannot classify a launch as legacy undefined
+  ---
+  duration_ms: 49.7352
+  type: 'test'
+  ...
+# Subtest: defined automatic control without supplied binding cannot fall back to legacy birth
+ok 45 - defined automatic control without supplied binding cannot fall back to legacy birth
+  ---
+  duration_ms: 61.7898
+  type: 'test'
+  ...
+# Subtest: real plugin subscription and control acknowledgement are inside the durable automatic reservation and outside birth lock
+ok 46 - real plugin subscription and control acknowledgement are inside the durable automatic reservation and outside birth lock
+  ---
+  duration_ms: 106.1756
+  type: 'test'
+  ...
+# Subtest: real plugin missing subscription retains automatic unknown
+ok 47 - real plugin missing subscription retains automatic unknown
+  ---
+  duration_ms: 97.2329
+  type: 'test'
+  ...
+# Subtest: real plugin throw subscription retains automatic unknown
+ok 48 - real plugin throw subscription retains automatic unknown
+  ---
+  duration_ms: 92.1904
+  type: 'test'
+  ...
+# Subtest: real plugin failed control acknowledgement retains automatic unknown
+ok 49 - real plugin failed control acknowledgement retains automatic unknown
+  ---
+  duration_ms: 395.1271
+  type: 'test'
+  ...
+# Subtest: automatic success holds a durable slot through awaited production then releases it
+ok 50 - automatic success holds a durable slot through awaited production then releases it
+  ---
+  duration_ms: 67.0693
+  type: 'test'
+  ...
+# Subtest: automatic admission refuses durable pending, stopped, malformed, and stale-definition causes before effect
+    # Subtest: pending
+    ok 1 - pending
+      ---
+      duration_ms: 41.1917
+      type: 'test'
+      ...
+    # Subtest: stopped
+    ok 2 - stopped
+      ---
+      duration_ms: 53.2036
+      type: 'test'
+      ...
+    # Subtest: malformed
+    ok 3 - malformed
+      ---
+      duration_ms: 44.5734
+      type: 'test'
+      ...
+    # Subtest: scalarStops
+    ok 4 - scalarStops
+      ---
+      duration_ms: 40.8151
+      type: 'test'
+      ...
+    # Subtest: scalarRecords
+    ok 5 - scalarRecords
+      ---
+      duration_ms: 39.8693
+      type: 'test'
+      ...
+    # Subtest: stale
+    ok 6 - stale
+      ---
+      duration_ms: 33.3754
+      type: 'test'
+      ...
+    1..6
+ok 51 - automatic admission refuses durable pending, stopped, malformed, and stale-definition causes before effect
+  ---
+  duration_ms: 253.9293
+  type: 'test'
+  ...
+# Subtest: uncertain production remains durably reserved across fresh journals and ports
+    # Subtest: throw
+    ok 1 - throw
+      ---
+      duration_ms: 53.1865
+      type: 'test'
+      ...
+    # Subtest: unknown
+    ok 2 - unknown
+      ---
+      duration_ms: 50.8831
+      type: 'test'
+      ...
+    1..2
+ok 52 - uncertain production remains durably reserved across fresh journals and ports
+  ---
+  duration_ms: 104.5332
+  type: 'test'
+  ...
+# Subtest: known producer refusal releases automatic reservation without a stop fact
+ok 53 - known producer refusal releases automatic reservation without a stop fact
+  ---
+  duration_ms: 50.1548
+  type: 'test'
+  ...
+# Subtest: automatic reservation remains outside the birth lock until positive continuation acknowledgement
+ok 54 - automatic reservation remains outside the birth lock until positive continuation acknowledgement
+  ---
+  duration_ms: 56.9124
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for undefined
+ok 55 - unclassified automatic producer retains unknown for undefined
+  ---
+  duration_ms: 43.1623
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for null
+ok 56 - unclassified automatic producer retains unknown for null
+  ---
+  duration_ms: 43.7816
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for false
+ok 57 - unclassified automatic producer retains unknown for false
+  ---
+  duration_ms: 43.2024
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for 0
+ok 58 - unclassified automatic producer retains unknown for 0
+  ---
+  duration_ms: 42.801
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for ""
+ok 59 - unclassified automatic producer retains unknown for ""
+  ---
+  duration_ms: 41.6322
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for {}
+ok 60 - unclassified automatic producer retains unknown for {}
+  ---
+  duration_ms: 40.6205
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for []
+ok 61 - unclassified automatic producer retains unknown for []
+  ---
+  duration_ms: 41.2119
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for {"refused":""}
+ok 62 - unclassified automatic producer retains unknown for {"refused":""}
+  ---
+  duration_ms: 38.1332
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for {"unknown":false}
+ok 63 - unclassified automatic producer retains unknown for {"unknown":false}
+  ---
+  duration_ms: 36.9221
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for {"id":"fake-runner","pid":"123"}
+ok 64 - unclassified automatic producer retains unknown for {"id":"fake-runner","pid":"123"}
+  ---
+  duration_ms: 35.7401
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for {"id":"fake-runner","pid":123}
+ok 65 - unclassified automatic producer retains unknown for {"id":"fake-runner","pid":123}
+  ---
+  duration_ms: 34.8298
+  type: 'test'
+  ...
+# Subtest: unclassified automatic producer retains unknown for {"refused":"ambiguous","id":"fake-runner","pid":123}
+ok 66 - unclassified automatic producer retains unknown for {"refused":"ambiguous","id":"fake-runner","pid":123}
+  ---
+  duration_ms: 34.8428
+  type: 'test'
+  ...
+# Subtest: automatic continuation false retains durable unknown
+ok 67 - automatic continuation false retains durable unknown
+  ---
+  duration_ms: 38.6025
+  type: 'test'
+  ...
+# Subtest: automatic continuation undefined retains durable unknown
+ok 68 - automatic continuation undefined retains durable unknown
+  ---
+  duration_ms: 37.5092
+  type: 'test'
+  ...
+# Subtest: automatic continuation throw retains durable unknown
+ok 69 - automatic continuation throw retains durable unknown
+  ---
+  duration_ms: 37.4114
+  type: 'test'
+  ...
+# Subtest: absent continuation capability refuses before automatic birth
+ok 70 - absent continuation capability refuses before automatic birth
+  ---
+  duration_ms: 24.9493
+  type: 'test'
+  ...
+# Subtest: automatic missing established journal refuses exact cause before birth without recreation
+ok 71 - automatic missing established journal refuses exact cause before birth without recreation
+  ---
+  duration_ms: 27.5523
+  type: 'test'
+  ...
+# Subtest: healthy pending custody, terminal result and cross-instance replay remain typed
+ok 72 - healthy pending custody, terminal result and cross-instance replay remain typed
+  ---
+  duration_ms: 33.7143
+  type: 'test'
+  ...
+# Subtest: malformed owner refuses reads and same-agent reservation without writes
+ok 73 - malformed owner refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 19.4484
+  type: 'test'
+  ...
+# Subtest: scalar unknown refuses reads and same-agent reservation without writes
+ok 74 - scalar unknown refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 21.5133
+  type: 'test'
+  ...
+# Subtest: array unknown refuses reads and same-agent reservation without writes
+ok 75 - array unknown refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 17.9177
+  type: 'test'
+  ...
+# Subtest: unknown wrong status refuses reads and same-agent reservation without writes
+ok 76 - unknown wrong status refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 22.7091
+  type: 'test'
+  ...
+# Subtest: unknown wrong outcome refuses reads and same-agent reservation without writes
+ok 77 - unknown wrong outcome refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 21.1065
+  type: 'test'
+  ...
+# Subtest: unknown non-null lifetime refuses reads and same-agent reservation without writes
+ok 78 - unknown non-null lifetime refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 20.113
+  type: 'test'
+  ...
+# Subtest: unknown empty timestamp refuses reads and same-agent reservation without writes
+ok 79 - unknown empty timestamp refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 22.1771
+  type: 'test'
+  ...
+# Subtest: unknown missing lifetime refuses reads and same-agent reservation without writes
+ok 80 - unknown missing lifetime refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 20.9248
+  type: 'test'
+  ...
+# Subtest: incomplete terminal refuses reads and same-agent reservation without writes
+ok 81 - incomplete terminal refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 18.8239
+  type: 'test'
+  ...
+# Subtest: terminal scalar refuses reads and same-agent reservation without writes
+ok 82 - terminal scalar refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 18.2543
+  type: 'test'
+  ...
+# Subtest: terminal untyped outcome refuses reads and same-agent reservation without writes
+ok 83 - terminal untyped outcome refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 23.156
+  type: 'test'
+  ...
+# Subtest: terminal missing timestamp refuses reads and same-agent reservation without writes
+ok 84 - terminal missing timestamp refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 21.4957
+  type: 'test'
+  ...
+# Subtest: pending with terminal result refuses reads and same-agent reservation without writes
+ok 85 - pending with terminal result refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 20.3053
+  type: 'test'
+  ...
+# Subtest: changed row agent refuses reads and same-agent reservation without writes
+ok 86 - changed row agent refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 18.4993
+  type: 'test'
+  ...
+# Subtest: changed map id refuses reads and same-agent reservation without writes
+ok 87 - changed map id refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 19.0045
+  type: 'test'
+  ...
+# Subtest: unparseable intent refuses reads and same-agent reservation without writes
+ok 88 - unparseable intent refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 18.1505
+  type: 'test'
+  ...
+# Subtest: noncanonical intent whitespace refuses reads and same-agent reservation without writes
+ok 89 - noncanonical intent whitespace refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 18.2839
+  type: 'test'
+  ...
+# Subtest: intent wrong action refuses reads and same-agent reservation without writes
+ok 90 - intent wrong action refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 17.6939
+  type: 'test'
+  ...
+# Subtest: intent missing tuple field refuses reads and same-agent reservation without writes
+ok 91 - intent missing tuple field refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 17.468
+  type: 'test'
+  ...
+# Subtest: intent untyped revision refuses reads and same-agent reservation without writes
+ok 92 - intent untyped revision refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 16.5972
+  type: 'test'
+  ...
+# Subtest: intent untyped fresh context refuses reads and same-agent reservation without writes
+ok 93 - intent untyped fresh context refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 19.0614
+  type: 'test'
+  ...
+# Subtest: invalid finish {"status":"done"} cannot corrupt custody
+ok 94 - invalid finish {"status":"done"} cannot corrupt custody
+  ---
+  duration_ms: 10.3874
+  type: 'test'
+  ...
+# Subtest: invalid finish 1 cannot corrupt custody
+ok 95 - invalid finish 1 cannot corrupt custody
+  ---
+  duration_ms: 12.5854
+  type: 'test'
+  ...
+# Subtest: invalid finish {"status":"done","outcome":"stop","resultLifetime":1,"finishedAt":"2026-10-08T00:00:00.000Z"} cannot corrupt custody
+ok 96 - invalid finish {"status":"done","outcome":"stop","resultLifetime":1,"finishedAt":"2026-10-08T00:00:00.000Z"} cannot corrupt custody
+  ---
+  duration_ms: 11.2633
+  type: 'test'
+  ...
+# Subtest: invalid finish {"status":"done","outcome":"stop","resultLifetime":null,"finishedAt":""} cannot corrupt custody
+ok 97 - invalid finish {"status":"done","outcome":"stop","resultLifetime":null,"finishedAt":""} cannot corrupt custody
+  ---
+  duration_ms: 11.7243
+  type: 'test'
+  ...
+# Subtest: invalid finish {"status":"done","outcome":"stop","resultLifetime":null,"finishedAt":"2026-10-08T00:00:00.000Z","resultIncarnation":1} cannot corrupt custody
+ok 98 - invalid finish {"status":"done","outcome":"stop","resultLifetime":null,"finishedAt":"2026-10-08T00:00:00.000Z","resultIncarnation":1} cannot corrupt custody
+  ---
+  duration_ms: 10.6675
+  type: 'test'
+  ...
+# Subtest: invalid reserve request and stop fact cannot publish corrupt journal
+ok 99 - invalid reserve request and stop fact cannot publish corrupt journal
+  ---
+  duration_ms: 12.0168
+  type: 'test'
+  ...
+# Subtest: construction, reads and reservations never initialize absent journal
+ok 100 - construction, reads and reservations never initialize absent journal
+  ---
+  duration_ms: 3.017
+  type: 'test'
+  ...
+# Subtest: only explicit virgin initialization creates journal and existing valid bytes are preserved
+ok 101 - only explicit virgin initialization creates journal and existing valid bytes are preserved
+  ---
+  duration_ms: 20.081
+  type: 'test'
+  ...
+# Subtest: explicit initialization refuses malformed existing journal and untyped prior boot
+ok 102 - explicit initialization refuses malformed existing journal and untyped prior boot
+  ---
+  duration_ms: 4.1024
+  type: 'test'
+  ...
+# Subtest: missing reserve yields typed refusal before any dependency or effect
+ok 103 - missing reserve yields typed refusal before any dependency or effect
+  ---
+  duration_ms: 2.6514
+  type: 'test'
+  ...
+# Subtest: complete explicit absence may durably stop without termination
+ok 104 - complete explicit absence may durably stop without termination
+  ---
+  duration_ms: 26.5905
+  type: 'test'
+  ...
+# Subtest: omitted current is unanswered identity, not explicit absence
+ok 105 - omitted current is unanswered identity, not explicit absence
+  ---
+  duration_ms: 13.9125
+  type: 'test'
+  ...
+# Subtest: actual boot initializes virgin home once before generation and preserves durable custody
+ok 106 - actual boot initializes virgin home once before generation and preserves durable custody
+  ---
+  duration_ms: 31.8927
+  type: 'test'
+  ...
+# Subtest: a lost journal is reported and never recreated; the host boots and lifecycle actions refuse
+ok 107 - a lost journal is reported and never recreated; the host boots and lifecycle actions refuse
+  ---
+  duration_ms: 21.7025
+  type: 'test'
+  ...
+# Subtest: a malformed journal is reported, kept as found, and the host boots
+ok 108 - a malformed journal is reported, kept as found, and the host boots
+  ---
+  duration_ms: 8.3586
+  type: 'test'
+  ...
+# Subtest: unreadable generation evidence refuses virgin initialization and generation write
+ok 109 - unreadable generation evidence refuses virgin initialization and generation write
+  ---
+  duration_ms: 1.8843
+  type: 'test'
+  ...
+# Subtest: new explicit and automatic reservations durably record their daemon owner
+ok 110 - new explicit and automatic reservations durably record their daemon owner
+  ---
+  duration_ms: 120.1988
+  type: 'test'
+  ...
+# Subtest: a replacement settles a proven-dead prior-generation owner and admits the next start
+ok 111 - a replacement settles a proven-dead prior-generation owner and admits the next start
+  ---
+  duration_ms: 95.6197
+  type: 'test'
+  ...
+# Subtest: a live concurrent scope retains custody while another scope boots
+ok 112 - a live concurrent scope retains custody while another scope boots
+  ---
+  duration_ms: 77.2321
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: gone pid
+ok 113 - nonexclusive prior owner: gone pid
+  ---
+  duration_ms: 80.1562
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: reused pid
+ok 114 - nonexclusive prior owner: reused pid
+  ---
+  duration_ms: 83.9011
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: live owner
+ok 115 - nonexclusive prior owner: live owner
+  ---
+  duration_ms: 68.6934
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: unknown owner
+ok 116 - nonexclusive prior owner: unknown owner
+  ---
+  duration_ms: 64.9133
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: missing birth time
+ok 117 - nonexclusive prior owner: missing birth time
+  ---
+  duration_ms: 66.698
+  type: 'test'
+  ...
+# Subtest: an ownerless legacy reservation stays reserved despite a replacement boot
+ok 118 - an ownerless legacy reservation stays reserved despite a replacement boot
+  ---
+  duration_ms: 51.0124
+  type: 'test'
+  ...
+# Subtest: different default ports are different recovery scopes even with an earlier generation
+ok 119 - different default ports are different recovery scopes even with an earlier generation
+  ---
+  duration_ms: 51.958
+  type: 'test'
+  ...
+# Subtest: recovery rereads ownership under the lock after its process probe
+ok 120 - recovery rereads ownership under the lock after its process probe
+  ---
+  duration_ms: 53.8415
+  type: 'test'
+  ...
+# Subtest: recovery preserves a result completed while the process probe was running
+ok 121 - recovery preserves a result completed while the process probe was running
+  ---
+  duration_ms: 55.0734
+  type: 'test'
+  ...
+# CONTROL replacement owns endpoint; old owner pid is alive and its lifecycle builder is unresolved
+# Subtest: a bound replacement must not settle a still-live same-port owner during shutdown drain
+ok 122 - a bound replacement must not settle a still-live same-port owner during shutdown drain
+  ---
+  duration_ms: 1729.7195
+  type: 'test'
+  ...
+# Subtest: successful serving/durable boot wires actual sender and its exported evaluation cadence independent of sweep
+ok 123 - successful serving/durable boot wires actual sender and its exported evaluation cadence independent of sweep
+  ---
+  duration_ms: 74.0783
+  type: 'test'
+  ...
+# Subtest: dedicated readiness precedes sending; boot/readiness refusal and view-only send nothing
+ok 124 - dedicated readiness precedes sending; boot/readiness refusal and view-only send nothing
+  ---
+  duration_ms: 132.092
+  type: 'test'
+  ...
+1..124
+# tests 132
+# suites 0
+# pass 132
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5565.3315

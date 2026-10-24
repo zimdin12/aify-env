@@ -235,3 +235,42 @@ than bookkeeping.
 **On Windows there is no graceful path from another process.** `SIGTERM` there is `TerminateProcess`:
 the target dies immediately and no handler runs. So every external stop is the ungraceful one, and the
 record is not a backstop — it is the whole mechanism.
+
+## Pending lifecycle reservations after daemon death
+
+The lifecycle journal, `~/.aify/agent-lifecycle.json`, is shared across daemon scopes. A new production
+reservation records `owner` with its scope, publication generation, PID and process creation time in
+microseconds. The creation time is null when the existing OS probe cannot establish it.
+
+A standalone scope is the actual bound loopback endpoint, including its resolved port. A dedicated
+scope is its instance-context scope. Neither scope has proven operation exclusivity at recovery:
+dedicated readiness is claimed after state boot, and a standalone listener closes before its daemon's
+shutdown drain finishes. An earlier generation or a successful replacement bind does not prove the
+old lifecycle operation ended. Scope and generation identify the saved owner; they do not authorize
+settlement by themselves.
+
+Boot settles a pending row only when a fresh OS probe proves the saved PID absent, or
+proves that PID now has a different creation time. A live or unanswered owner stays reserved. On
+platforms where the existing process probe is unsupported, that branch remains unanswered. Neither
+receipt age nor a new generation in another scope authorizes settlement. Recovery compares the exact
+observed row intent and owner again under the journal lock before writing; a row that changed or
+completed during the probe is left alone.
+
+Settlement sets `phase` to `terminal` and `result` to that row's existing `unknown` receipt. It does
+not replay an effect, rewrite the receipt, change operator-stop facts, or delete history. Retrying
+the abandoned request ID still returns its original `failed` / `execution-unknown` result. A new
+request ID can be admitted, subject to the normal definition and identity checks.
+
+### Ownerless legacy rows require manual recovery
+
+A refusal with `agent-reserved` can be a live operation, an unanswered owner or a legacy reservation.
+An ownerless row provides no automatic proof of which daemon held it. The operator must establish
+that the operation cannot still complete before recovering it; age alone is insufficient.
+
+With the relevant lifecycle writers stopped or otherwise excluded, acquire the journal's existing
+`agent-lifecycle.json.lock` by exclusive creation. If that lock is held, leave it intact and resolve
+its owner rather than deleting it by age. While holding the acquired lock, read and back up the
+journal, identify the exact abandoned pending row, set only its `phase` to `terminal` and its `result`
+to a copy of its existing `unknown`, then validate and durably replace the journal. Preserve its
+`intent`, `unknown`, owner if present, all other rows and `stops`. Release only the lock this recovery
+acquired. Submit a new request ID after recovery; replaying the old ID remains execution-unknown.

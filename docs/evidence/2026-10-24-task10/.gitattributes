@@ -1,0 +1,5 @@
+# Preserve the raw bytes named by execution receipts, including native CRLF logs.
+* -text
+# Reporter whitespace is part of a captured log, not a source formatting error.
+*.txt -whitespace
+*.json whitespace=cr-at-eol

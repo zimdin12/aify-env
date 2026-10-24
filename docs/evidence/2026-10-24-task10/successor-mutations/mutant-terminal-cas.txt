@@ -1,0 +1,116 @@
+TAP version 13
+# Subtest: new explicit and automatic reservations durably record their daemon owner
+ok 1 - new explicit and automatic reservations durably record their daemon owner
+  ---
+  duration_ms: 86.7734
+  type: 'test'
+  ...
+# Subtest: a replacement settles a proven-dead prior-generation owner and admits the next start
+ok 2 - a replacement settles a proven-dead prior-generation owner and admits the next start
+  ---
+  duration_ms: 64.7075
+  type: 'test'
+  ...
+# Subtest: a live concurrent scope retains custody while another scope boots
+ok 3 - a live concurrent scope retains custody while another scope boots
+  ---
+  duration_ms: 48.1366
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: gone pid
+ok 4 - nonexclusive prior owner: gone pid
+  ---
+  duration_ms: 61.4316
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: reused pid
+ok 5 - nonexclusive prior owner: reused pid
+  ---
+  duration_ms: 65.0141
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: live owner
+ok 6 - nonexclusive prior owner: live owner
+  ---
+  duration_ms: 49.4325
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: unknown owner
+ok 7 - nonexclusive prior owner: unknown owner
+  ---
+  duration_ms: 50.8168
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: missing birth time
+ok 8 - nonexclusive prior owner: missing birth time
+  ---
+  duration_ms: 47.6139
+  type: 'test'
+  ...
+# Subtest: an ownerless legacy reservation stays reserved despite a replacement boot
+ok 9 - an ownerless legacy reservation stays reserved despite a replacement boot
+  ---
+  duration_ms: 41.5089
+  type: 'test'
+  ...
+# Subtest: different default ports are different recovery scopes even with an earlier generation
+ok 10 - different default ports are different recovery scopes even with an earlier generation
+  ---
+  duration_ms: 43.062
+  type: 'test'
+  ...
+# Subtest: recovery rereads ownership under the lock after its process probe
+ok 11 - recovery rereads ownership under the lock after its process probe
+  ---
+  duration_ms: 46.6434
+  type: 'test'
+  ...
+# Subtest: recovery preserves a result completed while the process probe was running
+not ok 12 - recovery preserves a result completed while the process probe was running
+  ---
+  duration_ms: 48.3474
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\lifecycle-owner-recovery.test.js:140:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      {
+    +   finishedAt: '2026-10-24T01:35:20.482Z',
+    +   outcome: 'execution-unknown',
+    +   resultLifetime: null,
+    +   status: 'failed'
+    -   finishedAt: '2026-10-24T00:00:00.000Z',
+    -   outcome: 'start',
+    -   resultLifetime: 'verified-lifetime',
+    -   status: 'done'
+      }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    status: 'done'
+    outcome: 'start'
+    resultLifetime: 'verified-lifetime'
+    finishedAt: '2026-10-24T00:00:00.000Z'
+  actual:
+    status: 'failed'
+    outcome: 'execution-unknown'
+    resultLifetime: ~
+    finishedAt: '2026-10-24T01:35:20.482Z'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/lifecycle-owner-recovery.test.js:148:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 11
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 739.6311

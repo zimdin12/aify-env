@@ -1,0 +1,18 @@
+TAP version 13
+# CONTROL replacement owns endpoint; old owner pid is alive and its lifecycle builder is unresolved
+# CONTROL fresh native death probe settled only after the old owner exited
+# Subtest: a bound replacement must not settle a still-live same-port owner during shutdown drain
+ok 1 - a bound replacement must not settle a still-live same-port owner during shutdown drain
+  ---
+  duration_ms: 2436.2952
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2545.4041

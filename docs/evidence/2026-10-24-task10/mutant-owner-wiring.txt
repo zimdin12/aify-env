@@ -1,0 +1,57 @@
+TAP version 13
+# Subtest: successful serving/durable boot wires actual sender and its exported evaluation cadence independent of sweep
+not ok 1 - successful serving/durable boot wires actual sender and its exported evaluation cadence independent of sweep
+  ---
+  duration_ms: 58.765
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\the-daemon-sends-agent-state.test.js:90:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    production ports must receive the boot owner's identity, not write ownerless reservations
+    + actual - expected
+    
+    + undefined
+    - {
+    -   createdAtUs: null,
+    -   generation: 1000,
+    -   pid: 9,
+    -   scope: 'http://127.0.0.1:0'
+    - }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    scope: 'http://127.0.0.1:0'
+    generation: 1000
+    pid: 9
+    createdAtUs: ~
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/the-daemon-sends-agent-state.test.js:94:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: dedicated readiness precedes sending; boot/readiness refusal and view-only send nothing
+not ok 2 - dedicated readiness precedes sending; boot/readiness refusal and view-only send nothing
+  ---
+  duration_ms: 33.4909
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\the-daemon-sends-agent-state.test.js:127:1'
+  failureType: 'testCodeFailure'
+  error: "Cannot read properties of undefined (reading 'scope')"
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/the-daemon-sends-agent-state.test.js:131:41)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 181.8133

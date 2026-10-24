@@ -33,3 +33,19 @@ test('private ready publication is exclusive and transport-only', t => {
   assert.throws(() => publishInstanceReady(f.context, receipt), /instance_context/);
   assert.equal(contextError('refused').message, 'instance_context: refused');
 });
+test('two dedicated preparations can pass before the exclusive readiness claim', async t => {
+  const f = fixture(t), waiting = [];
+  const owner = net.createServer(socket => socket.once('data', bytes => {
+    waiting.push({ socket, request: JSON.parse(bytes) });
+    if (waiting.length === 2) for (const { socket, request } of waiting)
+      socket.end(JSON.stringify({ ...request, accepted: true }) + '\n');
+  }));
+  await new Promise(resolve => owner.listen(f.context.ownerEndpoint, resolve));
+  t.after(() => owner.close());
+  const prepared = await Promise.all([prepareInstance(f.file, {}), prepareInstance(f.file, {})]);
+  assert.equal(prepared.length, 2, 'preparation alone is not an exclusive scope owner');
+  assert.equal(prepared[0].scope, prepared[1].scope);
+  publishInstanceReady(prepared[0], { pid: 123, envInstance: 'first', port: 12345, build: 'test' });
+  assert.throws(() => publishInstanceReady(prepared[1],
+    { pid: 124, envInstance: 'second', port: 12346, build: 'test' }), /instance_context/);
+});

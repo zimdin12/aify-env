@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: a junction on the listed path re-pointed outside after the checks is not followed on that look
+ok 1 - a junction on the listed path re-pointed outside after the checks is not followed on that look
+  ---
+  duration_ms: 288.8751
+  type: 'test'
+  ...
+# Subtest: a worktree's .git file re-pointed outside after the checks is not followed on that look
+ok 2 - a worktree's .git file re-pointed outside after the checks is not followed on that look
+  ---
+  duration_ms: 333.372
+  type: 'test'
+  ...
+# Subtest: a worktree whose commondir reaches the shared directory through a junction is not read
+ok 3 - a worktree whose commondir reaches the shared directory through a junction is not read
+  ---
+  duration_ms: 241.7536
+  type: 'test'
+  ...
+# Subtest: a worktree whose commondir names the shared directory as it is, written whole, is read
+ok 4 - a worktree whose commondir names the shared directory as it is, written whole, is read
+  ---
+  duration_ms: 268.5345
+  type: 'test'
+  ...
+# Subtest: an alternates line reaching a store through a junction is not read
+ok 5 - an alternates line reaching a store through a junction is not read
+  ---
+  duration_ms: 273.7254
+  type: 'test'
+  ...
+# Subtest: a range read after a junction on the listed path is re-pointed is the judged repository's history
+ok 6 - a range read after a junction on the listed path is re-pointed is the judged repository's history
+  ---
+  duration_ms: 420.0788
+  type: 'test'
+  ...
+# Subtest: a head asked for by a folder's path, not its judged places, runs no git
+ok 7 - a head asked for by a folder's path, not its judged places, runs no git
+  ---
+  duration_ms: 1.0908
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1894.0661

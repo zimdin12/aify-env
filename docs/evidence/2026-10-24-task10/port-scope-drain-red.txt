@@ -1,0 +1,36 @@
+TAP version 13
+# CONTROL replacement owns endpoint; old owner pid is alive and its lifecycle builder is unresolved
+# Subtest: a bound replacement must not settle a still-live same-port owner during shutdown drain
+not ok 1 - a bound replacement must not settle a still-live same-port owner during shutdown drain
+  ---
+  duration_ms: 1679.8086
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\docs\\evidence\\2026-10-24-task10\\port-scope-drain-probe.mjs:41:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    a released listener is not proof the old lifecycle operation cannot still execute
+    + actual - expected
+    
+    + 'terminal'
+    - 'pending'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'pending'
+  actual: 'terminal'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/docs/evidence/2026-10-24-task10/port-scope-drain-probe.mjs:76:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1768.5983

@@ -1,0 +1,15 @@
+{
+  "base": "34c31d02e9af81a6e128a2051d3856431828e614",
+  "product_source_unchanged": true,
+  "source_sha256": {
+    "lib/agent-lifecycle.mjs": "41ea99f23284e8e6dbfa8e6c29e71f4e00ca0802fb404fbea15e2d9701553f7a",
+    "lib/daemon-agent-state.mjs": "ae4f05af9349efdbbfda42039e69ec6f5f6ff340739d9b7151a7999c3b654567",
+    "lib/daemon-agent-lifecycle.mjs": "d3d909179a22420e60c480f47f5097bb79d060695ace4d800ddb1cf9723fe855",
+    "bin/aify-env.mjs": "09723f1ca9449359cf951e103c3123864d5688a63a8de16765ac25e041a18599"
+  },
+  "probe_exit": 1,
+  "probe_pass": 3,
+  "probe_fail": 1,
+  "log_sha256": "6981bb6c259ab6ecd531dd9ff80ce2c6436c7de1055fb1144a21e6839ba85e28",
+  "scope": "private home; real boot, journal, definitions and lifecycle ports; injected no-child runner"
+}

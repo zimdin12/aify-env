@@ -659,7 +659,7 @@ server.listen(port, HOST, async () => {
   try { agentState = bootDaemonAgentState({ aifyHome: join(homedir(), ".aify"), context: instanceContext,
     url: `http://${HOST}:${bound.port}`, report: logLine });
     agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine });
-    agentState.lifecycle = createAgentLifecyclePorts({ aifyHome: join(homedir(), ".aify"),
+    agentState.lifecycle = createAgentLifecyclePorts({ aifyHome: join(homedir(), ".aify"), owner: agentState.lifecycleOwner,
       machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(),
         env: process.env, exists: existsSync, isWsl: hostIsWsl() }).machineId,
       stateHost: agentState.host, residents: agentState.residents, runner, definitions: definitionStore,

@@ -41,6 +41,7 @@ test('healthy pending custody, terminal result and cross-instance replay remain 
 });
 
 const corruptions = [
+  ['malformed owner', (_s, row) => { row.owner = { scope: 'scope', generation: 1, pid: '12', createdAtUs: null }; }],
   ['scalar unknown', (_s, row) => { row.unknown = 1; }],
   ['array unknown', (_s, row) => { row.unknown = []; }],
   ['unknown wrong status', (_s, row) => { row.unknown.status = 'done'; }],

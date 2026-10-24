@@ -1,0 +1,106 @@
+{
+  "base": "34c31d02e9af81a6e128a2051d3856431828e614",
+  "staged_tree": "f455e61cbb2df3a2cd802be77a7b78338c710699",
+  "files": [
+    {
+      "path": "bin/aify-env.mjs",
+      "sha256": "56e66bc54eb87e5ec0228e4c12b593e697513eee273d7f5f38d25f9ad2f727cd",
+      "lines": 985
+    },
+    {
+      "path": "docs/PROTOCOL.md",
+      "sha256": "1f1c3ac5f413c4a1313ec1a7ec6857238e0d5cd4b3787ed5f0c36c062e7a295c",
+      "lines": 276
+    },
+    {
+      "path": "lib/agent-lifecycle.mjs",
+      "sha256": "ab1151497781d5e86fd7b469d0be623f1b9e87fb87240f9e3bec6c91ce0275de",
+      "lines": 307
+    },
+    {
+      "path": "lib/daemon-agent-lifecycle.mjs",
+      "sha256": "ba47b00588e30662652a45cc4b75fd8a73b8c13e446c0c9845e7b4c973f67ee6",
+      "lines": 119
+    },
+    {
+      "path": "lib/daemon-agent-state.mjs",
+      "sha256": "650ed809f83e1f8b6bcb7cb416554ac099c87f52fbb92fb88042466b11e00b06",
+      "lines": 100
+    },
+    {
+      "path": "tests/instance-bootstrap.test.js",
+      "sha256": "2a3cd0ca74e49449c7305e6f588ba2ef227bc0ab69d11c78bed17bb8f3d51e21",
+      "lines": 51
+    },
+    {
+      "path": "tests/lifecycle-journal-integrity.test.js",
+      "sha256": "75719434c90cdc0d191b173bc28cedcc5f4dcd01be06d04e76c1f286109f66b4",
+      "lines": 191
+    },
+    {
+      "path": "tests/lifecycle-owner-recovery.test.js",
+      "sha256": "5bb7297803ceb93058c7d4049af8e7b59e099805cb5b32223b98d6c2ba59b12c",
+      "lines": 149
+    },
+    {
+      "path": "tests/lifecycle-port-drain.test.js",
+      "sha256": "9c885558e575e640987cd3d93edcc902605372cccb9fa022b63c53533b4c95a5",
+      "lines": 79
+    },
+    {
+      "path": "tests/the-daemon-sends-agent-state.test.js",
+      "sha256": "9ca702f9472f0d5a213500a3c1177330cb2d5fc788614cb9ba5363f3f65df122",
+      "lines": 143
+    }
+  ],
+  "checks": [
+    {
+      "log": "native-death-green.txt",
+      "sha256": "5cd0792996dfc3fe8ee1ec2a388cf16cfaa24e5426bc3c451a2146805e07c382",
+      "counts": {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    },
+    {
+      "log": "named-env-control/baseline.txt",
+      "sha256": "846f26012c3ff04238203e8d6c6504feba792c9bf5a38c22a04c9d85b34c94b3",
+      "counts": {
+        "tests": 7,
+        "pass": 7,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    },
+    {
+      "log": "named-env-control/candidate.txt",
+      "sha256": "e100da4f53fb0365a2513464619da56d3ce35a85e375ccaa650c4bf3d095d307",
+      "counts": {
+        "tests": 7,
+        "pass": 7,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    },
+    {
+      "log": "successor-focused.txt",
+      "sha256": "d89da0b55243e836476ec36e8a1bea23a984f7f550650d8d04f9ab9b6e8232b4",
+      "counts": {
+        "tests": 132,
+        "pass": 132,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    }
+  ]
+}

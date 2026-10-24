@@ -1,0 +1,32 @@
+[
+  {
+    "check": "hardcoded-secret",
+    "positive_control": true,
+    "negative_control": true,
+    "added_line_hits": []
+  },
+  {
+    "check": "shell-injection",
+    "positive_control": true,
+    "negative_control": true,
+    "added_line_hits": []
+  },
+  {
+    "check": "dynamic-code",
+    "positive_control": true,
+    "negative_control": true,
+    "added_line_hits": []
+  },
+  {
+    "check": "unsafe-pickle",
+    "positive_control": true,
+    "negative_control": true,
+    "added_line_hits": []
+  },
+  {
+    "check": "sql-formatting",
+    "positive_control": true,
+    "negative_control": true,
+    "added_line_hits": []
+  }
+]

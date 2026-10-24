@@ -1,0 +1,93 @@
+[
+  {
+    "suite": "baseline-bridge",
+    "exit_code": 1,
+    "log_sha256": "a33b787761185497cc332dfff63303575002150892f475d6b50d280af7bcfb39",
+    "executed_files": 380,
+    "failures": [
+      [
+        "tests\\bridge-exits-when-its-terminal-goes.test.js",
+        "1"
+      ]
+    ],
+    "failed_file_output": "TAP version 13\n# Subtest: a resident bridge whose stdin ends reports resident-lost and exits\nnot ok 1 - a resident bridge whose stdin ends reports resident-lost and exits\n  ---\n  duration_ms: 365.8834\n  type: 'test'\n  location: 'C:\\\\Users\\\\Administrator\\\\projects\\\\aify-comms-task5\\\\mcp\\\\stdio\\\\tests\\\\bridge-exits-when-its-terminal-goes.test.js:74:1'\n  failureType: 'testCodeFailure'\n  error: |-\n    Expected values to be strictly equal:\n    \n    0 !== 1\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: 1\n  actual: 0\n  operator: 'strictEqual'\n  stack: |-\n    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-comms-task5/mcp/stdio/tests/bridge-exits-when-its-terminal-goes.test.js:77:10)\n    process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    async Test.run (node:internal/test_runner/test:1054:7)\n    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)\n  ...\n# Subtest: a resident bridge given SIGHUP reports resident-lost before exiting\nok 2 - a resident bridge given SIGHUP reports resident-lost before exiting # SKIP\n  ---\n  duration_ms: 0.1298\n  type: 'test'\n  ...\n# Subtest: a managed bridge exits on the same events and never reports resident-lost\nok 3 - a managed bridge exits on the same events and never reports resident-lost\n  ---\n  duration_ms: 314.5787\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 1\n# fail 1\n# cancelled 0\n# skipped 1\n# todo 0\n# duration_ms 684.2989"
+  },
+  {
+    "suite": "baseline-env",
+    "exit_code": 0,
+    "log_sha256": "65d2a7fa0409d5526fc33a2fba8cca38ea7ec91fb81c9dcf67b6d1e2321b9dd3",
+    "counts": {
+      "tests": 3432,
+      "pass": 3428,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 4,
+      "todo": 0
+    },
+    "python_summary": []
+  },
+  {
+    "suite": "candidate-python",
+    "exit_code": 0,
+    "log_sha256": "20aea51e8c9fac96ed325195524ce0b0f7e6eda2105e9b22f9b814ed2fb153bd",
+    "counts": {},
+    "python_summary": [
+      "5736 passed, 28 skipped, 8 warnings, 12638 subtests passed in 112.70s (0:01:52)"
+    ]
+  },
+  {
+    "suite": "candidate-bridge",
+    "exit_code": 1,
+    "log_sha256": "7b3dbb47304dc430930ea36e410a28b40634a5c72a92707dbbd7f89d707558c0",
+    "executed_files": 380,
+    "failures": [
+      [
+        "tests\\bridge-exits-when-its-terminal-goes.test.js",
+        "1"
+      ]
+    ],
+    "failed_file_output": "TAP version 13\n# Subtest: a resident bridge whose stdin ends reports resident-lost and exits\nnot ok 1 - a resident bridge whose stdin ends reports resident-lost and exits\n  ---\n  duration_ms: 410.3506\n  type: 'test'\n  location: 'C:\\\\Users\\\\Administrator\\\\projects\\\\aify-comms-task5\\\\mcp\\\\stdio\\\\tests\\\\bridge-exits-when-its-terminal-goes.test.js:74:1'\n  failureType: 'testCodeFailure'\n  error: |-\n    Expected values to be strictly equal:\n    \n    0 !== 1\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: 1\n  actual: 0\n  operator: 'strictEqual'\n  stack: |-\n    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-comms-task5/mcp/stdio/tests/bridge-exits-when-its-terminal-goes.test.js:77:10)\n    process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    async Test.run (node:internal/test_runner/test:1054:7)\n    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)\n  ...\n# Subtest: a resident bridge given SIGHUP reports resident-lost before exiting\nok 2 - a resident bridge given SIGHUP reports resident-lost before exiting # SKIP\n  ---\n  duration_ms: 0.1435\n  type: 'test'\n  ...\n# Subtest: a managed bridge exits on the same events and never reports resident-lost\nok 3 - a managed bridge exits on the same events and never reports resident-lost\n  ---\n  duration_ms: 351.3053\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 1\n# fail 1\n# cancelled 0\n# skipped 1\n# todo 0\n# duration_ms 766.1885"
+  },
+  {
+    "suite": "candidate-dashboard",
+    "exit_code": 0,
+    "log_sha256": "629f250f8d2df06b6e99238c40eeedf0629fbb3502f8fe73d82770b2eb874bc4",
+    "counts": {
+      "tests": 1953,
+      "pass": 1953,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    "python_summary": []
+  },
+  {
+    "suite": "candidate-wrapper",
+    "exit_code": 0,
+    "log_sha256": "cad9958264ba3fdf22bf509d91fd61b1ab30bde2e0ad1fedbb423c7f8bf823c6",
+    "counts": {
+      "tests": 1006,
+      "pass": 936,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 70,
+      "todo": 0
+    },
+    "python_summary": []
+  },
+  {
+    "suite": "candidate-env",
+    "exit_code": 0,
+    "log_sha256": "9cec119b481b898508bd4034e3881e439a7f328543974025cace7fc685d41dea",
+    "counts": {
+      "tests": 3446,
+      "pass": 3442,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 4,
+      "todo": 0
+    },
+    "python_summary": []
+  }
+]

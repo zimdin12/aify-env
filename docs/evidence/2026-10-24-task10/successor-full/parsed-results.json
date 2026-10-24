@@ -1,0 +1,96 @@
+[
+  {
+    "suite": "baseline-bridge",
+    "exit_code": 1,
+    "log_sha256": "b7cc803ecb170a516353d28a208dec336ac3a566e4e3467cc83b177d9f2c0111",
+    "executed_files": 380,
+    "failures": [
+      [
+        "tests\\bridge-exits-when-its-terminal-goes.test.js",
+        "1"
+      ]
+    ],
+    "failed_file_output": "TAP version 13\n# Subtest: a resident bridge whose stdin ends reports resident-lost and exits\nnot ok 1 - a resident bridge whose stdin ends reports resident-lost and exits\n  ---\n  duration_ms: 1201.619\n  type: 'test'\n  location: 'C:\\\\Users\\\\Administrator\\\\projects\\\\aify-comms-task5\\\\mcp\\\\stdio\\\\tests\\\\bridge-exits-when-its-terminal-goes.test.js:74:1'\n  failureType: 'testCodeFailure'\n  error: |-\n    Expected values to be strictly equal:\n    \n    0 !== 1\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: 1\n  actual: 0\n  operator: 'strictEqual'\n  stack: |-\n    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-comms-task5/mcp/stdio/tests/bridge-exits-when-its-terminal-goes.test.js:77:10)\n    process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    async Test.run (node:internal/test_runner/test:1054:7)\n    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)\n  ...\n# Subtest: a resident bridge given SIGHUP reports resident-lost before exiting\nok 2 - a resident bridge given SIGHUP reports resident-lost before exiting # SKIP\n  ---\n  duration_ms: 0.22\n  type: 'test'\n  ...\n# Subtest: a managed bridge exits on the same events and never reports resident-lost\nok 3 - a managed bridge exits on the same events and never reports resident-lost\n  ---\n  duration_ms: 961.2702\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 1\n# fail 1\n# cancelled 0\n# skipped 1\n# todo 0\n# duration_ms 2169.262"
+  },
+  {
+    "suite": "baseline-env",
+    "exit_code": 0,
+    "log_sha256": "6919ff9b99e4c5af1bf7640b648fe55bc1635fa0aeed47150d30e77ab8c092da",
+    "counts": {
+      "tests": 3432,
+      "pass": 3428,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 4,
+      "todo": 0
+    },
+    "python_summary": []
+  },
+  {
+    "suite": "candidate-python",
+    "exit_code": 0,
+    "log_sha256": "b04091af80485bb73dbb05ab005f6afb769feafe2edb3910cdb53e4b27e2a659",
+    "counts": {},
+    "python_summary": [
+      "5736 passed, 28 skipped, 8 warnings, 12638 subtests passed in 102.89s (0:01:42)"
+    ]
+  },
+  {
+    "suite": "candidate-bridge",
+    "exit_code": 1,
+    "log_sha256": "a65fa3623c9348d4b6946228c0127c1b59e8a2d561a7841335a7961453528454",
+    "executed_files": 380,
+    "failures": [
+      [
+        "tests\\bridge-exits-when-its-terminal-goes.test.js",
+        "1"
+      ]
+    ],
+    "failed_file_output": "TAP version 13\n# Subtest: a resident bridge whose stdin ends reports resident-lost and exits\nnot ok 1 - a resident bridge whose stdin ends reports resident-lost and exits\n  ---\n  duration_ms: 334.2744\n  type: 'test'\n  location: 'C:\\\\Users\\\\Administrator\\\\projects\\\\aify-comms-task5\\\\mcp\\\\stdio\\\\tests\\\\bridge-exits-when-its-terminal-goes.test.js:74:1'\n  failureType: 'testCodeFailure'\n  error: |-\n    Expected values to be strictly equal:\n    \n    0 !== 1\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: 1\n  actual: 0\n  operator: 'strictEqual'\n  stack: |-\n    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-comms-task5/mcp/stdio/tests/bridge-exits-when-its-terminal-goes.test.js:77:10)\n    process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    async Test.run (node:internal/test_runner/test:1054:7)\n    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)\n  ...\n# Subtest: a resident bridge given SIGHUP reports resident-lost before exiting\nok 2 - a resident bridge given SIGHUP reports resident-lost before exiting # SKIP\n  ---\n  duration_ms: 0.122\n  type: 'test'\n  ...\n# Subtest: a managed bridge exits on the same events and never reports resident-lost\nok 3 - a managed bridge exits on the same events and never reports resident-lost\n  ---\n  duration_ms: 324.5679\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 1\n# fail 1\n# cancelled 0\n# skipped 1\n# todo 0\n# duration_ms 663.3193"
+  },
+  {
+    "suite": "candidate-dashboard",
+    "exit_code": 0,
+    "log_sha256": "3eefb0814577bf95f8c1f3716af7981eec3e6736cc6a878a92deb1fb79265f28",
+    "counts": {
+      "tests": 1953,
+      "pass": 1953,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    "python_summary": []
+  },
+  {
+    "suite": "candidate-wrapper",
+    "exit_code": 0,
+    "log_sha256": "bdf74dcf607180834de083a50750bef318adc082fa7c5533cbf648280118d2c5",
+    "counts": {
+      "tests": 1006,
+      "pass": 936,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 70,
+      "todo": 0
+    },
+    "python_summary": []
+  },
+  {
+    "suite": "candidate-env",
+    "exit_code": 1,
+    "log_sha256": "15ed6fad7b50c633ec1f5c9c4d6056d089f0c8591d363c705815b33fed21cf7e",
+    "counts": {
+      "tests": 3441,
+      "pass": 3436,
+      "fail": 1,
+      "cancelled": 0,
+      "skipped": 4,
+      "todo": 0
+    },
+    "python_summary": [],
+    "failure_blocks": [
+      "# Subtest: tests\\\\the-dashboard-plugin-reads-only-what-it-judged.test.js\nnot ok 264 - tests\\\\the-dashboard-plugin-reads-only-what-it-judged.test.js\n  ---\n  duration_ms: 241.2314\n  type: 'test'\n  location: 'C:\\\\Users\\\\Administrator\\\\projects\\\\aify-env-task10\\\\tests\\\\the-dashboard-plugin-reads-only-what-it-judged.test.js:1:1'\n  failureType: 'testCodeFailure'\n  exitCode: 1\n  signal: ~\n  error: 'test failed'\n  code: 'ERR_TEST_FAILURE'\n  ...\n# Subtest: batches are cut at fifty, each after the last one's final commit, the last one closing the range\nok 2665 - batches are cut at fifty, each after the last one's final commit, the last one closing the range\n  ---\n  duration_ms: 1.7693\n  type: 'test'\n  ...\n# Subtest: the commits since the accepted head are reported oldest first, with their files, and coverage reaches the head\nok 2666 - the commits since the accepted head are reported oldest first, with their files, and coverage reaches the head\n  ---\n  duration_ms: 2324.751\n  type: 'test'\n  ...\n# Subtest: commits dated before the head they follow are still a range forward from it, not a gap\nok 2667 - commits dated before the head they follow are still a range forward from it, not a gap\n  ---\n  duration_ms: 2258.1536\n  type: 'test'\n  ...\n# Subtest: a refused range is retried from the cursor the dashboard gave, without reading the history again\nok 2668 - a refused range is retried from the cursor the dashboard gave, without reading the history again\n  ---\n  duration_ms: 2501.4224\n  type: 'test'\n  ...\n# Subtest: a range the dashboard superseded leaves coverage short, which is shown and tried again from the commits already read\nok 2669 - a range the dashboard superseded leaves coverage short, which is shown and tried again from the commits already read\n  ---\n  duration_ms: 1912.2799\n  type: 'test'\n  ...\n# Subtest: file names and subjects arrive exactly as git holds them\nok 2670 - file names and subjects arrive exactly as git holds them\n  ---\n  duration_ms: 3106.3899\n  type: 'test'\n  ...\n# Subtest: a log that does not parse is refused whole, never read as shorter subjects or extra files"
+    ]
+  }
+]

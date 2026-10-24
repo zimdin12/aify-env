@@ -35,7 +35,7 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
   }
   const definitions = new DefinitionStore({ dir: path.join(home, "defs") });
   const events = [], calls = [], intervals = [], cancelled = [];
-  let lifecycle = null, shared = null, constructions = 0;
+  let lifecycle = null, shared = null, constructions = 0, lifecycleOwner = null;
   const setup = section("function evaluateAgentState()", "server.on(\"error\"");
   const body = section("server.listen(port, HOST, async () => {", "\nconst SWEEP_MS").replace(/^server\.listen\(port, HOST, async \(\) => \{/, "").replace(/\}\);\s*$/, "");
   const fakeProcess = { pid: 9, env: {}, execPath: "fixture-node", stdout: { write() {} }, stderr: { write() {} }, exit(code) { throw new Error(`exit-${code}`); } };
@@ -49,6 +49,7 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
     publishInstanceReady: () => { events.push("ready"); if (failReady) throw new Error("refused"); },
     createAgentLifecyclePorts: (options) => {
       events.push("lifecycle"); constructions++;
+      lifecycleOwner = options.owner;
       lifecycle = createAgentLifecyclePorts(options);
       return lifecycle;
     },
@@ -81,12 +82,15 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
   try { actual = await new AsyncFunction(...Object.keys(deps), code)(...Object.values(deps)); }
   catch (e) { error = e; }
   t.after(() => actual?.stopAgentStateSending());
-  await flush(); return { actual, error, events, calls, intervals, cancelled, lifecycle, shared, constructions };
+  await flush(); return { actual, error, events, calls, intervals, cancelled, lifecycle, shared, constructions,
+    lifecycleOwner };
 }
 
 test("successful serving/durable boot wires actual sender and its exported evaluation cadence independent of sweep", async (t) => {
   const f = await boot(t); assert.equal(f.error, null, String(f.error));
   assert.equal(f.constructions, 1, "the actual daemon bootstrap must construct one lifecycle owner");
+  assert.deepEqual(f.lifecycleOwner, { scope: 'http://127.0.0.1:0', generation: 1000, pid: 9, createdAtUs: null },
+    "production ports must receive the boot owner's identity, not write ownerless reservations");
   assert.strictEqual(f.shared.agents.lifecycle, f.lifecycle.lifecycle, "plugins share the actual executor");
   assert.strictEqual(f.shared.agents.stopFacts, f.lifecycle.stopFacts, "plugins share the actual stop reader");
   assert.strictEqual(f.shared.agents.admitColdStart, f.lifecycle.admitColdStart);
@@ -121,6 +125,7 @@ test("successful serving/durable boot wires actual sender and its exported evalu
 test("dedicated readiness precedes sending; boot/readiness refusal and view-only send nothing", async (t) => {
   const dedicated = await boot(t, { context: { scope: "fixture-scope" } });
   assert.equal(dedicated.error, null, String(dedicated.error)); await posted(dedicated, 2); assert.deepEqual(dedicated.events, ["durable-boot", "lifecycle", "ready", "sender", "sender"]);
+  assert.equal(dedicated.lifecycleOwner.scope, 'fixture-scope');
   assert.deepEqual(dedicated.calls.map((call) => call.body.instance).sort().map((i) => i.replace(RESIDENTS_KEY, "residents-*")),
     ["fixture-scope", "residents-*"]);
   for (const options of [{ failBoot: true }, { context: { scope: "fixture-scope" }, failReady: true }, { viewOnly: true }]) {

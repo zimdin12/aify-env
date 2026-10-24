@@ -1,0 +1,253 @@
+TAP version 13
+# Subtest: healthy pending custody, terminal result and cross-instance replay remain typed
+ok 1 - healthy pending custody, terminal result and cross-instance replay remain typed
+  ---
+  duration_ms: 25.7425
+  type: 'test'
+  ...
+# Subtest: malformed owner refuses reads and same-agent reservation without writes
+not ok 2 - malformed owner refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 14.8045
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\tests\\lifecycle-journal-integrity.test.js:66:43'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'throws'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/tests/lifecycle-journal-integrity.test.js:69:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: scalar unknown refuses reads and same-agent reservation without writes
+ok 3 - scalar unknown refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 14.5561
+  type: 'test'
+  ...
+# Subtest: array unknown refuses reads and same-agent reservation without writes
+ok 4 - array unknown refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 10.4466
+  type: 'test'
+  ...
+# Subtest: unknown wrong status refuses reads and same-agent reservation without writes
+ok 5 - unknown wrong status refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.9453
+  type: 'test'
+  ...
+# Subtest: unknown wrong outcome refuses reads and same-agent reservation without writes
+ok 6 - unknown wrong outcome refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.3071
+  type: 'test'
+  ...
+# Subtest: unknown non-null lifetime refuses reads and same-agent reservation without writes
+ok 7 - unknown non-null lifetime refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.8754
+  type: 'test'
+  ...
+# Subtest: unknown empty timestamp refuses reads and same-agent reservation without writes
+ok 8 - unknown empty timestamp refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 10.3692
+  type: 'test'
+  ...
+# Subtest: unknown missing lifetime refuses reads and same-agent reservation without writes
+ok 9 - unknown missing lifetime refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.7256
+  type: 'test'
+  ...
+# Subtest: incomplete terminal refuses reads and same-agent reservation without writes
+ok 10 - incomplete terminal refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.4168
+  type: 'test'
+  ...
+# Subtest: terminal scalar refuses reads and same-agent reservation without writes
+ok 11 - terminal scalar refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.569
+  type: 'test'
+  ...
+# Subtest: terminal untyped outcome refuses reads and same-agent reservation without writes
+ok 12 - terminal untyped outcome refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.3666
+  type: 'test'
+  ...
+# Subtest: terminal missing timestamp refuses reads and same-agent reservation without writes
+ok 13 - terminal missing timestamp refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.1788
+  type: 'test'
+  ...
+# Subtest: pending with terminal result refuses reads and same-agent reservation without writes
+ok 14 - pending with terminal result refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 14.2225
+  type: 'test'
+  ...
+# Subtest: changed row agent refuses reads and same-agent reservation without writes
+ok 15 - changed row agent refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.3816
+  type: 'test'
+  ...
+# Subtest: changed map id refuses reads and same-agent reservation without writes
+ok 16 - changed map id refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 14.2648
+  type: 'test'
+  ...
+# Subtest: unparseable intent refuses reads and same-agent reservation without writes
+ok 17 - unparseable intent refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.1266
+  type: 'test'
+  ...
+# Subtest: noncanonical intent whitespace refuses reads and same-agent reservation without writes
+ok 18 - noncanonical intent whitespace refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.378
+  type: 'test'
+  ...
+# Subtest: intent wrong action refuses reads and same-agent reservation without writes
+ok 19 - intent wrong action refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.2306
+  type: 'test'
+  ...
+# Subtest: intent missing tuple field refuses reads and same-agent reservation without writes
+ok 20 - intent missing tuple field refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.1848
+  type: 'test'
+  ...
+# Subtest: intent untyped revision refuses reads and same-agent reservation without writes
+ok 21 - intent untyped revision refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.4412
+  type: 'test'
+  ...
+# Subtest: intent untyped fresh context refuses reads and same-agent reservation without writes
+ok 22 - intent untyped fresh context refuses reads and same-agent reservation without writes
+  ---
+  duration_ms: 13.5627
+  type: 'test'
+  ...
+# Subtest: invalid finish {"status":"done"} cannot corrupt custody
+ok 23 - invalid finish {"status":"done"} cannot corrupt custody
+  ---
+  duration_ms: 8.3466
+  type: 'test'
+  ...
+# Subtest: invalid finish 1 cannot corrupt custody
+ok 24 - invalid finish 1 cannot corrupt custody
+  ---
+  duration_ms: 8.0523
+  type: 'test'
+  ...
+# Subtest: invalid finish {"status":"done","outcome":"stop","resultLifetime":1,"finishedAt":"2026-10-08T00:00:00.000Z"} cannot corrupt custody
+ok 25 - invalid finish {"status":"done","outcome":"stop","resultLifetime":1,"finishedAt":"2026-10-08T00:00:00.000Z"} cannot corrupt custody
+  ---
+  duration_ms: 7.6769
+  type: 'test'
+  ...
+# Subtest: invalid finish {"status":"done","outcome":"stop","resultLifetime":null,"finishedAt":""} cannot corrupt custody
+ok 26 - invalid finish {"status":"done","outcome":"stop","resultLifetime":null,"finishedAt":""} cannot corrupt custody
+  ---
+  duration_ms: 8.1202
+  type: 'test'
+  ...
+# Subtest: invalid finish {"status":"done","outcome":"stop","resultLifetime":null,"finishedAt":"2026-10-08T00:00:00.000Z","resultIncarnation":1} cannot corrupt custody
+ok 27 - invalid finish {"status":"done","outcome":"stop","resultLifetime":null,"finishedAt":"2026-10-08T00:00:00.000Z","resultIncarnation":1} cannot corrupt custody
+  ---
+  duration_ms: 8.5317
+  type: 'test'
+  ...
+# Subtest: invalid reserve request and stop fact cannot publish corrupt journal
+ok 28 - invalid reserve request and stop fact cannot publish corrupt journal
+  ---
+  duration_ms: 8.3593
+  type: 'test'
+  ...
+# Subtest: construction, reads and reservations never initialize absent journal
+ok 29 - construction, reads and reservations never initialize absent journal
+  ---
+  duration_ms: 1.8737
+  type: 'test'
+  ...
+# Subtest: only explicit virgin initialization creates journal and existing valid bytes are preserved
+ok 30 - only explicit virgin initialization creates journal and existing valid bytes are preserved
+  ---
+  duration_ms: 15.7788
+  type: 'test'
+  ...
+# Subtest: explicit initialization refuses malformed existing journal and untyped prior boot
+ok 31 - explicit initialization refuses malformed existing journal and untyped prior boot
+  ---
+  duration_ms: 2.7919
+  type: 'test'
+  ...
+# Subtest: missing reserve yields typed refusal before any dependency or effect
+ok 32 - missing reserve yields typed refusal before any dependency or effect
+  ---
+  duration_ms: 2.0614
+  type: 'test'
+  ...
+# Subtest: complete explicit absence may durably stop without termination
+ok 33 - complete explicit absence may durably stop without termination
+  ---
+  duration_ms: 18.5302
+  type: 'test'
+  ...
+# Subtest: omitted current is unanswered identity, not explicit absence
+ok 34 - omitted current is unanswered identity, not explicit absence
+  ---
+  duration_ms: 12.1121
+  type: 'test'
+  ...
+# Subtest: actual boot initializes virgin home once before generation and preserves durable custody
+ok 35 - actual boot initializes virgin home once before generation and preserves durable custody
+  ---
+  duration_ms: 22.2335
+  type: 'test'
+  ...
+# Subtest: a lost journal is reported and never recreated; the host boots and lifecycle actions refuse
+ok 36 - a lost journal is reported and never recreated; the host boots and lifecycle actions refuse
+  ---
+  duration_ms: 11.7451
+  type: 'test'
+  ...
+# Subtest: a malformed journal is reported, kept as found, and the host boots
+ok 37 - a malformed journal is reported, kept as found, and the host boots
+  ---
+  duration_ms: 5.1828
+  type: 'test'
+  ...
+# Subtest: unreadable generation evidence refuses virgin initialization and generation write
+ok 38 - unreadable generation evidence refuses virgin initialization and generation write
+  ---
+  duration_ms: 1.4454
+  type: 'test'
+  ...
+1..38
+# tests 38
+# suites 0
+# pass 37
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 541.9148

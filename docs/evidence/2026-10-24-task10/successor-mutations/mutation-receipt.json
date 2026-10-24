@@ -1,0 +1,85 @@
+[
+  {
+    "mutation": "owner-wiring",
+    "command": [
+      "C:\\nvm4w\\nodejs\\node.EXE",
+      "tests/run-in-a-temp-root.mjs",
+      "tests/the-daemon-sends-agent-state.test.js"
+    ],
+    "exit": 1,
+    "expected_case": "successful serving/durable boot wires actual sender",
+    "failed_cases": [
+      "not ok 1 - successful serving/durable boot wires actual sender and its exported evaluation cadence independent of sweep",
+      "not ok 2 - dedicated readiness precedes sending; boot/readiness refusal and view-only send nothing"
+    ],
+    "detected": true,
+    "restored_sha256": "56e66bc54eb87e5ec0228e4c12b593e697513eee273d7f5f38d25f9ad2f727cd",
+    "log_sha256": "16474cc4b0b6b9359deb41f14d9f858becbe12290e0e096a7c1adf15c92b62d7"
+  },
+  {
+    "mutation": "owner-validation",
+    "command": [
+      "C:\\nvm4w\\nodejs\\node.EXE",
+      "tests/run-in-a-temp-root.mjs",
+      "tests/lifecycle-journal-integrity.test.js"
+    ],
+    "exit": 1,
+    "expected_case": "malformed owner refuses reads",
+    "failed_cases": [
+      "not ok 2 - malformed owner refuses reads and same-agent reservation without writes"
+    ],
+    "detected": true,
+    "restored_sha256": "ab1151497781d5e86fd7b469d0be623f1b9e87fb87240f9e3bec6c91ce0275de",
+    "log_sha256": "3a6c5f43428c78042742440b050e42ecdf2c4f70403c1b0711260097e80a575b"
+  },
+  {
+    "mutation": "birth-mismatch",
+    "command": [
+      "C:\\nvm4w\\nodejs\\node.EXE",
+      "tests/run-in-a-temp-root.mjs",
+      "tests/lifecycle-owner-recovery.test.js"
+    ],
+    "exit": 1,
+    "expected_case": "a live concurrent scope retains custody",
+    "failed_cases": [
+      "not ok 3 - a live concurrent scope retains custody while another scope boots",
+      "not ok 6 - nonexclusive prior owner: live owner",
+      "not ok 10 - different default ports are different recovery scopes even with an earlier generation"
+    ],
+    "detected": true,
+    "restored_sha256": "ab1151497781d5e86fd7b469d0be623f1b9e87fb87240f9e3bec6c91ce0275de",
+    "log_sha256": "913689fafc734803157dd3e7e557d99c1b24a5fb0e33632479b98f40629f0086"
+  },
+  {
+    "mutation": "owner-cas",
+    "command": [
+      "C:\\nvm4w\\nodejs\\node.EXE",
+      "tests/run-in-a-temp-root.mjs",
+      "tests/lifecycle-owner-recovery.test.js"
+    ],
+    "exit": 1,
+    "expected_case": "recovery rereads ownership under the lock",
+    "failed_cases": [
+      "not ok 11 - recovery rereads ownership under the lock after its process probe"
+    ],
+    "detected": true,
+    "restored_sha256": "ab1151497781d5e86fd7b469d0be623f1b9e87fb87240f9e3bec6c91ce0275de",
+    "log_sha256": "2c8876ca75199269a926ea22775f49297c4362a5db92751b6d608013179d451b"
+  },
+  {
+    "mutation": "terminal-cas",
+    "command": [
+      "C:\\nvm4w\\nodejs\\node.EXE",
+      "tests/run-in-a-temp-root.mjs",
+      "tests/lifecycle-owner-recovery.test.js"
+    ],
+    "exit": 1,
+    "expected_case": "recovery preserves a result completed",
+    "failed_cases": [
+      "not ok 12 - recovery preserves a result completed while the process probe was running"
+    ],
+    "detected": true,
+    "restored_sha256": "ab1151497781d5e86fd7b469d0be623f1b9e87fb87240f9e3bec6c91ce0275de",
+    "log_sha256": "cf72d403486ed3c4fd7b504167fcdc4ace96e99255c18f15268f83706a92fe86"
+  }
+]

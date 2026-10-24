@@ -1,0 +1,243 @@
+TAP version 13
+# Subtest: new explicit and automatic reservations durably record their daemon owner
+not ok 1 - new explicit and automatic reservations durably record their daemon owner
+  ---
+  duration_ms: 60.0613
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\docs\\evidence\\2026-10-24-task10\\successor-owned-base-probe.mjs:49:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+    + undefined
+    - {
+    -   createdAtUs: 200,
+    -   generation: 2000,
+    -   pid: 12,
+    -   scope: 'http://127.0.0.1:9999'
+    - }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    scope: 'http://127.0.0.1:9999'
+    generation: 2000
+    pid: 12
+    createdAtUs: 200
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/docs/evidence/2026-10-24-task10/successor-owned-base-probe.mjs:57:16)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: a replacement settles a proven-dead prior-generation owner and admits the next start
+not ok 2 - a replacement settles a proven-dead prior-generation owner and admits the next start
+  ---
+  duration_ms: 47.6677
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\docs\\evidence\\2026-10-24-task10\\successor-owned-base-probe.mjs:68:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      [
+    +   'refused',
+    +   'agent-reserved'
+    -   'done',
+    -   'start'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'done'
+    1: 'start'
+  actual:
+    0: 'refused'
+    1: 'agent-reserved'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/docs/evidence/2026-10-24-task10/successor-owned-base-probe.mjs:72:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: a live concurrent scope retains custody while another scope boots
+ok 3 - a live concurrent scope retains custody while another scope boots
+  ---
+  duration_ms: 53.9827
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: gone pid
+not ok 4 - nonexclusive prior owner: gone pid
+  ---
+  duration_ms: 48.1169
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\docs\\evidence\\2026-10-24-task10\\successor-owned-base-probe.mjs:104:4'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      [
+    +   'refused',
+    +   'agent-reserved'
+    -   'done',
+    -   'start'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'done'
+    1: 'start'
+  actual:
+    0: 'refused'
+    1: 'agent-reserved'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/docs/evidence/2026-10-24-task10/successor-owned-base-probe.mjs:109:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: nonexclusive prior owner: reused pid
+not ok 5 - nonexclusive prior owner: reused pid
+  ---
+  duration_ms: 52.239
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\docs\\evidence\\2026-10-24-task10\\successor-owned-base-probe.mjs:104:4'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      [
+    +   'refused',
+    +   'agent-reserved'
+    -   'done',
+    -   'start'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'done'
+    1: 'start'
+  actual:
+    0: 'refused'
+    1: 'agent-reserved'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/docs/evidence/2026-10-24-task10/successor-owned-base-probe.mjs:109:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: nonexclusive prior owner: live owner
+ok 6 - nonexclusive prior owner: live owner
+  ---
+  duration_ms: 51.1213
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: unknown owner
+ok 7 - nonexclusive prior owner: unknown owner
+  ---
+  duration_ms: 52.1447
+  type: 'test'
+  ...
+# Subtest: nonexclusive prior owner: missing birth time
+ok 8 - nonexclusive prior owner: missing birth time
+  ---
+  duration_ms: 52.6357
+  type: 'test'
+  ...
+# Subtest: an ownerless legacy reservation stays reserved despite a replacement boot
+ok 9 - an ownerless legacy reservation stays reserved despite a replacement boot
+  ---
+  duration_ms: 48.3122
+  type: 'test'
+  ...
+# Subtest: different default ports are different recovery scopes even with an earlier generation
+ok 10 - different default ports are different recovery scopes even with an earlier generation
+  ---
+  duration_ms: 45.2108
+  type: 'test'
+  ...
+# Subtest: recovery rereads ownership under the lock after its process probe
+not ok 11 - recovery rereads ownership under the lock after its process probe
+  ---
+  duration_ms: 43.3438
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\docs\\evidence\\2026-10-24-task10\\successor-owned-base-probe.mjs:128:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      {
+    +   createdAtUs: 100,
+    -   createdAtUs: 101,
+        generation: 1000,
+        pid: 11,
+        scope: 'herdr-owned'
+      }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    scope: 'herdr-owned'
+    generation: 1000
+    pid: 11
+    createdAtUs: 101
+  actual:
+    scope: 'herdr-owned'
+    generation: 1000
+    pid: 11
+    createdAtUs: 100
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/docs/evidence/2026-10-24-task10/successor-owned-base-probe.mjs:137:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: recovery preserves a result completed while the process probe was running
+not ok 12 - recovery preserves a result completed while the process probe was running
+  ---
+  duration_ms: 42.734
+  type: 'test'
+  location: 'C:\\Users\\Administrator\\projects\\aify-env-task10\\docs\\evidence\\2026-10-24-task10\\successor-owned-base-probe.mjs:140:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+    + undefined
+    - {
+    -   finishedAt: '2026-10-24T00:00:00.000Z',
+    -   outcome: 'start',
+    -   resultLifetime: 'verified-lifetime',
+    -   status: 'done'
+    - }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    status: 'done'
+    outcome: 'start'
+    resultLifetime: 'verified-lifetime'
+    finishedAt: '2026-10-24T00:00:00.000Z'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/Administrator/projects/aify-env-task10/docs/evidence/2026-10-24-task10/successor-owned-base-probe.mjs:148:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 6
+# fail 6
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 682.8785
