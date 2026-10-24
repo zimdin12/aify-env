@@ -236,6 +236,31 @@ than bookkeeping.
 the target dies immediately and no handler runs. So every external stop is the ungraceful one, and the
 record is not a backstop — it is the whole mechanism.
 
+## Explicit starts and resident startup acknowledgment
+
+An explicit managed Start or Spawn also clears a matching already-running agent's host stop.
+The host rechecks the definition and exact current lifetime under the definition lock before clearing;
+it does not create a second worker. A cold managed start still clears only after verified attachment.
+
+`POST /agents/:id/resident-started` accepts `{instance, lifetime, harness, producer, sessionId}`.
+This stage supports resident Claude launches with the native `SessionStart` producer. The launcher
+must first have accepted resident replace intent outside an agent session and captured a current
+host definition and journal snapshot before publishing its lifetime record. The callback must match
+that verified current lifetime and the record's `operatorStart` metadata. Adoption and ordinary turn
+completion do not clear a stop. Restore/start intent, legacy metadata, unanswered or conflicting
+process identity, moved definitions, later Stop and replay cannot consume the old binding.
+
+The successful response is `200` with `{agentId, consumed:true, reason:"resident-start"}`. Refusals
+return `400` for malformed callback data or `409` for an unavailable producer, identity, binding,
+role, changed stop or pending lifecycle reservation. An unavailable host dependency returns `503`.
+The consumer holds the existing resident role and definition fence through the journal's guarded
+replacement. The journal stays version 1 with optional stop revisions; its receipt fingerprint also
+fences old writers that cannot advance those revisions. Any intervening receipt for the same agent
+conservatively invalidates capture.
+
+Hermes and Codex resident startup clearing is not supported in this stage. Their resident launches
+remain non-clearing. There is no runtime preload, marker-file acknowledgment or turn-end fallback.
+
 ## Pending lifecycle reservations after daemon death
 
 The lifecycle journal, `~/.aify/agent-lifecycle.json`, is shared across daemon scopes. A new production

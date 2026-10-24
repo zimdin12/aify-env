@@ -128,6 +128,47 @@ test('running matched start is no-op without second worker', async (t) => {
   const f = fixture(t); assert.equal((await f.execute(req({ action: 'start' }))).outcome, 'already-running');
   assert.equal(f.calls.length, 0);
 });
+for (const action of ['start', 'spawn']) test(`matched running ${action} clears a prior stop without another worker`, async t => {
+  const f = fixture(t);
+  await f.execute(req());
+  assert.equal(f.journal.stopFacts().get('s:1:a'), true);
+  f.setRaw({ current: { lifetime: 'running', pid: 44, handle: 'running-h' }, conflict: false, unknown: false });
+  const request = req({ id: 'r2', action, expectedLifetime: 'running' });
+  const answer = await f.execute(request);
+  assert.deepEqual([answer.status, answer.outcome, answer.resultLifetime], ['done', 'already-running', 'running']);
+  assert.equal(new LifecycleJournal({ file: f.file }).stopFacts().get('s:1:a'), false,
+    'an explicit matched start must durably clear the operator stop');
+  assert.deepEqual(f.calls.map(([kind]) => kind), ['stop'], 'no second birth or stop');
+  assert.deepEqual(await f.execute(request), answer, 'the same request replays without repeating effects');
+});
+test('matched running start refuses a definition moved after its first read and keeps the stop', async t => {
+  const f = fixture(t);
+  await f.execute(req());
+  f.setRaw({ current: { lifetime: 'running', pid: 44, handle: 'running-h' }, conflict: false, unknown: false });
+  const identity = f.deps.identity;
+  f.deps.identity = () => {
+    f.setReading({ id: 'a', incarnation: 1, revision: 2, problems: [], agent: { mode: 'managed', harness: 'hermes' } });
+    return identity();
+  };
+  const answer = await f.execute(req({ id: 'r2', action: 'start', expectedLifetime: 'running' }));
+  assert.deepEqual([answer.status, answer.outcome], ['refused', 'revision-moved']);
+  assert.equal(f.journal.stopFacts().get('s:1:a'), true);
+  assert.deepEqual(f.calls.map(([kind]) => kind), ['stop']);
+});
+test('matched running start rechecks lifetime inside the definition fence before clearing', async t => {
+  const f = fixture(t);
+  await f.execute(req());
+  f.setRaw({ current: { lifetime: 'running', pid: 44, handle: 'running-h' }, conflict: false, unknown: false });
+  const locked = f.deps.definitions.withLifecycleDefinition;
+  f.deps.definitions.withLifecycleDefinition = work => {
+    f.setRaw({ current: { lifetime: 'later', pid: 45, handle: 'later-h' }, conflict: false, unknown: false });
+    return locked(work);
+  };
+  const answer = await f.execute(req({ id: 'r2', action: 'start', expectedLifetime: 'running' }));
+  assert.deepEqual([answer.status, answer.outcome], ['refused', 'lifetime-moved']);
+  assert.equal(f.journal.stopFacts().get('s:1:a'), true);
+  assert.deepEqual(f.calls.map(([kind]) => kind), ['stop']);
+});
 test('identity is revalidated immediately before destructive effect', async (t) => {
   const f = fixture(t); let reads = 0; f.deps.identity = () => (++reads === 1
     ? { current: { lifetime: 'old', pid: 42, handle: 'h' } } : { current: { lifetime: 'replacement', pid: 42, handle: 'h2' } });

@@ -10,6 +10,10 @@
  */
 
 import process from "node:process";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { LifecycleJournal } from "../lib/agent-lifecycle.mjs";
+import { ResidentStarts } from "../lib/resident-starts.mjs";
 
 import { installedHarnesses } from "../lib/advertise.mjs";
 import { DefinitionRefused, DefinitionStore, DefinitionStoreError } from "../lib/agent-definitions.mjs";
@@ -28,6 +32,7 @@ const USAGE = [
   "usage:",
   "  aify-env agents list",
   "  aify-env agents show <id>",
+  "  aify-env agents resident-start-binding <id> <harness> <producer>  capture eligible startup; no reservation or clear",
   "  aify-env agents set <id> key=value ...     keys: name role harness mode workspace model effort",
   "                                               instructions herdrSpace env.<NAME>; -env.<NAME> unsets",
   "  aify-env agents set --all | --harness <h> | --ids a,b  model=X [effort=Y] [--yes]",
@@ -54,6 +59,9 @@ const BULK_KEYS = new Set(["model", "effort"]);
 export function parseAgentsArgs(argv) {
   const [verb = "", ...rest] = Array.isArray(argv) ? argv.map(String) : [];
   const fail = (problem) => ({ verb, problem });
+  if (verb === "resident-start-binding") return rest.length === 3
+    ? { verb, id: rest[0], harness: rest[1], producer: rest[2], problem: "" }
+    : fail("resident-start-binding needs an id, harness and native producer");
   if (verb === "list" || verb === "unlock" || verb === "models") return rest.length ? fail(`${verb} takes no arguments`) : { verb, problem: "" };
   if (verb === "recover") {
     const choice = { "--as-committed": "committed", "--as-not-committed": "not-committed" }[rest[0]];
@@ -153,7 +161,13 @@ function conflictLines(conflict) {
 
 /** Run one parsed intent against a store. Returns the lines to print and the exit code. */
 export async function runAgents(intent, { store, installed, unlock = () => DefinitionStore.unlock(), importable = null,
-  actual = actualModel }) {
+  actual = actualModel, residentStarts = null }) {
+  if (intent.verb === "resident-start-binding") {
+    const captured = await residentStarts?.capture(intent.id, intent.harness, intent.producer);
+    return !captured || captured.refused
+      ? { code: EXIT_FAILED, lines: [captured?.refused ?? "resident-start-binding-unavailable"] }
+      : { code: EXIT_OK, lines: [JSON.stringify(captured)] };
+  }
   if (intent.verb === "import") return importAgents(intent, { store, installed, importable });
   if (intent.verb === "models") return agentModels({ store, importable, actual });
   if (intent.verb === "unlock") {
@@ -310,6 +324,8 @@ async function main() {
   const installed = new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client));
   try {
     const { code, lines } = await runAgents(intent, { store, installed,
+      residentStarts: new ResidentStarts({ definitions: store,
+        journal: new LifecycleJournal({ file: join(homedir(), ".aify", "agent-lifecycle.json") }) }),
       importable: async () => {
         const found = await findEnvEndpoint();
         return found.problem ? { problem: found.problem, services: [] } : importableAgents({ endpoint: found.endpoint });
