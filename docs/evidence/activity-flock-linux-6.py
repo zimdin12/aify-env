@@ -2,19 +2,29 @@
 Run from this checkout with Python; needs Docker Linux engine and network.
 Raw receipts remain in .check-output/activity-flock-linux-6, never versioned.
 """
+import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 import time
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--product-head', required=True)
+parser.add_argument('--wrapper-repo', type=Path, required=True)
+parser.add_argument('--wrapper-head', required=True)
+options = parser.parse_args()
+for value in [options.product_head, options.wrapper_head]:
+    if re.fullmatch('[a-f0-9]{40}', value) is None:
+        parser.error('Each source head must be an exact lowercase 40-character SHA')
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / '.check-output/activity-flock-linux-6' / ('run-' + str(time.time_ns()))
-WRAPPER = Path('C:/Users/Administrator/projects/wrapper-activity-loss-review-6')
-FROZEN = '0e6f1f4178544ddf95840217534d27bc1fdec103'
-WRAPPER_HEAD = '0de08cbd1ee6faf3a484bba2fb514ed0d117ce92'
+WRAPPER = options.wrapper_repo.resolve(strict=True)
+FROZEN = options.product_head
+WRAPPER_HEAD = options.wrapper_head
 
 
 def call(args, name, check=True):
@@ -31,12 +41,14 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     if (OUT / 'started.json').exists():
         raise RuntimeError('Evidence already exists; choose a fresh owned clone, never overwrite receipts')
-    (OUT / 'started.json').write_text(json.dumps({'epoch': time.time(), 'root': str(ROOT)}))
+    (OUT / 'started.json').write_text(json.dumps({'epoch': time.time(), 'root': str(ROOT), 'productHead': FROZEN, 'wrapperHead': WRAPPER_HEAD}))
+    if call(['git', 'status', '--porcelain'], 'source-status').stdout:
+        raise RuntimeError('Qualification source must be committed and clean')
     head = call(['git', 'rev-parse', 'HEAD'], 'source-head').stdout.decode().strip()
     call(['git', 'merge-base', '--is-ancestor', FROZEN, 'HEAD'], 'frozen-ancestor')
     frozen_diff = call(['git', 'diff', FROZEN, '--', 'lib', 'package.json', 'package-lock.json', 'tests/run-in-a-temp-root.mjs'], 'frozen-product-diff').stdout
     if frozen_diff:
-        raise RuntimeError('Product or maintained runner differs from frozen parent')
+        raise RuntimeError('Product or maintained runner differs from the specified commit')
     wh = call(['git', '-C', str(WRAPPER), 'rev-parse', 'HEAD'], 'wrapper-head').stdout.decode().strip()
     if wh != WRAPPER_HEAD:
         raise RuntimeError('Wrapper source changed')

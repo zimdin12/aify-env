@@ -7,16 +7,19 @@ PROVEN on actual Linux container runtimes with the real checkpoint implementatio
 From this checkout on the Windows Docker host:
 
 ```sh
-python docs/evidence/activity-flock-linux-6.py
+python docs/evidence/activity-flock-linux-6.py \
+  --product-head <exact-product-commit> \
+  --wrapper-repo <absolute-frozen-wrapper-checkout> \
+  --wrapper-head 0de08cbd1ee6faf3a484bba2fb514ed0d117ce92
 ```
 
-The driver verifies the frozen parent is an ancestor and that product code, dependency declarations and the maintained runner still match it. It requires the frozen wrapper checkout at `C:/Users/Administrator/projects/wrapper-activity-loss-review-6`, verifies its HEAD, and archives its tracked `lib` bytes without executing its entry point. The driver selects exact official Node tags, records their immutable image IDs, and starts only uniquely named owned containers. Source is mounted read-only; work, dependencies, home and temp are container-local. Tests run exclusively through `npm test -- tests/the-dashboard-plugin-serializes-activity-checkpoints.test.js`.
+The driver requires a committed, clean checkout. It verifies the supplied product commit is an ancestor and that product code, dependency declarations and the maintained runner still match it. It verifies the explicitly supplied wrapper checkout's HEAD and archives its tracked `lib` bytes without executing its entry point. Both heads must be complete lowercase commit SHAs. The driver selects exact official Node tags, records their immutable image IDs, and starts only uniquely named owned containers. Source is mounted read-only; work, dependencies, home and temp are container-local. Tests run exclusively through `npm test -- tests/the-dashboard-plugin-serializes-activity-checkpoints.test.js`.
 
 Each replay creates a new ignored `.check-output/activity-flock-linux-6/run-*` folder. It retains sources, driver, hashes before/after, npm dependency receipts, native binaries, loaded libc/Koffi mappings, kernel/filesystem observations, all command exits, syscall traces, fixture checkpoint bytes and exact container IDs. Container deletion has positive and negative readback controls. No Docker socket, real home or live service state is mounted.
 
 ## Executed result
 
-Frozen product `0e6f1f4178544ddf95840217534d27bc1fdec103`; wrapper `0de08cbd1ee6faf3a484bba2fb514ed0d117ce92`.
+The historical result below used product `0e6f1f4178544ddf95840217534d27bc1fdec103` and wrapper `0de08cbd1ee6faf3a484bba2fb514ed0d117ce92`. It does not qualify a later checkpoint state by inheritance. Replay a successor with its explicit product commit; the source HEAD and supplied product identity are retained in that run's receipts.
 
 Verified run `run-1792880116660410400`. Its `summary.json` SHA-256 is `44330a4aa56648a4a063bec6d8086e1ac9c8739fa072976f305bc95c07164f06`.
 
