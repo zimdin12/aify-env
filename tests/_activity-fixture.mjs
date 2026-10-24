@@ -18,7 +18,7 @@ assert.equal(path.resolve(process.execPath).toLowerCase(), path.resolve(expected
 if (process.env.ACTIVITY_SEALED_ROOT) {
   const root = path.resolve(process.env.ACTIVITY_SEALED_ROOT).toLowerCase() + path.sep;
   for (const key of ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TMPDIR', 'HERMES_HOME',
-    'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'ProgramData']) {
+    'ProgramFiles', 'ProgramW6432', 'ProgramData', ...(process.platform === 'win32' ? ['ProgramFiles(x86)'] : [])]) {
     assert.ok(typeof process.env[key] === 'string' && path.resolve(process.env[key]).toLowerCase().startsWith(root), `worker ${key} is fixture-sealed`);
   }
 }

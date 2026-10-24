@@ -23,7 +23,7 @@ fs.readFileSync = function(file, ...args) {
 const sealedRoot = process.env.ACTIVITY_SEALED_ROOT;
 if (sealedRoot) {
   for (const key of ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TMPDIR', 'HERMES_HOME',
-    'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'ProgramData', 'SystemDrive']) {
+    'ProgramFiles', 'ProgramW6432', 'ProgramData', 'SystemDrive', ...(process.platform === 'win32' ? ['ProgramFiles(x86)'] : [])]) {
     if (!path.resolve(process.env[key] ?? '').toLowerCase().startsWith(path.resolve(sealedRoot).toLowerCase())) throw new Error('fixture-environment');
   }
 }

@@ -72,7 +72,11 @@ for (const stale of [false, true]) {
     w.release('B', 'recover'); await w.wait('B', 'entered', 'result');
     const overlap = w.has('B', 'entered');
     const bObserved = await w.settle('B', b), afterB = fs.readFileSync(f.checkpoint);
+    // Retain the actual forbidden-writer bytes before A can replace them.
+    fs.writeFileSync(path.join(w.box, 'checkpoint-before.json'), before);
+    fs.writeFileSync(path.join(w.box, 'checkpoint-after-B.json'), afterB);
     const aObserved = await w.settle('A', a);
+    fs.copyFileSync(f.checkpoint, path.join(w.box, 'checkpoint-after-A.json'));
     console.log(JSON.stringify({ checkpointWriters: { stale, overlap, b: bObserved.result, a: aObserved.result,
       exits: [aObserved.exit, bObserved.exit], bChangedCheckpoint: !afterB.equals(before), finalGeneration: generation(f) } }));
     assert.deepEqual(afterB, before, 'B cannot overwrite checkpoint bytes while A owns the operation');
@@ -95,14 +99,20 @@ for (const phase of ['entered', 'saved']) {
     w.release('A', 'go'); await w.wait('A', 'entered');
     if (phase === 'saved') { w.release('A', 'finish'); await w.wait('A', 'saved'); }
     const bytes = fs.readFileSync(f.checkpoint);
+    fs.writeFileSync(path.join(w.box, 'checkpoint-before-death.json'), bytes);
     assert.equal(generation(f), initial + (phase === 'saved' ? 1 : 0));
     assert.equal(a.child.kill(), true, 'only this fixture-owned process is terminated');
     const exit = await a.closed; assert.ok(exit[0] !== 0 || exit[1], 'owner really died before cleanup');
+    assert.throws(() => process.kill(a.child.pid, 0), { code: 'ESRCH' }, 'dead owner cannot still hold its descriptor');
+    fs.copyFileSync(f.checkpoint, path.join(w.box, 'checkpoint-after-death.json'));
+    console.log(JSON.stringify({ deadCheckpointOwner: { phase, pid: a.child.pid, exit, initialGeneration: initial, survivingGeneration: generation(f) } }));
     assert.deepEqual(fs.readFileSync(f.checkpoint), bytes, 'death preserves last committed bytes');
     const b = await w.start('B'); w.release('B', 'go'); await w.wait('B', 'entered', 'result');
     assert.equal(w.has('B', 'entered'), true, 'dead owner must not strand checkpoint operations');
     assert.deepEqual(fs.readFileSync(f.checkpoint), bytes, 'recovery never resets checkpoint');
+    fs.copyFileSync(f.checkpoint, path.join(w.box, 'checkpoint-before-successor-save.json'));
     await w.finish('B', b, { entered: true, ok: true });
+    fs.copyFileSync(f.checkpoint, path.join(w.box, 'checkpoint-after-successor-save.json'));
     assert.equal(generation(f), initial + (phase === 'saved' ? 2 : 1), 'successor updates the exact surviving generation');
   });
 }
