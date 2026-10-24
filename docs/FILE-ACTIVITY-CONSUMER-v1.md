@@ -33,7 +33,7 @@ Configuration is read on each maintained plugin tick. Disabling it stops new act
 
 ## Discovery and authentication
 
-The plugin asks its existing registry entry's endpoint for `/.well-known/aify-service` through `DashboardApi`. This same-endpoint spec request is necessary because older registry readers do not retain the new fixed declaration. Only `fixed.fileActivity: {"path":"/api/v1/file-activity"}` authorizes ingress. An absent or malformed declaration permits neither a trial activity POST nor importing the wrapper grant.
+The first enabled tick asks its existing registry entry's endpoint for `/.well-known/aify-service` through `DashboardApi`. This same-endpoint spec request is necessary because older registry readers do not retain the new fixed declaration. A successfully read declaration, including an absent capability, is retained until the plugin restarts; idle ticks do not refetch it. Failed discovery requests can retry on a later existing tick. Only `fixed.fileActivity: {"path":"/api/v1/file-activity"}` authorizes ingress. An absent or malformed declaration permits neither a trial activity POST nor importing the wrapper grant. Restart the plugin after changing the receiver's declared capability.
 
 Activity ingress presents `x-aify-activity-key` containing the existing API_KEY from the existing per-call credential getter. It never presents `x-api-key` or the secrets header. Legacy requests and the separate secrets-fetch credential retain their original headers and authority. There is no second activity credential. Redirects are manual. The existing ten-second request deadline and plugin stop signal cover body reads too. Activity error messages contain bounded local descriptions, not remote response, header, path or credential bytes.
 

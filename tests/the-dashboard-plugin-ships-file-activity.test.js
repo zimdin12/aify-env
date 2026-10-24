@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { fixture, prerequisite, delay } from './_activity-fixture.mjs';
+import { fixture, prerequisite, delay, until } from './_activity-fixture.mjs';
 
 test('activity test worker uses the selected native runtime', () => {
   console.log(JSON.stringify({ activityWorker: { version: process.version, execPath: process.execPath } }));
@@ -31,4 +31,20 @@ test('configured plugin ships only immutable event metadata and commits the real
   assert.equal(f.bodies[0].coverage.reportEveryMs, null, 'no invented freshness cadence');
   assert.equal(Object.hasOwn(f.bodies[0], 'wsl'), false, 'no changing WSL retry facts');
   assert.equal(f.open().read().token, null, 'committed ACK retires actual source bytes');
+});
+
+test('plugin startup checks activity capability once across idle ticks', { skip: prerequisite }, async t => {
+  for (const declared of [true, false]) await t.test(declared ? 'declared' : 'absent', async t => {
+    const f = await fixture(t);
+    if (!declared) f.capability(null);
+    const before = f.open().read().token;
+    const p = f.plugin({ overrides: { tickMs: 1 } });
+    await p.start(f.host);
+    try { await until(() => (p.state().activity?.passes ?? 0) >= 3, 'three existing plugin ticks complete'); }
+    finally { await p.stop(); }
+    assert.equal(f.bodies.length, declared ? 1 : 0, 'healthy delivery and absent-capability refusal both execute');
+    assert.deepEqual(f.open().read().token, declared ? null : before, 'idle or refused ticks preserve the real cursor');
+    assert.equal(f.requests.filter(r => r.path === '/.well-known/aify-service').length, 1,
+      'idle ticks do not rediscover the same capability');
+  });
 });
