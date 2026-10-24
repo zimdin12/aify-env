@@ -30,16 +30,24 @@ test('17 sequential ended incarnations free both real producer capacity and boun
   assert.ok(generations.every((v, i) => i === 0 || v > generations[i - 1]), 'recycled slots never reset delivery generation');
 });
 
-test('fully ACKed LIVE, null, unknown and unbound historical incarnations remain physically retained', options, async t => {
-  const f = await reclamationFixture(t); const owner = await f.owner();
-  const incarnations = [owner.lifetime, null, 'unknown', randomUUID()];
-  const files = incarnations.map(v => f.append(f.record(v)));
-  for (let i = 0; i < incarnations.length; i++) commit(f.open(), f.open().read());
-  const before = fs.readFileSync(f.checkpoint);
-  assert.equal(f.open().read().token, null, 'LIVE incarnation cannot acquire terminal reclamation');
-  assert.deepEqual(fs.readFileSync(f.checkpoint), before, 'ordinary drained lifecycle observation publishes no checkpoint');
-  assert.ok(files.every(v => fs.existsSync(v)), 'all protected populations remain');
-});
+// Each population owns one drained source. A spurious terminal batch cannot be
+// confused with an ordinary record left queued by another source's recovery.
+for (const kind of ['LIVE', 'null', 'unknown', 'unbound historical']) {
+  test(`fully ACKed ${kind} incarnation remains physically retained`, options, async t => {
+    const f = await reclamationFixture(t); const owner = await f.owner();
+    const incarnation = kind === 'LIVE' ? owner.lifetime : kind === 'null' ? null : kind === 'unknown' ? 'unknown' : randomUUID();
+    const file = f.append(f.record(incarnation)), c = f.open(), first = c.read();
+    assert.equal(first.source.incarnation, incarnation);
+    assert.equal(first.records.length, 1, 'one original source record is ready');
+    commit(c, first);
+    const before = fs.readFileSync(f.checkpoint), idle = f.open().read();
+    assert.equal(idle.ok, true, 'protected source remains readable');
+    assert.deepEqual(idle.records, [], 'no unrelated queued record can satisfy this discriminator');
+    assert.equal(idle.token, null, `${kind} incarnation cannot acquire terminal reclamation`);
+    assert.deepEqual(fs.readFileSync(f.checkpoint), before, 'ordinary drained lifecycle observation publishes no checkpoint');
+    assert.equal(fs.existsSync(file), true, 'protected source remains on disk');
+  });
+}
 
 test('terminal retry survives reopen and malformed ACK, 409 and transport failure cannot authorize deletion', options, async t => {
   const f = await reclamationFixture(t); const { c, file } = await drained(f); const r = terminal(c);

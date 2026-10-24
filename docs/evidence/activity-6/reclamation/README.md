@@ -44,6 +44,35 @@ All controls compile and run through maintained npm tests on both native runtime
 
 Earlier failed apparatus attempts are retained. The first run exposed fixture teardown ordering, then suffered a transport timeout without a complete native receipt. It is not credited as a completed RED campaign or an exact-PID cleanup receipt. Corrected runs register owned-child cleanup before root teardown and retain birth/exit ledgers. Earlier source bindings are not relabeled as later ones.
 
+## Combined qualification
+
+The original mixed protected-source case could fail an END-bypass mutation on an unrelated queued record. Separate LIVE, null, unknown and unbound-historical cases now each contain exactly one drained source. On both native runtimes all four pass. Bypassing only the fresh END result compiles and makes only the LIVE case fail at its terminal-token assertion, with no queued event IDs; the other three cases pass. Restoring the production bytes recovers GREEN. The original mixed-source RED is not credited as this isolated discriminator.
+
+The combined selection passes 188 tests across 17 files on each of Node 22.20.0 and 26.7.0, with zero failures, cancellations, skips or todo. Each arm records 39 matched helper birth/exit pairs. This includes the prior lock, idle, credentials and lifecycle selection plus the new reclamation files. With the frozen approved wrapper supplied through `AIFY_WRAPPER_REPO`, reproduce the selection through the maintained runner:
+
+```sh
+npm test -- --test-reporter=tap \
+  tests/activity.test.js \
+  tests/the-dashboard-plugin-activity-api-guards.test.js \
+  tests/the-dashboard-plugin-activity-guard-controls.test.js \
+  tests/the-dashboard-plugin-checkpoints-activity-v2.test.js \
+  tests/the-dashboard-plugin-confines-file-activity.test.js \
+  tests/the-dashboard-plugin-consumes-activity-v2.test.js \
+  tests/the-dashboard-plugin-fetches-a-workers-secrets.test.js \
+  tests/the-dashboard-plugin-lifecycle.test.js \
+  tests/the-dashboard-plugin-reads-activity-v2.test.js \
+  tests/the-dashboard-plugin-reclaims-activity-v2.test.js \
+  tests/the-dashboard-plugin-reclamation-tail.test.js \
+  tests/the-dashboard-plugin-recovers-file-activity.test.js \
+  tests/the-dashboard-plugin-recovers-reclamation.test.js \
+  tests/the-dashboard-plugin-sends-its-key-only-to-its-endpoint.test.js \
+  tests/the-dashboard-plugin-serializes-activity-checkpoints.test.js \
+  tests/the-dashboard-plugin-ships-file-activity.test.js \
+  tests/the-dashboard-plugin-writes-activity-only-for-batches.test.js
+```
+
+The exact source, native dependency, wrapper and worker bindings and raw logs remain under ignored `.check-output/activity-6`. This is a focused integration selection, not the whole env suite or final Linux/dashboard qualification.
+
 ## Sandbox lifecycle replay
 
 The existing plugin factory now forwards `shared.agents` to `ActivityShipper` and then to `ActivityConsumer`. It expects the production synchronous `rawIdentity(agentId)` port. Only an answer with `unknown: false`, `conflict: false` and a matching current `{ agentId, instance, lifetime, pid }` can bind a source witness. `instance` must match `source.instanceId`; `lifetime` must match `source.incarnation`. If `createdAtUs` or `harness` is supplied, it must agree with the fresh process birth or source runtime. A missing current record or a promise is not proof of END.
