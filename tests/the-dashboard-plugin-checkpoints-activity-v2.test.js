@@ -6,14 +6,17 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fixture, prerequisite } from './_activity-fixture.mjs';
 import { sourceName, LIMITS } from '../lib/plugins/aify-dashboard/activity-raw.mjs';
+import { ActivityState } from '../lib/plugins/aify-dashboard/activity-state.mjs';
 const receipt = r => ({ committed: true, eventIds: r.token.eventIds, gapIds: r.token.gapIds });
 
 test('a live lock owner cannot be displaced by another consumer operation', { skip: prerequisite }, async t => {
   const f = await fixture(t); f.open().read(); const before = fs.readFileSync(f.checkpoint);
-  const lock = path.join(path.dirname(f.checkpoint), 'lock'); fs.writeFileSync(lock, String(process.pid));
-  assert.equal(f.open().read().ok, false, 'live owner lock refuses concurrent access');
-  assert.deepEqual(fs.readFileSync(f.checkpoint), before, 'live lock refusal changes no checkpoint');
-  assert.equal(fs.readFileSync(lock, 'utf8'), String(process.pid), 'live owner lock remains in place');
+  const storage = new ActivityState({ directory: f.directory, endpoint: f.endpoint });
+  storage.transaction(() => {
+    assert.equal(f.open().read().ok, false, 'same-process owner also refuses a nested operation');
+    assert.deepEqual(fs.readFileSync(f.checkpoint), before, 'live lock refusal changes no checkpoint');
+  });
+  assert.equal(f.open().read().ok, true, 'released operation admits the next consumer');
 });
 
 test('an lstat-reported state symlink refuses reads and replacement writes', { skip: prerequisite }, async t => {
