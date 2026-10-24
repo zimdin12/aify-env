@@ -122,6 +122,22 @@ test("the socket is BORN locked, not locked a moment after it is born", async ()
     "narrowed before the bind and restored after it: a process-wide umask left narrow is its own defect");
 });
 
+for (const asynchronous of [false, true]) {
+  test(`a ${asynchronous ? "rejected" : "throwing"} start restores the socket umask before logging fallback`, async () => {
+    const fs = fakeFs();
+    const masksAtLog = [];
+    const result = await startInputSocket({
+      enabled: true, port: 1, platform: "linux", dir: "/run/user/1000/aify-env",
+      createServer: () => ({ start() {
+        if (asynchronous) return Promise.reject(new Error("EADDRINUSE"));
+        throw new Error("EADDRINUSE");
+      } }), ...fs, log: () => masksAtLog.push([...fs.calls.umask]),
+    });
+    assert.equal(result, null, "a bind failure must preserve HTTP fallback");
+    assert.deepEqual(masksAtLog, [[0o177, 0o022]], "restore the process-wide mask before reporting a bind failure");
+  });
+}
+
 test("a socket that could not be locked is never advertised", async () => {
   // The other half of D: the chmod sat in `try {} catch {}` and its failure was never consulted, so
   // the daemon published a 755 socket on /health with nothing in any log. OBSERVED under WSL.
