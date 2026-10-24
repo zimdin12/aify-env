@@ -12,6 +12,7 @@ import { LifecycleJournal } from '../lib/agent-lifecycle.mjs';
 import { createAgentLifecyclePorts } from '../lib/daemon-agent-lifecycle.mjs';
 import { DaemonResidents } from '../lib/daemon-residents.mjs';
 import { handleRequest } from '../lib/protocol.mjs';
+import { RESIDENT_START_PRODUCERS, residentStartBinding, ResidentStarts } from '../lib/resident-starts.mjs';
 
 const LIFETIME = '11111111-1111-4111-8111-111111111111';
 const WRITTEN = 1790000000000000;
@@ -103,6 +104,10 @@ async function fixture(t, harness = 'claude') {
 test('native CLI captures a current definition and atomic stop snapshot without reserving or clearing', async t => {
   const f = await fixture(t), before = fs.readFileSync(f.file, 'utf8');
   const stamp = f.capture();
+  // Direct binding checks complement the existing CLI and host-route cases without another guard matrix.
+  assert.deepEqual(RESIDENT_START_PRODUCERS, { claude: 'SessionStart' });
+  assert.deepEqual(residentStartBinding({ ...stamp, unrelated: 'discarded' }), stamp);
+  assert.equal(residentStartBinding({ ...stamp, producer: 'turn-end' }), null);
   assert.deepEqual({ ...stamp, stopReceipt: 'digest' }, { agentId: 'fixture', intent: 'replace', harness: 'claude',
     producer: 'SessionStart', storeId: f.request.storeId, incarnation: 1, revision: 1,
     stopRevision: 1, stopReceipt: 'digest' });
@@ -226,4 +231,21 @@ test('the binding CLI refuses an absent journal rather than initializing authori
   const f = await fixture(t); fs.unlinkSync(f.file);
   assert.equal(f.captureResult().status, 65);
   assert.equal(fs.existsSync(f.file), false);
+});
+
+test('direct ResidentStarts capture and consume preserve then clear the durable stop once', async t => {
+  const f = await fixture(t);
+  const starts = new ResidentStarts({ definitions: f.definitions, journal: f.journal,
+    residents: f.residents, identity: id => f.ports.rawIdentity(id) });
+  const before = fs.readFileSync(f.file, 'utf8');
+  const binding = await starts.capture('fixture', 'claude', 'SessionStart');
+  assert.equal(binding.agentId, 'fixture');
+  assert.equal(binding.stopRevision, 1);
+  assert.equal(fs.readFileSync(f.file, 'utf8'), before);
+  f.record(binding);
+  assert.deepEqual(await starts.consume('fixture', f.body()), { status: 200,
+    body: { agentId: 'fixture', consumed: true, reason: 'resident-start' } });
+  assert.equal(f.stopped(), false);
+  const consumed = fs.readFileSync(f.file, 'utf8');
+  f.assertRefusal(consumed, await starts.consume('fixture', f.body()), 'stop-moved');
 });
