@@ -46,13 +46,27 @@ function sealedEnv(record, port) {
   });
 }
 
-async function collect(child, ms) {
-  let out = "";
-  child.stdout?.on("data", (chunk) => { out += chunk.toString(); });
-  child.stderr?.on("data", (chunk) => { out += chunk.toString(); });
-  await new Promise((resolve) => setTimeout(resolve, ms));
-  return out;
+// WAIT FOR WHAT IS ASSERTED, NOT FOR A FIXED TIME. A fixed 2.5 s failed under full-suite load with nothing but
+// ConPTY's own preamble captured (`\x1b[?9001h\x1b[?1004h`, 2026-10-25): the daemon had not yet printed its banner.
+// A presence waits up to BOOT_MS; an absence is judged over QUIET_MS after the banner, five view refreshes.
+const BOOT_MS = 30_000;
+const QUIET_MS = 1_500;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Resolves once `seen()` is true, or after `ms`; the caller's assertion then says which. */
+async function until(seen, ms = BOOT_MS) {
+  const deadline = Date.now() + ms;
+  while (!seen() && Date.now() < deadline) await sleep(50);
 }
+
+function collector(child) {
+  const got = { out: "" };
+  child.stdout?.on("data", (chunk) => { got.out += chunk.toString(); });
+  child.stderr?.on("data", (chunk) => { got.out += chunk.toString(); });
+  return got;
+}
+
+const plainOf = (out) => out.split(ESC).join("");
 
 test("piped output keeps the plain banner and prints no escapes", async () => {
   const record = tempRecord("pipe");
@@ -61,7 +75,10 @@ test("piped output keeps the plain banner and prints no escapes", async () => {
     env: sealedEnv(record, port), stdio: ["ignore", "pipe", "pipe"],
   });
   try {
-    const out = await collect(child, 2500);
+    const got = collector(child);
+    await until(() => /aify-env .* listening on/.test(got.out));
+    await sleep(QUIET_MS);
+    const out = got.out;
     assert.match(out, /aify-env .* listening on/, `no banner: ${out}`);
     assert.ok(!out.includes(CLEAR), "a screen-clearing escape reached a pipe");
     assert.ok(!/PROCESSES/.test(out), "the view opened on a non-terminal");
@@ -87,7 +104,7 @@ test("a terminal gets the view", async (t) => {
   let out = "";
   child.onData((data) => { out += data; });
   try {
-    await new Promise((resolve) => setTimeout(resolve, 4000));
+    await until(() => out.includes(CLEAR) && ["SERVICES", "PROCESSES", "TRAFFIC"].every((word) => plainOf(out).includes(word)));
     assert.ok(out.includes(CLEAR), `the view never drew a frame: ${JSON.stringify(out.slice(0, 200))}`);
     const plain = out.split(ESC).join("");
     assert.match(plain, /SERVICES/);
@@ -119,8 +136,9 @@ test("AIFY_NO_DASHBOARD keeps a terminal on the plain banner", async (t) => {
   let out = "";
   child.onData((data) => { out += data; });
   try {
-    await new Promise((resolve) => setTimeout(resolve, 2500));
-    const plain = out.split(ESC).join("");
+    await until(() => /listening on/.test(plainOf(out)));
+    await sleep(QUIET_MS);
+    const plain = plainOf(out);
     assert.match(plain, /listening on/);
     // Asserted on the view's CONTENT, not on the absence of a screen-clear escape. ConPTY emits its
     // own escapes when a terminal is allocated, so "no escapes" is not evidence about this program --
