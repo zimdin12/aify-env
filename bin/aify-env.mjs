@@ -299,6 +299,8 @@ async function reapLeftovers() {
 const runner = new Runner({ ownedFile: OWNED_FILE,
   managedHost: () => agentState ? { ...agentState, url: `http://${HOST}:${server.address().port}` } : null,
   reportManaged: (problem) => logLine(problem),
+  // A process came or went: its agent's word is published now, not on the next sweep (the operator, 2026-10-25).
+  onProcessChange: () => evaluateAgentState(),
 });
 
 // SERVICE PLUGINS. This host runs processes for whoever asked; a plugin is how a SERVICE teaches it
@@ -658,11 +660,11 @@ server.listen(port, HOST, async () => {
   const support = terminalSupport();
   try { agentState = bootDaemonAgentState({ aifyHome: join(homedir(), ".aify"), context: instanceContext,
     url: `http://${HOST}:${bound.port}`, report: logLine });
-    agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine });
+    agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine, onApplied: evaluateAgentState });
     agentState.lifecycle = createAgentLifecyclePorts({ aifyHome: join(homedir(), ".aify"), owner: agentState.lifecycleOwner,
       machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(),
         env: process.env, exists: existsSync, isWsl: hostIsWsl() }).machineId,
-      stateHost: agentState.host, residents: agentState.residents, runner, definitions: definitionStore,
+      stateHost: agentState.host, residents: agentState.residents, runner, definitions: definitionStore, onStopChange: evaluateAgentState,
       installed: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) });
   }
   catch (error) { process.stderr.write(`[aify-env] agent state boot failed: ${error.message}\n`); process.exit(2); }

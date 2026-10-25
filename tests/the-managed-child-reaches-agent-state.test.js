@@ -246,7 +246,7 @@ test("actual daemon source statements lazily join boot host and bound URL for de
     const f = fixture(t);
     const run = new Function("Runner", "bootDaemonAgentState", "AgentTurnEvents", "OWNED_FILE", "join", "homedir", "instanceContext", "HOST", "bound", "logLine", "process", "server",
       "createAgentLifecyclePorts", "hostIdentityFacts", "hostname", "existsSync", "hostIsWsl", "definitionStore",
-      "installedHarnesses", "aifyLauncherFilesOnPath",
+      "installedHarnesses", "aifyLauncherFilesOnPath", "evaluateAgentState",
       `let agentState = null;\n${runnerBlock}\nconst readDeps = () => ({ ${stateLines} });\nif (readDeps().stateHost !== null) throw new Error("HTTP host captured before boot");\nif (typeof runner.deps.managedHost !== "function") throw new Error("actual bootstrap lacks lazy managedHost");\nconst before = () => runner.deps.managedHost();\nconst unready = before();\n${bootBlock}\nreturn { unready, owner: before(), http: readDeps() };`);
     class CaptureRunner { constructor(deps) { this.deps = deps; } }
     const observed = run(CaptureRunner,
@@ -255,7 +255,7 @@ test("actual daemon source statements lazily join boot host and bound URL for de
       { stderr: { write() {} }, exit() { throw new Error("bootstrap failed"); }, platform: process.platform, env: {} },
       { address: () => ({ port: 18802 }) },
       createAgentLifecyclePorts, () => ({ machineId: "win32:test-host" }), () => "test-host", fs.existsSync, () => false,
-      null, () => [], () => []);
+      null, () => [], () => [], () => {});
     assert.equal(observed.unready, null);
     assert.equal(observed.owner.instance, context?.scope ?? "default");
     assert.equal(observed.owner.url, URL);

@@ -135,7 +135,10 @@ test("initial, 59999 and 60000 quiet snapshots use boot epochs and changes canno
 test("public ticks coalesce real collection and return before fetch settles; busy spends no number", async (t) => {
   const remote = defer(), f = await fixture(t, { fetchImpl: async (url, options) => { f.calls.push({ url, options, body: JSON.parse(options.body) }); return remote.promise; } });
   const observed = defer(); f.hold(observed);
-  const a = f.sender.tick(), b = f.sender.tick(); assert.equal(a, b, "one collection promise");
+  // A tick asked during the flight is one follow-up, shared by every such ask, so a change landing mid-collection is
+  // published after it rather than on the next sweep (a-state-change-is-published-when-it-happens.test.js).
+  const a = f.sender.tick(), b = f.sender.tick(), c = f.sender.tick();
+  assert.notEqual(a, b, "the follow-up is not the collection in flight"); assert.equal(b, c, "one follow-up promise");
   await flush(); assert.equal(f.observations(), 1); observed.resolve(); await a; await b; await flush();
   assert.equal(f.calls.length, 1, "tick did not await remote");
   await f.tick(); assert.equal(f.calls.length, 1);
