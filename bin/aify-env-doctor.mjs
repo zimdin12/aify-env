@@ -24,7 +24,7 @@ import { EXIT, summarise } from "../lib/health.mjs";
 // seam this file's own header has always named.
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { collectEnvironmentChecks } from "../lib/environment-report.mjs";
-import { discoverServingEndpoint, readyReceipts } from "../lib/serving-endpoint.mjs";
+import { discoverServingEndpoint, liveInvocationRegistries, readyReceipts } from "../lib/serving-endpoint.mjs";
 import { credentialRoot, listCredentialStore } from "../lib/credential-fs.mjs";
 import { terminalSupport } from "../lib/runner.mjs";
 // THE HOST CHECKS that moved here from `aify-comms doctor` (plan D11). Every reader below only reads:
@@ -87,6 +87,7 @@ const checks = await collectEnvironmentChecks({
   readRegistry,
   terminalSupport,
   readCredentialStore: () => listCredentialStore(credentialRoot()),
+  readInvocationRegistries: () => liveInvocationRegistries(HERDR_PROFILE),
   listDefinitions: () => new DefinitionStore().list(),
   hostChecks: ({ services, endpoint }) => collectHostChecks({
     services,
