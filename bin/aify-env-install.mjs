@@ -17,7 +17,7 @@ import { createInterface } from "node:readline/promises";
 
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
-import { approvedInstaller, connectRecorded, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, connectRecorded, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const plan = parseChainArgs(process.argv.slice(2));
 if (plan.problem) process.stderr.write(`aify-env install: ${plan.problem}\n${USAGE}\n`);
@@ -51,6 +51,9 @@ async function runChain(plan) {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try { return await rl.question(question); } finally { rl.close(); }
     },
+    // The terminal itself, never stdin: stdin may carry the service key. Null when there is none to ask through.
+    askTerminal: (question) => askTerminal(question, { windows }),
+    unapproved: (name, url, approve) => unapprovedArtifacts(name, url, { ...wrapper, approve }),
     publishedKey: (name) => hasPublishedKey(name, { registry }),
     ensurePackages: async () => {
       if (!fs.existsSync(path.join(wrapperRoot, "package.json"))) {
@@ -92,4 +95,19 @@ async function runChain(plan) {
   };
   const { exit } = await new InstallChain(plan, io).run();
   return exit;
+}
+
+/** One answer read from the controlling terminal, or null when this process has none (a pipe, a service, mintty). */
+async function askTerminal(question, { windows }) {
+  if (!process.stdout.isTTY) return null;
+  let input, output;
+  try {
+    input = fs.createReadStream(null, { fd: fs.openSync(windows ? "CONIN$" : "/dev/tty", "r") });
+    output = fs.createWriteStream(null, { fd: fs.openSync(windows ? "CONOUT$" : "/dev/tty", "w") });
+  } catch {
+    input?.destroy();
+    return null;
+  }
+  const rl = createInterface({ input, output });
+  try { return await rl.question(question); } finally { rl.close(); input.destroy(); output.destroy(); }
 }

@@ -20,6 +20,9 @@ function host({ present = [], published = false, connectExit = 0, env = {}, inst
     env, said: [],
     say(line) { this.said.push(line); },
     ask: async () => "",
+    // Approval prompting has its own file (the-install-chain-asks-before-an-unapproved-artifact.test.js).
+    unapproved: async () => [],
+    askTerminal: async () => null,
     publishedKey: async (name) => { calls.push(["publishedKey", name]); return published; },
     ensurePackages: async () => { calls.push(["ensurePackages"]); return packages; },
     approvedInstaller: async (name) => { calls.push(["approvedInstaller", name]); return installer; },
