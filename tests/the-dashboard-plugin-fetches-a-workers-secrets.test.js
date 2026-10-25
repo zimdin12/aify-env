@@ -160,6 +160,8 @@ test("an ordinary instance offers the same contributor, and one not started refu
   const { offered } = await started(t, dashboard.endpoint, { dedicated: false });
   assert.equal((await ask(offered, { project: "p1", names: ["OPENAI_API_KEY"] })).env.OPENAI_API_KEY, `${SENTINEL}-OPENAI_API_KEY`);
   const never = createDashboardPlugin({ endpoint: dashboard.endpoint, servedElsewhere: async () => true, service: { name: "aify-dashboard" } });
-  assert.deepEqual(await never.capabilities.spawnEnv.contribute({ definition: definition(), signal: new AbortController().signal }),
+  // The secrets offer is the one supplying the `secrets` field; the plugin offers file activity's beside it.
+  const secretsOffer = never.capabilities.spawnEnv.find((offer) => offer.field === "secrets");
+  assert.deepEqual(await secretsOffer.contribute({ definition: definition(), signal: new AbortController().signal }),
     { refused: { reason: "unavailable" } });
 });
