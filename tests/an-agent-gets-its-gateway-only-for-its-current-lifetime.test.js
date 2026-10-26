@@ -39,7 +39,13 @@ test('THE CURRENT LIFETIME PREPARES AND REGISTERS: each reaches the book with th
   assert.deepEqual([prepared.status, prepared.body], [200, { agentId: 'hermes-agent', ok: true, port: 9000, live: false }]);
   const registered = await f.ask({ instance: 'default', lifetime: L1, action: 'register', port: 9000, pid: 77 });
   assert.deepEqual([registered.status, registered.body.ok], [200, true]);
-  assert.deepEqual(f.calls, [
+  // Each carries the admission's fence, which the book asks before every effect (a-gateway-effect-holds-only-while-its-
+  // admission-does.test.js); it holds here, so asking it is harmless.
+  for (const [, args] of f.calls) {
+    assert.equal(typeof args.fence, 'function');
+    assert.doesNotThrow(() => args.fence());
+  }
+  assert.deepEqual(f.calls.map(([action, { fence, ...args }]) => [action, args]), [
     ['prepare', { agentId: 'hermes-agent', lifetime: L1 }],
     ['register', { agentId: 'hermes-agent', lifetime: L1, port: 9000, pid: 77 }],
   ]);
