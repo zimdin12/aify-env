@@ -95,7 +95,9 @@ test('A GATEWAY THAT COULD NOT BE ENDED KEEPS ITS RECORD, and the newer lifetime
 
 test('AFTER A KILL, AN OS THAT CANNOT SAY IS NOT AN END: the record stays and the newer lifetime is refused', async (t) => {
   // An unanswered probe, an unread command line or a failed probe was read as the gateway gone (review of ca24737).
-  for (const afterKill of [{ alive: null, commandLine: null }, { alive: true, commandLine: null }, 'throw']) {
+  // A blank command line is text the probe kept, and proves neither absence nor another program (review of 89300ad).
+  for (const afterKill of [{ alive: null, commandLine: null }, { alive: true, commandLine: null }, { alive: true, commandLine: '' },
+    { alive: true, commandLine: '   ' }, 'throw']) {
     const w = world(t, { killAnswer: false, afterKill });
     await w.launch('pc-manager', L1);
     await assert.rejects(w.book.prepare({ agentId: 'pc-manager', lifetime: L2 }), { code: NOT_ENDED }, JSON.stringify(afterKill));
@@ -115,6 +117,8 @@ test('isProvenEnded: only a gone process or another program on the pid proves th
   assert.equal(isProvenEnded(record, { alive: true, commandLine: 'node other.js' }), true);
   assert.equal(isProvenEnded(record, { alive: true, commandLine: line(9341) }), false, 'still the gateway');
   assert.equal(isProvenEnded(record, { alive: true, commandLine: null }), false, 'unread command line');
+  assert.equal(isProvenEnded(record, { alive: true, commandLine: '' }), false, 'blank command line');
+  assert.equal(isProvenEnded(record, { alive: true, commandLine: ' \t ' }), false, 'whitespace command line');
   assert.equal(isProvenEnded(record, { alive: null }), false, 'unanswered');
   assert.equal(isProvenEnded(record, undefined), false);
 });
