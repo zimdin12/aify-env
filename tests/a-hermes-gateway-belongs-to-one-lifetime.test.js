@@ -15,7 +15,7 @@ const L2 = '22222222-2222-4222-8222-222222222222';
 const line = (port) => `C:\\hermes\\hermes.exe dashboard --port ${port} --host 127.0.0.1 --no-open --skip-build`;
 
 /** A book over a temp home, with a fake gateway world: what is live, what the OS says, what was killed. */
-function world(t, { commandLine = line, killWorks = true } = {}) {
+function world(t, { commandLine = line, killAnswer = null } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aify-gw-book-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const live = new Map(); // port -> pid
@@ -30,7 +30,8 @@ function world(t, { commandLine = line, killWorks = true } = {}) {
       const port = [...live].find(([, p]) => p === pid)?.[0];
       return [pid, port === undefined ? { alive: false } : { alive: true, commandLine: commandLine(port) }];
     })),
-    kill: async (pid) => { killed.push(pid); if (!killWorks) return false; for (const [port, p] of live) if (p === pid) live.delete(port); return true; },
+    // killAnswer set: the kill leaves the process running and answers that (killTree's true is an attempt, not an end).
+    kill: async (pid) => { killed.push(pid); if (killAnswer !== null) return killAnswer; for (const [port, p] of live) if (p === pid) live.delete(port); return true; },
   });
   /** What hermes-aify does: prepare, start on the port given unless one is live, register the pid. */
   const launch = async (agentId, lifetime) => {
@@ -77,11 +78,14 @@ test('AN UNCONFIRMED PROCESS IS NEVER KILLED: another program on that pid, or a 
 
 test('A GATEWAY THAT COULD NOT BE ENDED KEEPS ITS RECORD, and the newer lifetime is refused, not handed its port', async (t) => {
   // Dropping the record forgot the pid of a gateway still running (review of 85cbd1a).
-  const w = world(t, { killWorks: false });
-  await w.launch('pc-manager', L1);
-  await assert.rejects(w.book.prepare({ agentId: 'pc-manager', lifetime: L2 }), { code: NOT_ENDED });
-  assert.deepEqual(w.killed, [5000], 'CONTROL: the kill was attempted');
-  assert.deepEqual(w.book.records().map(({ record }) => [record.lifetime, record.pid]), [[L1, 5000]]);
+  // The kill answering true with the gateway still running is taskkill exiting 1 (review of e7e0956).
+  for (const killAnswer of [false, true]) {
+    const w = world(t, { killAnswer });
+    await w.launch('pc-manager', L1);
+    await assert.rejects(w.book.prepare({ agentId: 'pc-manager', lifetime: L2 }), { code: NOT_ENDED }, `kill answered ${killAnswer}`);
+    assert.deepEqual(w.killed, [5000], 'CONTROL: the kill was attempted');
+    assert.deepEqual(w.book.records().map(({ record }) => [record.lifetime, record.pid]), [[L1, 5000]]);
+  }
 });
 
 test("ANOTHER GATEWAY ON THE RECORDED PORT IS NEVER ADOPTED: its token is not this agent's", async (t) => {

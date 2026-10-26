@@ -2,7 +2,7 @@
 // whose ids hash to one port still get two ports.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { choosePort, hashedPort, PORT_BASE, PORT_SPAN, RESERVED_PORTS } from '../lib/hermes-gateway-ports.mjs';
+import { choosePort, hashedPort, NO_FREE_PORT, PORT_BASE, PORT_SPAN, RESERVED_PORTS } from '../lib/hermes-gateway-ports.mjs';
 
 const always = async () => true;
 
@@ -37,4 +37,10 @@ test('RESERVED PORTS are never chosen, and the search stays in range', async () 
   const port = await choosePort({ agentId: 'general-helper-gpt', isFree: async (p) => { seen.push(p); return p > 8805; } });
   assert.equal(port, 8806);
   assert.ok(seen.every((p) => !RESERVED_PORTS.has(p)), `asked about a reserved port: ${seen}`);
+});
+
+test('NO FREE PORT IN THE SEARCH IS A REFUSAL, never the busy start port', async () => {
+  // It returned the hashed port after 64 busy answers, the occupied previous port among them (review of e7e0956).
+  await assert.rejects(choosePort({ agentId: 'pc-manager', previous: 8868, isFree: async () => false }), { code: NO_FREE_PORT });
+  assert.equal(await choosePort({ agentId: 'pc-manager', isFree: async (p) => p === 8868 + 63 }), 8868 + 63, 'CONTROL: the last port searched');
 });

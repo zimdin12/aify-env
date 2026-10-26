@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import { AgentGateways } from '../lib/agent-gateways.mjs';
 import { AgentStateHost } from '../lib/agent-state-host.mjs';
 import { NOT_ENDED } from '../lib/hermes-gateway-book.mjs';
+import { NO_FREE_PORT } from '../lib/hermes-gateway-ports.mjs';
 import { handleRequest } from '../lib/protocol.mjs';
 
 const L1 = '11111111-1111-4111-8111-111111111111';
@@ -84,6 +85,12 @@ test('A PREVIOUS GATEWAY THE BOOK COULD NOT END IS A 409 that says so, not a cra
   const f = fixture(t, { book: { prepare: async () => { throw Object.assign(new Error('x'), { code: NOT_ENDED }); } } });
   const refused = await f.ask({ instance: 'default', lifetime: L1, action: 'prepare' });
   assert.deepEqual([refused.status, refused.body.reason], [409, 'previous-gateway-not-ended']);
+});
+
+test('NO FREE GATEWAY PORT IS A 503 that says so', async (t) => {
+  const f = fixture(t, { book: { prepare: async () => { throw Object.assign(new Error('x'), { code: NO_FREE_PORT }); } } });
+  const refused = await f.ask({ instance: 'default', lifetime: L1, action: 'prepare' });
+  assert.deepEqual([refused.status, refused.body.reason], [503, 'no-free-gateway-port']);
 });
 
 test('WITHOUT AGENT STATE the route answers 503 rather than guessing', async () => {
