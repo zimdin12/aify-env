@@ -1,32 +1,18 @@
 // An agent's hermes gateway keeps the port comms' bridge gave it when the host moved here (0.9.10), and two agents
 // whose ids hash to one port still get two ports.
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { choosePort, hashedPort, PORT_BASE, PORT_SPAN, RESERVED_PORTS } from '../lib/hermes-gateway-ports.mjs';
 
 const always = async () => true;
 
-test('THE SAME PORTS as comms: values its agentPort answered on 2026-10-26', () => {
+test('THE SAME PORTS as comms: values its agentPort answered on 2026-10-26 (its rule left comms with this move)', () => {
   // general-helper-gpt hashes onto the comms service's 8800 and steps past the reserved 8801 and 8802.
   assert.equal(hashedPort('general-helper-gpt'), 8803);
   assert.equal(hashedPort('comms-senior-dev'), 9341);
   assert.equal(hashedPort('graph-hermes-tl'), 9341, 'the collision the probe exists for');
   assert.equal(hashedPort('pc-manager'), 8868);
   assert.equal(hashedPort('sc-coder-gpt'), 9545);
-});
-
-const comms = process.env.AIFY_COMMS_REPO;
-test('THE SAME PORTS as the comms checkout, for 500 ids', { skip: comms ? false : 'needs AIFY_COMMS_REPO' }, async () => {
-  const file = path.join(comms, 'mcp/stdio/hermes-endpoint.js');
-  assert.ok(fs.existsSync(file), 'AIFY_COMMS_REPO must name a comms checkout');
-  const { agentPort } = await import(pathToFileURL(file).href);
-  for (let i = 0; i < 500; i += 1) {
-    const id = `agent-${i}-${(i * 7919).toString(36)}`;
-    assert.equal(hashedPort(id), agentPort(id), id);
-  }
 });
 
 test('THE PREVIOUS PORT IS KEPT, even while its own gateway listens there, unless another agent holds it', async () => {

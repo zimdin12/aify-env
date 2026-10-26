@@ -57,10 +57,10 @@ test("an entry that is not a function is no contributor, at the lookup and at th
   assert.equal(typeof callableFor(table, "aify-real"), "function");
   const rows = await collectHostChecks({
     services: [{ name: "aify-odd", endpoint: NOWHERE }], endpoint: NOWHERE, knock: async () => ({}), machineId: "m",
-    listProcesses: () => [], credentialFor: async () => "", claudeLogin: () => ({ id: "claude-login" }),
+    listProcesses: () => [], gatewayRecords: () => [], credentialFor: async () => "", claudeLogin: () => ({ id: "claude-login" }),
     doctorChecksFor: () => ({ not: "callable" }),
   });
-  assert.deepEqual(rows.map((row) => row.id), ["claude-login"]);
+  assert.deepEqual(rows.map((row) => row.id), ["claude-login", "gateway-orphans"]);
 });
 
 test("THE COLLECTOR: the report renders, aify-comms contributes, an inherited name contributes nothing", async () => {
@@ -75,7 +75,7 @@ test("THE COLLECTOR: the report renders, aify-comms contributes, an inherited na
       endpoint,
       knock: async () => ({ ok: false, error: "ECONNREFUSED" }),
       machineId: "test:host",
-      listProcesses: () => assert.fail("the host was listed for a silent service"),
+      listProcesses: () => assert.fail("the host was listed for a silent service"), gatewayRecords: () => [],
       credentialFor: async () => "",
       claudeLogin: () => ({ id: "claude-login", state: "passed", detail: "", fix: "", code: "skipped" }),
     }),
@@ -97,12 +97,12 @@ test("a contributor that throws or answers no list costs its own rows, and the r
   ]) {
     const rows = await collectHostChecks({
       services: [{ name: "aify-broken", endpoint: NOWHERE }, { name: "aify-fine", endpoint: NOWHERE }],
-      endpoint: NOWHERE, knock: async () => ({}), machineId: "m", listProcesses: () => [], credentialFor: async () => "",
+      endpoint: NOWHERE, knock: async () => ({}), machineId: "m", listProcesses: () => [], gatewayRecords: () => [], credentialFor: async () => "",
       claudeLogin: () => ({ id: "claude-login", state: "passed", detail: "", fix: "" }),
       doctorChecksFor: (name) => (name === "aify-broken" ? contributor
         : async () => [{ id: "fine-row", state: "passed", detail: "", fix: "" }]),
     });
-    assert.deepEqual(rows.map((row) => row.id), ["aify-broken host checks", "fine-row", "claude-login"], what);
+    assert.deepEqual(rows.map((row) => row.id), ["aify-broken host checks", "fine-row", "claude-login", "gateway-orphans"], what);
     assert.equal(rows[0].state, "failed", what);
     assert.match(rows[0].detail, /aify-broken/, what);
     assert.ok(rows[0].fix, what);

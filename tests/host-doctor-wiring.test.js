@@ -42,14 +42,14 @@ test("a failure without a fix is refused, as every failed row here is", () => {
 
 // ── the core collector: asks the registry by name, and names no service itself ───────────────────────
 
-test("only a registered service whose plugin answers adds rows, and claude-login comes last", async () => {
+test("only a registered service whose plugin answers adds rows, and the core's own rows come last", async () => {
   const asked = [];
   const rows = await collectHostChecks({
     services: [{ name: "aify-dashboard", endpoint: "http://d" }, { name: "aify-comms", endpoint: "http://c" }],
     endpoint: "http://127.0.0.1:8802",
     knock: async () => ({ ok: false }),
     machineId: "win32:host",
-    listProcesses: () => [],
+    listProcesses: () => [], gatewayRecords: () => [],
     credentialFor: async (service) => `key-for-${service.name}`,
     claudeLogin: () => ({ id: "claude-login", state: "passed", detail: "", fix: "", code: "skipped" }),
     doctorChecksFor: (name) => (name === "aify-comms"
@@ -59,17 +59,17 @@ test("only a registered service whose plugin answers adds rows, and claude-login
       }
       : null),
   });
-  assert.deepEqual(rows.map((row) => row.id), ["from-comms", "claude-login"]);
+  assert.deepEqual(rows.map((row) => row.id), ["from-comms", "claude-login", "gateway-orphans"]);
   assert.deepEqual(asked, [{ endpoint: "http://c", key: "key-for-aify-comms", env: "http://127.0.0.1:8802", machine: "win32:host" }]);
 });
 
-test("with no service registered, only the core's own row is asked", async () => {
+test("with no service registered, only the core's own rows are asked", async () => {
   const rows = await collectHostChecks({
-    services: [], endpoint: "e", knock: async () => ({}), machineId: "m", listProcesses: () => [],
+    services: [], endpoint: "e", knock: async () => ({}), machineId: "m", listProcesses: () => [], gatewayRecords: () => [],
     credentialFor: async () => "", claudeLogin: () => ({ id: "claude-login" }),
     doctorChecksFor: () => assert.fail("a contributor was looked up with no service registered"),
   });
-  assert.deepEqual(rows.map((row) => row.id), ["claude-login"]);
+  assert.deepEqual(rows.map((row) => row.id), ["claude-login", "gateway-orphans"]);
 });
 
 test("the registry maps aify-comms to its doctor rows, and nothing else to any", () => {
