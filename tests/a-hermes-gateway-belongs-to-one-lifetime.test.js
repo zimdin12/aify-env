@@ -19,12 +19,13 @@ function world(t, { commandLine = line } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aify-gw-book-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const live = new Map(); // port -> pid
+  const hung = new Set(); // ports whose gateway runs but answers no probe
   const killed = [];
   let nextPid = 5000;
   const book = new HermesGatewayBook({
     aifyHome: home,
     isFree: async (port) => !live.has(port),
-    probe: async ({ port }) => (live.has(port) ? { port, token: `t${live.get(port)}`, wsUrl: `ws://127.0.0.1:${port}/api/ws?token=t${live.get(port)}` } : null),
+    probe: async ({ port }) => (live.has(port) && !hung.has(port) ? { port, token: `t${live.get(port)}`, wsUrl: `ws://127.0.0.1:${port}/api/ws?token=t${live.get(port)}` } : null),
     processes: async (pids) => new Map(pids.map((pid) => {
       const port = [...live].find(([, p]) => p === pid)?.[0];
       return [pid, port === undefined ? { alive: false } : { alive: true, commandLine: commandLine(port) }];
@@ -40,7 +41,7 @@ function world(t, { commandLine = line } = {}) {
     assert.deepEqual(await book.register({ agentId, lifetime, port: prepared.port, pid }), { registered: true });
     return { ...prepared, started: pid };
   };
-  return { home, book, live, killed, launch };
+  return { home, book, live, hung, killed, launch };
 }
 
 test('THE SAME LIFETIME GETS ITS LIVE GATEWAY BACK and starts nothing; the delivery loop finds it', async (t) => {
@@ -51,7 +52,7 @@ test('THE SAME LIFETIME GETS ITS LIVE GATEWAY BACK and starts nothing; the deliv
   const again = await w.launch('pc-manager', L1);
   assert.equal(again.started, null, 'a live gateway is reused');
   assert.equal(again.live.port, first.port);
-  assert.deepEqual(await w.book.current({ agentId: 'pc-manager', lifetime: L1 }), again.live);
+  assert.deepEqual(w.book.records().map(({ record }) => record.pid), [5000], 'the record keeps the running pid');
 });
 
 test('A NEWER LIFETIME ENDS THE CONFIRMED OLD GATEWAY and gets the same port', async (t) => {
@@ -60,7 +61,7 @@ test('A NEWER LIFETIME ENDS THE CONFIRMED OLD GATEWAY and gets the same port', a
   const second = await w.launch('pc-manager', L2);
   assert.deepEqual(w.killed, [5000], "the old lifetime's gateway was ended");
   assert.equal(second.port, first.port, 'the port is kept');
-  assert.equal(await w.book.current({ agentId: 'pc-manager', lifetime: L1 }), null, 'the old lifetime owns nothing now');
+  assert.deepEqual(w.book.records().map(({ record }) => [record.lifetime, record.pid]), [[L2, 5001]], 'the old lifetime owns nothing now');
 });
 
 test('AN UNCONFIRMED PROCESS IS NEVER KILLED: another program on that pid, or a gateway on another port', async (t) => {
@@ -90,25 +91,21 @@ test('A PREPARED BUT NEVER REGISTERED RECORD ENDS NOTHING when a newer lifetime 
   assert.deepEqual(w.killed, []);
 });
 
-test("ENDING IS THE OWNER'S: the owning lifetime ends it, any other lifetime changes nothing", async (t) => {
+test("THIS LIFETIME'S GATEWAY THAT NO LONGER ANSWERS IS ENDED, not forgotten; a dead one is simply started again", async (t) => {
+  // The delivery loop asks again only when it cannot reach its gateway. Rewriting the record as unregistered dropped the
+  // pid of a gateway still running, so no later lifetime could end it (review of a76e7da, F2).
   const w = world(t);
-  await w.launch('pc-manager', L1);
-  assert.deepEqual(await w.book.end({ agentId: 'pc-manager', lifetime: L2 }), { ended: false });
-  assert.deepEqual(w.killed, []);
-  assert.deepEqual(await w.book.end({ agentId: 'pc-manager', lifetime: L1 }), { ended: true });
-  assert.deepEqual(w.killed, [5000]);
-  assert.deepEqual(w.book.records(), [], 'its record is gone');
-});
-
-test('ASKING STARTS NOTHING: current answers null for a dead gateway or an unknown agent', async (t) => {
-  const w = world(t);
-  assert.equal(await w.book.current({ agentId: 'pc-manager', lifetime: L1 }), null);
-  await w.launch('pc-manager', L1);
-  w.live.clear();
-  assert.equal(await w.book.current({ agentId: 'pc-manager', lifetime: L1 }), null);
+  const first = await w.launch('pc-manager', L1);
+  w.hung.add(first.port);
   const again = await w.launch('pc-manager', L1);
-  assert.equal(again.started, 5001, 'a dead gateway gets a new start when its lifetime prepares again');
-  assert.equal(again.port, hashedPort('pc-manager'));
+  assert.deepEqual(w.killed, [5000], 'the running, unanswering gateway was ended');
+  assert.equal(again.started, 5001);
+  assert.deepEqual(w.book.records().map(({ record }) => record.pid), [5001]);
+  w.live.clear();
+  const third = await w.launch('pc-manager', L1);
+  assert.deepEqual(w.killed, [5000], 'CONTROL: a dead gateway is not killed again');
+  assert.equal(third.started, 5002);
+  assert.equal(third.port, hashedPort('pc-manager'));
 });
 
 test('TWO AGENTS THAT HASH TOGETHER get two ports: a recorded port is held even while its gateway is down', async (t) => {
@@ -131,8 +128,7 @@ test('AN AGENT ID IS NEVER A PATH', (t) => {
   const w = world(t);
   assert.throws(() => w.book.prepare({ agentId: '../escape', lifetime: L1 }), /not an agent id/);
   assert.throws(() => w.book.register({ agentId: 'a/b', lifetime: L1, port: 9000, pid: 7 }), /not an agent id/);
-  assert.throws(() => w.book.current({ agentId: 'a/b', lifetime: L1 }), /not an agent id/);
-  assert.throws(() => w.book.end({ agentId: '', lifetime: L1 }), /not an agent id/);
+  assert.throws(() => w.book.register({ agentId: '', lifetime: L1, port: 9000, pid: 7 }), /not an agent id/);
 });
 
 test("isRecordedGateway confirms only hermes dashboard on the record's own port, alive", () => {

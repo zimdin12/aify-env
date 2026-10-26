@@ -34,3 +34,17 @@ test('NOT LIVE: nothing serving, an index whose socket refuses, or an index with
   const blank = { fetchImpl: async () => ({ ok: true, text: async () => '<html></html>' }), WebSocketImpl: fake().WebSocketImpl };
   assert.equal(await probeGateway({ port: PORT, ...blank }), null);
 });
+
+test('A GATEWAY THAT ACCEPTS AND NEVER ANSWERS is not live, and the probe says so within its bound', async (t) => {
+  // It ran inside the agent's book queue unbounded: a relaunch queued behind it and timed out (review of a76e7da, F3).
+  const net = await import('node:net');
+  const held = [];
+  const server = net.createServer((socket) => { held.push(socket); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { for (const socket of held) socket.destroy(); server.close(); });
+  const started = Date.now();
+  assert.equal(await probeGateway({ port: server.address().port, timeoutMs: 300 }), null);
+  const took = Date.now() - started;
+  assert.ok(held.length > 0, 'CONTROL: the probe really reached the silent listener');
+  assert.ok(took < 3000, `the probe waited ${took} ms on a gateway that never answers`);
+});
