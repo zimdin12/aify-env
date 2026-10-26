@@ -1,5 +1,5 @@
-// /agents/:id/gateway hands an agent its hermes gateway only for the lifetime this host holds current, tied to the pid
-// this host recorded, never to one the request names (0.9.10). Real route and state host; the book is a stand-in.
+// /agents/:id/gateway serves an agent's hermes gateway only to the lifetime this host holds current (0.9.10): the
+// launcher prepares and registers, the delivery loop asks current. Real route and state host; the book is a stand-in.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,7 +11,7 @@ import { handleRequest } from '../lib/protocol.mjs';
 
 const L1 = '11111111-1111-4111-8111-111111111111';
 const L2 = '22222222-2222-4222-8222-222222222222';
-const GATEWAY = { port: 9000, token: 'tok', wsUrl: 'ws://127.0.0.1:9000/api/ws?token=tok' };
+const LIVE = { port: 9000, token: 'tok', wsUrl: 'ws://127.0.0.1:9000/api/ws?token=tok' };
 
 function fixture(t, { book = {} } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aify-gw-route-'));
@@ -23,8 +23,9 @@ function fixture(t, { book = {} } = {}) {
     launcher: '/owned/hermes-aify', writtenAtUs: nowUs - 1000 });
   const calls = [];
   const fake = {
-    ensure: async (args) => { calls.push(['ensure', args]); return GATEWAY; },
-    current: async (args) => { calls.push(['current', args]); return GATEWAY; },
+    prepare: async (args) => { calls.push(['prepare', args]); return { port: 9000, live: null }; },
+    register: async (args) => { calls.push(['register', args]); return { registered: true }; },
+    current: async (args) => { calls.push(['current', args]); return LIVE; },
     ...book,
   };
   const gateways = new AgentGateways({ host, instance: 'default', book: fake });
@@ -32,24 +33,35 @@ function fixture(t, { book = {} } = {}) {
   return { ask, calls };
 }
 
-test('THE CURRENT LIFETIME GETS ITS GATEWAY, owned by the pid this host recorded, not the one it was told', async (t) => {
+test('THE CURRENT LIFETIME PREPARES, REGISTERS AND ASKS: each reaches the book with that lifetime', async (t) => {
   const f = fixture(t);
-  const answer = await f.ask({ instance: 'default', lifetime: L1, ensure: true, ownerPid: 1 });
-  assert.equal(answer.status, 200, JSON.stringify(answer.body));
-  assert.deepEqual(answer.body, { agentId: 'hermes-agent', ok: true, ...GATEWAY });
-  assert.deepEqual(f.calls, [['ensure', { agentId: 'hermes-agent', lifetime: L1, ownerPid: 4321 }]]);
-  const asked = await f.ask({ instance: 'default', lifetime: L1 });
-  assert.equal(asked.status, 200);
-  assert.equal(f.calls.at(-1)[0], 'current', 'without ensure nothing is started');
+  const prepared = await f.ask({ instance: 'default', lifetime: L1, action: 'prepare' });
+  assert.deepEqual([prepared.status, prepared.body], [200, { agentId: 'hermes-agent', ok: true, port: 9000, live: false }]);
+  const registered = await f.ask({ instance: 'default', lifetime: L1, action: 'register', port: 9000, pid: 77 });
+  assert.deepEqual([registered.status, registered.body.ok], [200, true]);
+  const current = await f.ask({ instance: 'default', lifetime: L1, action: 'current' });
+  assert.deepEqual(current.body, { agentId: 'hermes-agent', ok: true, ...LIVE });
+  assert.deepEqual(f.calls, [
+    ['prepare', { agentId: 'hermes-agent', lifetime: L1 }],
+    ['register', { agentId: 'hermes-agent', lifetime: L1, port: 9000, pid: 77 }],
+    ['current', { agentId: 'hermes-agent', lifetime: L1 }],
+  ]);
 });
 
-test('ANY OTHER LIFETIME, INSTANCE OR AGENT IS REFUSED, and the book is never asked', async (t) => {
+test('A LIVE GATEWAY IS HANDED BACK AT PREPARE, so the launcher starts nothing', async (t) => {
+  const f = fixture(t, { book: { prepare: async () => ({ port: 9000, live: LIVE }) } });
+  const answer = await f.ask({ instance: 'default', lifetime: L1, action: 'prepare' });
+  assert.deepEqual(answer.body, { agentId: 'hermes-agent', ok: true, port: 9000, live: true, wsUrl: LIVE.wsUrl, token: LIVE.token });
+});
+
+test('ANY OTHER LIFETIME, INSTANCE, AGENT OR ACTION IS REFUSED, and the book is never asked', async (t) => {
   const f = fixture(t);
   for (const [body, agentId, status, reason] of [
-    [{ instance: 'default', lifetime: L2, ensure: true }, 'hermes-agent', 409, 'not-current'],
-    [{ instance: 'other', lifetime: L1, ensure: true }, 'hermes-agent', 409, 'wrong-instance'],
-    [{ instance: 'default', lifetime: L1, ensure: true }, 'nobody', 409, 'not-current'],
-    [{ instance: 'default', ensure: true }, 'hermes-agent', 400, 'malformed-request'],
+    [{ instance: 'default', lifetime: L2, action: 'prepare' }, 'hermes-agent', 409, 'not-current'],
+    [{ instance: 'other', lifetime: L1, action: 'prepare' }, 'hermes-agent', 409, 'wrong-instance'],
+    [{ instance: 'default', lifetime: L1, action: 'prepare' }, 'nobody', 409, 'not-current'],
+    [{ instance: 'default', action: 'prepare' }, 'hermes-agent', 400, 'malformed-request'],
+    [{ instance: 'default', lifetime: L1, action: 'spawn' }, 'hermes-agent', 400, 'malformed-request'],
   ]) {
     const answer = await f.ask(body, agentId);
     assert.deepEqual([answer.status, answer.body.reason], [status, reason], JSON.stringify(body));
@@ -57,16 +69,14 @@ test('ANY OTHER LIFETIME, INSTANCE OR AGENT IS REFUSED, and the book is never as
   assert.deepEqual(f.calls, []);
 });
 
-test('NO GATEWAY IS A 404, AND A START THAT FAILED SAYS WHY', async (t) => {
-  const none = fixture(t, { book: { current: async () => null } });
-  assert.deepEqual((await none.ask({ instance: 'default', lifetime: L1 })).body.reason, 'no-gateway');
-  const failing = fixture(t, { book: { ensure: async () => { throw new Error('hermes could not start for port 9000: ENOENT'); } } });
-  const answer = await failing.ask({ instance: 'default', lifetime: L1, ensure: true });
-  assert.equal(answer.status, 502);
-  assert.deepEqual([answer.body.reason, answer.body.detail], ['gateway-failed', 'hermes could not start for port 9000: ENOENT']);
+test('NO GATEWAY IS A 404, AND A REGISTER THE BOOK REFUSES IS A 409', async (t) => {
+  const f = fixture(t, { book: { current: async () => null, register: async () => ({ registered: false }) } });
+  assert.deepEqual((await f.ask({ instance: 'default', lifetime: L1, action: 'current' })).body.reason, 'no-gateway');
+  const refused = await f.ask({ instance: 'default', lifetime: L1, action: 'register', port: 1, pid: 2 });
+  assert.deepEqual([refused.status, refused.body.reason], [409, 'not-prepared']);
 });
 
 test('WITHOUT AGENT STATE the route answers 503 rather than guessing', async () => {
-  const answer = await handleRequest({ method: 'POST', path: '/agents/hermes-agent/gateway', body: { instance: 'default', lifetime: L1 } }, {});
+  const answer = await handleRequest({ method: 'POST', path: '/agents/hermes-agent/gateway', body: { instance: 'default', lifetime: L1, action: 'current' } }, {});
   assert.deepEqual([answer.status, answer.body.reason], [503, 'state-unavailable']);
 });
