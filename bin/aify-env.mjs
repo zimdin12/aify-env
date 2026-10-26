@@ -450,6 +450,7 @@ const server = createServer(createDaemonHttp({
       {
         runner,
         turnEvents: agentState?.turnEvents,
+        gateways: agentState?.gateways,
         stateHost: agentState?.host ?? null,
         lifecycle: agentState?.lifecycle ?? null,
         residents: agentState?.residents?.report() ?? null,
