@@ -83,7 +83,8 @@ for (const pipes of [false, true]) test(`actual ${pipes ? "HTTP pipes" : "plugin
   assert.notEqual(token, f.runner.instance());
   assert.equal(Object.hasOwn(env, "aify_lifetime"), false);
   assert.equal(Object.hasOwn(env, "HERDR_PANE_ID"), false);
-  assert.equal(f.host.current("lead", GIVEN).stateCause, "turn-unknown");
+  const fresh = f.host.current("lead", GIVEN);
+  assert.deepEqual([fresh.state, fresh.stateCause], ["idle", "at-prompt"], "no turn predates a child this Runner started (#12)");
   assert.equal(f.host.current("lead", GIVEN).process.verified, "yes");
   assert.equal((await f.send(token)).body.applied, true, "refresh retains managed ownership for first G3 hook");
   assert.equal(JSON.parse(fs.readFileSync(f.file))[token].open, true);
