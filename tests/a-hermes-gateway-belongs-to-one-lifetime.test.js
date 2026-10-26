@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { test } from 'node:test';
-import { HermesGatewayBook, isRecordedGateway, portIsFree } from '../lib/hermes-gateway-book.mjs';
+import { HermesGatewayBook, isRecordedGateway, portIsFree, somethingAnswers } from '../lib/hermes-gateway-book.mjs';
 import { hashedPort } from '../lib/hermes-gateway-ports.mjs';
 
 const L1 = '11111111-1111-4111-8111-111111111111';
@@ -152,4 +152,26 @@ test('portIsFree says busy for a port something listens on, and free once it sto
   assert.equal(await portIsFree(port), false);
   await new Promise((resolve) => server.close(resolve));
   assert.equal(await portIsFree(port), true);
+});
+
+test('A BINDABLE PORT IS STILL BUSY when something answers it: Windows binds loopback beside a wildcard listener', async () => {
+  // Injected rather than opening a wildcard listener (a firewall prompt on Windows) or leaning on Windows bind rules.
+  const server = net.createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  await new Promise((resolve) => server.close(resolve));
+  const asked = [];
+  const answers = (answered) => async (p) => { asked.push(p); return answered; };
+  assert.equal(await portIsFree(port, { answers: answers(true) }), false, 'the 8811 case: bindable, but a dashboard answers');
+  assert.equal(await portIsFree(port, { answers: answers(false) }), true, 'CONTROL: bindable and silent');
+  assert.deepEqual(asked, [port, port]);
+});
+
+test('somethingAnswers sees a loopback listener, and silence once it closes', async () => {
+  const server = net.createServer((socket) => socket.destroy());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  assert.equal(await somethingAnswers(port), true);
+  await new Promise((resolve) => server.close(resolve));
+  assert.equal(await somethingAnswers(port), false);
 });
