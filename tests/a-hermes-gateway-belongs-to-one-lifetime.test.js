@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { test } from 'node:test';
-import { HermesGatewayBook, NOT_ENDED, isRecordedGateway, portIsFree, somethingAnswers } from '../lib/hermes-gateway-book.mjs';
+import { HermesGatewayBook, NOT_ENDED, isProvenEnded, isRecordedGateway, portIsFree, somethingAnswers } from '../lib/hermes-gateway-book.mjs';
 import { hashedPort } from '../lib/hermes-gateway-ports.mjs';
 
 const L1 = '11111111-1111-4111-8111-111111111111';
@@ -15,7 +15,7 @@ const L2 = '22222222-2222-4222-8222-222222222222';
 const line = (port) => `C:\\hermes\\hermes.exe dashboard --port ${port} --host 127.0.0.1 --no-open --skip-build`;
 
 /** A book over a temp home, with a fake gateway world: what is live, what the OS says, what was killed. */
-function world(t, { commandLine = line, killAnswer = null } = {}) {
+function world(t, { commandLine = line, killAnswer = null, afterKill = null } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aify-gw-book-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const live = new Map(); // port -> pid
@@ -26,10 +26,15 @@ function world(t, { commandLine = line, killAnswer = null } = {}) {
     aifyHome: home,
     isFree: async (port) => !live.has(port),
     probe: async ({ port }) => (live.has(port) && !hung.has(port) ? { port, token: `t${live.get(port)}`, wsUrl: `ws://127.0.0.1:${port}/api/ws?token=t${live.get(port)}` } : null),
-    processes: async (pids) => new Map(pids.map((pid) => {
-      const port = [...live].find(([, p]) => p === pid)?.[0];
-      return [pid, port === undefined ? { alive: false } : { alive: true, commandLine: commandLine(port) }];
-    })),
+    // afterKill set: what the OS says about a pid once it has been killed ('throw' for a probe that fails).
+    processes: async (pids) => {
+      if (afterKill === 'throw' && killed.length) throw new Error('probe timed out');
+      return new Map(pids.map((pid) => {
+        if (afterKill && killed.includes(pid)) return [pid, afterKill];
+        const port = [...live].find(([, p]) => p === pid)?.[0];
+        return [pid, port === undefined ? { alive: false } : { alive: true, commandLine: commandLine(port) }];
+      }));
+    },
     // killAnswer set: the kill leaves the process running and answers that (killTree's true is an attempt, not an end).
     kill: async (pid) => { killed.push(pid); if (killAnswer !== null) return killAnswer; for (const [port, p] of live) if (p === pid) live.delete(port); return true; },
   });
@@ -86,6 +91,32 @@ test('A GATEWAY THAT COULD NOT BE ENDED KEEPS ITS RECORD, and the newer lifetime
     assert.deepEqual(w.killed, [5000], 'CONTROL: the kill was attempted');
     assert.deepEqual(w.book.records().map(({ record }) => [record.lifetime, record.pid]), [[L1, 5000]]);
   }
+});
+
+test('AFTER A KILL, AN OS THAT CANNOT SAY IS NOT AN END: the record stays and the newer lifetime is refused', async (t) => {
+  // An unanswered probe, an unread command line or a failed probe was read as the gateway gone (review of ca24737).
+  for (const afterKill of [{ alive: null, commandLine: null }, { alive: true, commandLine: null }, 'throw']) {
+    const w = world(t, { killAnswer: false, afterKill });
+    await w.launch('pc-manager', L1);
+    await assert.rejects(w.book.prepare({ agentId: 'pc-manager', lifetime: L2 }), { code: NOT_ENDED }, JSON.stringify(afterKill));
+    assert.deepEqual(w.book.records().map(({ record }) => [record.lifetime, record.pid]), [[L1, 5000]]);
+  }
+  // CONTROL: the pid now running another program is the gateway gone, and the newer lifetime proceeds.
+  const w = world(t, { killAnswer: true, afterKill: { alive: true, commandLine: 'C:/Windows/notepad.exe' } });
+  await w.launch('pc-manager', L1);
+  const second = await w.book.prepare({ agentId: 'pc-manager', lifetime: L2 });
+  assert.equal(typeof second.port, 'number');
+  assert.deepEqual(w.book.records().map(({ record }) => [record.lifetime, record.pid]), [[L2, 0]]);
+});
+
+test('isProvenEnded: only a gone process or another program on the pid proves the gateway ended', () => {
+  const record = { port: 9341 };
+  assert.equal(isProvenEnded(record, { alive: false }), true);
+  assert.equal(isProvenEnded(record, { alive: true, commandLine: 'node other.js' }), true);
+  assert.equal(isProvenEnded(record, { alive: true, commandLine: line(9341) }), false, 'still the gateway');
+  assert.equal(isProvenEnded(record, { alive: true, commandLine: null }), false, 'unread command line');
+  assert.equal(isProvenEnded(record, { alive: null }), false, 'unanswered');
+  assert.equal(isProvenEnded(record, undefined), false);
 });
 
 test("ANOTHER GATEWAY ON THE RECORDED PORT IS NEVER ADOPTED: its token is not this agent's", async (t) => {
