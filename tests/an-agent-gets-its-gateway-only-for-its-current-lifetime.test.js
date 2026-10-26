@@ -8,6 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { AgentGateways } from '../lib/agent-gateways.mjs';
 import { AgentStateHost } from '../lib/agent-state-host.mjs';
+import { NOT_ENDED } from '../lib/hermes-gateway-book.mjs';
 import { handleRequest } from '../lib/protocol.mjs';
 
 const L1 = '11111111-1111-4111-8111-111111111111';
@@ -77,6 +78,12 @@ test('A REGISTER THE BOOK REFUSES IS A 409', async (t) => {
   const f = fixture(t, { book: { register: async () => ({ registered: false }) } });
   const refused = await f.ask({ instance: 'default', lifetime: L1, action: 'register', port: 1, pid: 2 });
   assert.deepEqual([refused.status, refused.body.reason], [409, 'not-prepared']);
+});
+
+test('A PREVIOUS GATEWAY THE BOOK COULD NOT END IS A 409 that says so, not a crash', async (t) => {
+  const f = fixture(t, { book: { prepare: async () => { throw Object.assign(new Error('x'), { code: NOT_ENDED }); } } });
+  const refused = await f.ask({ instance: 'default', lifetime: L1, action: 'prepare' });
+  assert.deepEqual([refused.status, refused.body.reason], [409, 'previous-gateway-not-ended']);
 });
 
 test('WITHOUT AGENT STATE the route answers 503 rather than guessing', async () => {

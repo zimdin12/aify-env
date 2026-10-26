@@ -15,9 +15,11 @@ test('THE SAME PORTS as comms: values its agentPort answered on 2026-10-26 (its 
   assert.equal(hashedPort('sc-coder-gpt'), 9545);
 });
 
-test('THE PREVIOUS PORT IS KEPT, even while its own gateway listens there, unless another agent holds it', async () => {
-  const busy = async () => false;
-  assert.equal(await choosePort({ agentId: 'pc-manager', previous: 9000, isFree: busy }), 9000);
+test('THE PREVIOUS PORT IS KEPT while it is free and no other agent holds it', async () => {
+  assert.equal(await choosePort({ agentId: 'pc-manager', previous: 9000, isFree: always }), 9000);
+  // The book ends the agent's own gateway first, so what still listens is something it declined to kill (review of 85cbd1a).
+  assert.equal(await choosePort({ agentId: 'pc-manager', previous: 9000, isFree: async (p) => p !== 9000 }), 8868,
+    'an occupied previous port is given up for the hashed one');
   assert.equal(await choosePort({ agentId: 'pc-manager', previous: 9000, others: [9000], isFree: always }), 8868,
     'a held previous port is given up for the hashed one');
   assert.equal(await choosePort({ agentId: 'pc-manager', previous: 80, isFree: always }), 8868, 'out of range is no port');

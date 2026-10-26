@@ -21,6 +21,10 @@ const nowUs = Date.now() * 1000;
 const gate = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
 const safeDeps = { probe: async () => null, isFree: async () => true, processes: async () => new Map(), kill: async () => { throw new Error('unexpected kill'); } };
 
+/** The OS confirming pid 5001 as the hermes gateway on `port()`, as it is for a registered gateway still running. */
+const gatewayPid = (port) => async (pids) => new Map(pids.map((pid) => [pid, pid === 5001
+  ? { alive: true, commandLine: `C:/fake/hermes.exe dashboard --port ${port()}` } : { alive: false }]));
+
 function home(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aify-gateway-fence-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -94,12 +98,14 @@ test('a lifetime replaced during the probe is not handed the old gateway\'s cred
   const entered = gate();
   const held = gate();
   let probing = false;
-  const book = new HermesGatewayBook({ ...safeDeps, aifyHome, probe: async ({ port }) => {
+  let recordedPort;
+  const book = new HermesGatewayBook({ ...safeDeps, aifyHome, processes: gatewayPid(() => recordedPort), probe: async ({ port }) => {
     if (!probing) { probing = true; entered.resolve(); await held.promise; }
     return { port, token: 'old-lifetime-token', wsUrl: `ws://127.0.0.1:${port}/api/ws?token=old-lifetime-token` };
   } });
   const ask = askFor(host, book);
   const prepared = await ask('hermes-agent', L1);
+  recordedPort = prepared.body.port;
   await ask('hermes-agent', L1, 'register', { port: prepared.body.port, pid: 5001 });
   const pending = ask('hermes-agent', L1);
   await entered.promise;
@@ -113,9 +119,12 @@ test('a lifetime replaced during the probe is not handed the old gateway\'s cred
 test('CONTROL: an admission that still holds gets the live gateway', async (t) => {
   const aifyHome = home(t);
   const host = managed(aifyHome, [['hermes-agent', L1]]);
-  const book = new HermesGatewayBook({ ...safeDeps, aifyHome, probe: async ({ port }) => ({ port, token: 'own', wsUrl: `ws://127.0.0.1:${port}/api/ws?token=own` }) });
+  let recordedPort;
+  const book = new HermesGatewayBook({ ...safeDeps, aifyHome, processes: gatewayPid(() => recordedPort),
+    probe: async ({ port }) => ({ port, token: 'own', wsUrl: `ws://127.0.0.1:${port}/api/ws?token=own` }) });
   const ask = askFor(host, book);
   const prepared = await ask('hermes-agent', L1);
+  recordedPort = prepared.body.port;
   await ask('hermes-agent', L1, 'register', { port: prepared.body.port, pid: 5001 });
   const again = await ask('hermes-agent', L1);
   assert.deepEqual([again.status, again.body.live, again.body.token], [200, true, 'own']);

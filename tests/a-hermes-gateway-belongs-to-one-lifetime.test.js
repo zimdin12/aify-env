@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { test } from 'node:test';
-import { HermesGatewayBook, isRecordedGateway, portIsFree, somethingAnswers } from '../lib/hermes-gateway-book.mjs';
+import { HermesGatewayBook, NOT_ENDED, isRecordedGateway, portIsFree, somethingAnswers } from '../lib/hermes-gateway-book.mjs';
 import { hashedPort } from '../lib/hermes-gateway-ports.mjs';
 
 const L1 = '11111111-1111-4111-8111-111111111111';
@@ -15,7 +15,7 @@ const L2 = '22222222-2222-4222-8222-222222222222';
 const line = (port) => `C:\\hermes\\hermes.exe dashboard --port ${port} --host 127.0.0.1 --no-open --skip-build`;
 
 /** A book over a temp home, with a fake gateway world: what is live, what the OS says, what was killed. */
-function world(t, { commandLine = line } = {}) {
+function world(t, { commandLine = line, killWorks = true } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aify-gw-book-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const live = new Map(); // port -> pid
@@ -30,7 +30,7 @@ function world(t, { commandLine = line } = {}) {
       const port = [...live].find(([, p]) => p === pid)?.[0];
       return [pid, port === undefined ? { alive: false } : { alive: true, commandLine: commandLine(port) }];
     })),
-    kill: async (pid) => { killed.push(pid); for (const [port, p] of live) if (p === pid) live.delete(port); return true; },
+    kill: async (pid) => { killed.push(pid); if (!killWorks) return false; for (const [port, p] of live) if (p === pid) live.delete(port); return true; },
   });
   /** What hermes-aify does: prepare, start on the port given unless one is live, register the pid. */
   const launch = async (agentId, lifetime) => {
@@ -67,10 +67,31 @@ test('A NEWER LIFETIME ENDS THE CONFIRMED OLD GATEWAY and gets the same port', a
 test('AN UNCONFIRMED PROCESS IS NEVER KILLED: another program on that pid, or a gateway on another port', async (t) => {
   for (const commandLine of [() => 'C:\\Program Files\\editor\\editor.exe --serve', () => line(1234)]) {
     const w = world(t, { commandLine });
-    await w.launch('pc-manager', L1);
-    await w.launch('pc-manager', L2);
+    const first = await w.launch('pc-manager', L1);
+    const second = await w.launch('pc-manager', L2);
     assert.deepEqual(w.killed, [], commandLine(0));
+    // What it declined to kill still listens there, so the new gateway starts elsewhere (review of 85cbd1a).
+    assert.notEqual(second.port, first.port, `${commandLine(0)}: handed the occupied port`);
   }
+});
+
+test('A GATEWAY THAT COULD NOT BE ENDED KEEPS ITS RECORD, and the newer lifetime is refused, not handed its port', async (t) => {
+  // Dropping the record forgot the pid of a gateway still running (review of 85cbd1a).
+  const w = world(t, { killWorks: false });
+  await w.launch('pc-manager', L1);
+  await assert.rejects(w.book.prepare({ agentId: 'pc-manager', lifetime: L2 }), { code: NOT_ENDED });
+  assert.deepEqual(w.killed, [5000], 'CONTROL: the kill was attempted');
+  assert.deepEqual(w.book.records().map(({ record }) => [record.lifetime, record.pid]), [[L1, 5000]]);
+});
+
+test("ANOTHER GATEWAY ON THE RECORDED PORT IS NEVER ADOPTED: its token is not this agent's", async (t) => {
+  const w = world(t);
+  const first = await w.launch('pc-manager', L1);
+  w.live.set(first.port, 6000); // the recorded pid is gone, and another hermes dashboard answers on its port
+  const again = await w.book.prepare({ agentId: 'pc-manager', lifetime: L1 });
+  assert.equal(again.live, null, `adopted pid 6000's token`);
+  assert.notEqual(again.port, first.port, 'and the occupied port is not handed out');
+  assert.deepEqual(w.killed, [], 'nothing the record does not name is killed');
 });
 
 test('REGISTER IS THE PREPARED LIFETIME AND PORT ONLY', async (t) => {
@@ -115,6 +136,13 @@ test('TWO AGENTS THAT HASH TOGETHER get two ports: a recorded port is held even 
   const b = await w.launch('graph-hermes-tl', L2);
   assert.equal(a.port, 9341);
   assert.equal(b.port, 9342);
+});
+
+test('TWO AGENTS THAT HASH TOGETHER AND PREPARE AT ONCE get two ports', async (t) => {
+  // Each read the other's record before either wrote: [9341, 9341] (review of 85cbd1a, inherited).
+  const w = world(t);
+  const ports = await Promise.all(['comms-senior-dev', 'graph-hermes-tl'].map((agentId) => w.book.prepare({ agentId, lifetime: L1 })));
+  assert.deepEqual(ports.map(({ port }) => port).sort(), [9341, 9342]);
 });
 
 test('PREPARING TWICE AT ONCE decides once', async (t) => {
