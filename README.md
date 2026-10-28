@@ -385,7 +385,7 @@ gone stale in the way a cache does: silently, while looking authoritative.
 What `--help` does not say, and belongs here:
 
 - **`aify-env doctor --json`** gives `{summary, counts, exitCode, checks:[{id, state, detail, fix}]}`.
-  The host rows that moved here from `aify-comms doctor` in 0.9.7 carry a `code` as well, the one they
+  The host rows that moved here from `aify-comms doctor` in aify-comms 0.9.7 (aify-env 0.9.4) carry a `code` as well, the one they
   had there: `env-processes`, `context-window` and `managed-orphans` (from the aify-comms plugin, when
   aify-comms is registered), `claude-login`, and `code-current` (`current`, `stale`, `unknown`), which
   answers what `env-code-currency` asked. A row that does not apply here passes with code `skipped`.
