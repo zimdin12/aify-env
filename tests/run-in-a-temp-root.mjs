@@ -21,6 +21,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { LIFETIME_CARRIERS } from '../lib/managed-lifetimes.mjs';
 
 const PREFIX = 'aify-env-testrun-';
 const PRUNE_AFTER_MS = 60 * 60 * 1000;
@@ -58,9 +59,13 @@ const root = fs.mkdtempSync(path.join(parent, PREFIX));
 // NOR THE HERDR OR AGENT OF THE TERMINAL IT WAS STARTED FROM (2026-10-03): run from an agent's Herdr pane, tests
 // inherited that pane's live socket and that agent's id and lease. aify-wrapper's runner drops the same (its
 // lib/inherited-session.mjs holds the full session list; these are the names that make a process an agent).
+// NOR ITS LIFETIME (2026-10-28): a single-file run from a managed agent's pane carried that agent's AIFY_LIFETIME,
+// AIFY_ENV_INSTANCE and AIFY_ENV_URL, which are what a managed child uses to speak as that lifetime to the live host.
+// Taken from the Runner's own list, so a new carrier is dropped here without an edit.
+const dropped = new Set(['AIFY_AGENT_ID', 'AIFY_AGENT_LEASE', 'CLAUDE_CODE_CHILD_SESSION', ...LIFETIME_CARRIERS]);
 const inherited = { ...process.env };
 for (const name of Object.keys(inherited)) {
-  if (/^(AIFY_)?HERDR_/i.test(name) || ['AIFY_AGENT_ID', 'AIFY_AGENT_LEASE', 'CLAUDE_CODE_CHILD_SESSION'].includes(name.toUpperCase())) delete inherited[name];
+  if (/^(AIFY_)?HERDR_/i.test(name) || dropped.has(name.toUpperCase())) delete inherited[name];
 }
 // Daemon boot now writes descriptor/generation/turns under homedir(), so tests must own that home too.
 const home = path.join(root, 'home');
