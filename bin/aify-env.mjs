@@ -77,7 +77,7 @@ import { PackageBuild } from "../lib/build-identity.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { outsideRootsWarning } from "../lib/definition-checks.mjs";
-import { readServices, registryIsReadable } from "../lib/services.mjs";
+import { readServices } from "../lib/services.mjs";
 import { ServicePlugins } from "../lib/service-plugins.mjs";
 import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
@@ -88,33 +88,12 @@ import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
 import { advertisementPathFor, pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
 import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
-import {
-  advertiseTo,
-  advertisementTargets,
-  advertisingChoice,
-  advertisingEnabled,
-  capabilityFingerprint,
-  acceptanceKey,
-  advertisementHealth,
-  attemptsByService,
-  revokesAcceptance,
-} from "../lib/advertise.mjs";
+import { HostAdvertiser } from "../lib/host-advertiser.mjs";
 import { credentialRoot } from "../lib/credential-fs.mjs";
 import { CredentialAclCache } from "../lib/credential-acl-cache.mjs";
 import { createNotices } from "../lib/notices.mjs";
-import {
-  credentialForTarget,
-  credentialReadinessFor,
-} from "../lib/credential-resolve.mjs";
-import {
-  advertisementStaleMs,
-  environmentAdvertisement,
-  hostIdentityFacts,
-  pluginHeartbeatBody,
-  installedHarnesses,
-  runtimeAvailability,
-  shouldRedetect,
-} from "../lib/advertise.mjs";
+import { credentialForTarget } from "../lib/credential-resolve.mjs";
+import { advertisingEnabled, hostIdentityFacts, pluginHeartbeatBody, installedHarnesses } from "../lib/advertise.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = readFileSync(join(ROOT, "VERSION"), "utf8").trim();
@@ -467,21 +446,8 @@ const server = createServer(createDaemonHttp({
         screens: () => servicePlugins.capabilities("screens"),
         unknown,
         terminals: terminalSupport(),
-        advertising: advertisingHealthNow().advertising,
-        // ARMED is a different question from BEING HEARD, and the doctor needs both: a daemon told
-        // not to advertise is silent by design, and reporting a missing credential there would fail
-        // a host configured exactly as intended.
-        advertisingEnabled: ADVERTISE,
-        advertisingTo: advertisingHealthNow().services,
-        advertiseOptedOut: advertising.optedOut,
-        advertiseIgnored: advertising.ignored,
-        // NAMES AND A BOOLEAN, never a key. Without this, a daemon with no credential is invisible:
-        // every advertisement is refused, `advertising` stays false, the bridge correctly keeps
-        // describing the host, and the operator sees a daemon that runs and is never believed.
-        advertiseCredentials: await credentialReadinessFor(advertisingTargets, credentialReading()),
-        // The outcome of the last beat per target, so a reader can tell a refusal from an outage.
-        // No response BODY travels -- a service's error text is its own, and could carry anything.
-        advertiseAttempts: attemptsByService(advertisingTargets, lastAttempts),
+        // Armed, heard by whom, refused by whom and why: the advertiser's own answer (lib/host-advertiser.mjs).
+        ...(await advertiser.healthFields()),
         // WHAT EACH PLUGIN IS ACTUALLY DOING, which is a different question from whether this host
         // is advertising. Advertising DESCRIBES the machine; a plugin CLAIMS work on it, and on
         // 2026-09-02 the first was healthy while the second was refused every time for hours with
@@ -821,178 +787,42 @@ const sweepTimer = setInterval(() => {
 }, SWEEP_MS);
 sweepTimer.unref();
 
-// ── telling every registered service what this host can do ───────────────────────────────────────
-//
-// ON BY DEFAULT, and the collision it used to risk is closed rather than avoided. `runtimes` and
-// `terminalRuntimes` are last-writer-wins, so two advertisers computing them differently would flap
-// the row -- which reads like failing hardware rather than like two components disagreeing. The
-// bridge now asks this daemon's `/health` whether it is advertising and omits host facts when it is,
-// so exactly one tier describes a host. `AIFY_ADVERTISE=0` hands the job back to the bridge.
-//
-// STANDING DOWN IS SAFE because a heartbeat that omits a field no longer erases it: see aify-comms
-// `service/api_core/environment_registration.py`, which preserves what a caller did not mention.
-//
-// The timer is `unref`'d exactly like the sweep above: a daemon whose last outstanding work is a
-// heartbeat should still be able to exit.
+// ── telling every registered service what this host can do (lib/host-advertiser.mjs) ─────────────
 
 // AN INSTANCE DESCRIBES THE HOST LIKE ANY OTHER: an instance context binds a LIFETIME to a Herdr, it
 // does not make this a lesser environment. Was `!instanceContext && ...`; see the dedicated tests.
 const ADVERTISE = advertisingEnabled(process.env.AIFY_ADVERTISE);
-const ADVERTISE_MS = Number(process.env.AIFY_ADVERTISE_MS || 30_000);
-const REDETECT_MS = Number(process.env.AIFY_ADVERTISE_REDETECT_MS || 300_000);
 const REGISTRY_FILE = instanceContext?.serviceRegistry ?? (process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json"));
-
-// Advertisement transport is inert until the dedicated-mode gate permits a beat.
-
-let lastDetectedAt = 0;
-let detectedRuntimes = [];
-let lastFingerprint = "";
-//: What /health reports, refreshed by each beat. Read from the SAME resolution the beat uses, so the
-//: answer cannot say "somebody is being told" while the beat posts to nobody -- which is the one
-//: wrong answer that strands a host, because the bridge stands down on it.
-let advertisingTargets = [];
-let advertising = advertisingChoice([]); //: who this host beats to, who opted out, what was ignored (advertise.mjs)
-//: Target url -> epoch ms of the last beat that came back 2xx. THE ONLY EVIDENCE that a service is
-//: actually being described by this daemon. Reporting "advertising" from the target LIST instead
-//: meant a 401 counted as success, and the aify-comms bridge stands down on that answer.
-const acceptedBeats = new Map();
-
-//: The LAST OUTCOME per target, accepted or not -- which `acceptedBeats` deliberately cannot carry,
-//: because it records only 2xx. Without it "we are not being heard" is one undifferentiated state,
-//: and a service that is DOWN is indistinguishable from one that REFUSED our credential. Those need
-//: different words from the doctor: one is somebody else's outage, the other is a key to set here.
-//: `advertiseTo` has always returned `{ok, status, error}` per target; it was only ever printed.
-const lastAttempts = new Map();
-
-function advertisingHealthNow() {
-  return advertisementHealth({
-    enabled: ADVERTISE,
-    targets: advertisingTargets,
-    acceptedAt: acceptedBeats,
-    now: Date.now(),
-    staleMs: advertisementStaleMs(ADVERTISE_MS),
-  });
-}
-
-async function advertiseOnce() {
-  // CHECKED AT CALL TIME, not only by the caller (R9-M9). `viewOnly` is set inside the error
-  // handler, which cannot run until this module has finished evaluating -- so the caller's
-  // `if (!viewOnly)` reads false and fires one beat that clearing the interval cannot recall. See
-  // `the-tui-stays-on-screen.test.js` for what that beat costs the incumbent.
-  if (viewOnly) return;
-  let registryText = "";
-  try {
-    registryText = readFileSync(REGISTRY_FILE, "utf8");
-  } catch {
-    // No registry means nobody has asked to be told. Not an error -- but it IS "not advertising",
-    // and saying otherwise would make the bridge stand down for a host nobody is describing.
-    advertisingTargets = [];
-    advertising = advertisingChoice([]);
-    return;
-  }
-  if (registryIsReadable(registryText)) followServices?.(readServices(registryText));
-  advertising = advertisingChoice(readServices(registryText)); // HERE, never in serviceTarget: see advertise.mjs
-  // THE ROUTE IS THE SERVICE'S OR ITS PLUGIN'S (`advertisementPath`), never this file's; neither means no beat.
-  const targets = advertisementTargets(advertising.advertised, advertisementPathFor);
-  advertisingTargets = targets;
-  if (targets.length === 0) return;
-
-  const now = Date.now();
-  if (shouldRedetect({ lastDetectedAt, now, intervalMs: REDETECT_MS })) {
-    detectedRuntimes = runtimeAvailability(installedHarnesses(aifyLauncherFilesOnPath()));
-    lastDetectedAt = now;
-  }
-
-  const support = terminalSupport();
-  // ONE PROBE, THREE FACTS. `isWsl` used to be `kind === "wsl"`, so the machine id the service
-  // arbitrates supersession on inherited an environment variable that is absent in many child
-  // processes -- and the aify-comms bridge on the same host reads /proc, so the two tiers could name
-  // one machine two different things with nothing raised. `hostIdentityFacts` takes the probe once.
-  const { kind, os: hostOs, machineId } = hostIdentityFacts({
-    platform: process.platform,
-    hostname: hostname(),
-    env: process.env,
-    exists: existsSync,
-    isWsl: hostIsWsl(),
-  });
-  const body = environmentAdvertisement({
-    hostname: hostname(),
-    kind,
-    os: hostOs,
-    machineId,
-    // NO `cwdRoots`. Which directories work may run in is the service's policy, and an advertiser
-    // sending an empty list would erase what the operator configured. Omitted means "kept".
-    runtimes: detectedRuntimes,
-    terminal: support.available,
-    terminalReason: support.reason,
-    version: VERSION,
-    instance: BUILD,
-    // WHAT IS ON DISK NOW, beside what this process loaded at boot. Cached, so a beat every
-    // 30 seconds does not re-hash the package continuously.
-    codeOnDisk: PACKAGE_BUILD.onDisk(),
-    launchRoots: CWD_ROOTS,
-  });
-
-  // WHAT CHANGED, said once rather than every beat. The fingerprint covers exactly the fields a
-  // re-walk could move, so a line here means a harness was installed or disappeared -- which is the
-  // event an operator is watching for, and it is invisible in a stream of identical heartbeats.
-  const fingerprint = capabilityFingerprint(body);
-  if (lastFingerprint !== "" && fingerprint !== lastFingerprint) {
-    process.stderr.write(
-      `[aify-env] capabilities changed: ${body.terminalRuntimes.join(", ") || "none"}${chr10}`,
-    );
-  }
-  lastFingerprint = fingerprint;
-
-  // Reported, never thrown: a service being down is that service's news, not this daemon's failure.
-  // THE STORE-AWARE RESOLVER, which is what makes the carrier deliver rather than only diagnose.
-  // A fault -- unreadable, insecure, invalid, conflicting -- yields NO key, so a beat goes out
-  // unauthenticated and is refused, and the refusal is then reported with its real cause instead of
-  // this daemon inventing one.
-  const results = await advertiseTo({
-    targets, body, post: postAdvertisement, env: process.env,
-    credential: async (target) => (await credentialForTarget(target, credentialReading())).value,
-  });
-  for (const result of results) {
-    lastAttempts.set(acceptanceKey(result), {
-      at: Date.now(), ok: result.ok === true,
-      status: Number(result.status || 0), error: String(result.error || ""),
-    });
-    if (result.ok) {
-      // Only a 2xx counts. This is the whole fix: acceptance is recorded, refusal is not.
-      acceptedBeats.set(acceptanceKey(result), Date.now());
-      continue;
-    }
-    // A CREDENTIAL REFUSAL REVOKES THE STANDING ACCEPTANCE IMMEDIATELY, rather than letting it age
-    // out over the staleness window. Between a key being rotated and the old acceptance expiring,
-    // this daemon would still report `advertising: true` for that service -- so the aify-comms
-    // bridge would keep standing down while every beat was being refused, and the host would be
-    // described by NOBODY for the length of the window. That is the exact outage the standdown fix
-    // exists to prevent, arriving through the fix for it.
-    //
-    // Scoped to 401 and 403: those are the service SAYING our credential is wrong. A 500 or an
-    // unreachable host says nothing about the key, and dropping an acceptance on one would hand the
-    // job back to the bridge every time somebody restarted a service.
-    if (revokesAcceptance(result)) acceptedBeats.delete(acceptanceKey(result));
-    // Reported, never thrown: a service being down is that service's news, not this daemon's
-    // failure. It is also NOT recorded as an acceptance, so that service's bridge keeps the job.
-    process.stderr.write(
-      `[aify-env] advertisement to ${result.url} failed (${result.status || result.error})${chr10}`,
-    );
-  }
-}
+const advertiser = new HostAdvertiser({
+  enabled: ADVERTISE,
+  everyMs: Number(process.env.AIFY_ADVERTISE_MS || 30_000),
+  redetectMs: Number(process.env.AIFY_ADVERTISE_REDETECT_MS || 300_000),
+  readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"),
+  onServices: (services) => followServices?.(services),
+  stopped: () => viewOnly,
+  host: () => {
+    // ONE PROBE, THREE FACTS. `isWsl` used to be `kind === "wsl"`, so the machine id the service
+    // arbitrates supersession on inherited an environment variable that is absent in many child
+    // processes -- and the aify-comms bridge on the same host reads /proc, so the two tiers could name
+    // one machine two different things with nothing raised. `hostIdentityFacts` takes the probe once.
+    const { kind, os: hostOs, machineId } = hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
+      exists: existsSync, isWsl: hostIsWsl() });
+    const support = terminalSupport();
+    // WHAT IS ON DISK NOW, beside what this process loaded at boot. Cached, so a beat every 30 seconds does not re-hash.
+    return { hostname: hostname(), kind, os: hostOs, machineId, terminal: support.available, terminalReason: support.reason,
+      version: VERSION, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk(), launchRoots: CWD_ROOTS };
+  },
+  harnesses: () => installedHarnesses(aifyLauncherFilesOnPath()),
+  pathFor: advertisementPathFor,
+  post: postAdvertisement,
+  credentialReading,
+  say: (line) => process.stderr.write(`[aify-env] ${line}${chr10}`),
+});
 
 if (ADVERTISE) {
   // NOT FROM A VIEW. See `viewOnly`: a process that refused a takeover runs nothing, so describing
-  // this host from it hands the service capabilities nobody will deliver.
+  // this host from it hands the service capabilities nobody will deliver. The beat refuses from a view too.
   if (!viewOnly) {
-    // NEVER UNHANDLED. This daemon registers no unhandledRejection handler, so a throw anywhere in
-    // an advertisement pass -- reading the registry, detecting runtimes, describing the host -- was
-    // the end of the process, and with it every worker it owned. A failed advertisement is a log line.
-    const advertiseSafely = () => advertiseOnce().catch((error) => logLine(`advertise failed: ${error?.message || error}`));
-    advertiseSafely();
-    const advertiseTimer = setInterval(advertiseSafely, ADVERTISE_MS);
-    advertiseTimer.unref();
-    stopAdvertising = () => clearInterval(advertiseTimer);
+    stopAdvertising = advertiser.start({ log: logLine });
   }
 }

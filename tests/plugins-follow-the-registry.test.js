@@ -12,7 +12,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
-import { runInNewContext } from "node:vm";
 
 // Through the plugin's own module, as before the split: the import an existing caller has.
 import { REQUEST_POLL_MS } from "../lib/plugins/aify-comms/definition-sync.mjs";
@@ -330,18 +329,8 @@ witness("THE REGISTRY'S EDGES: a plugin naming no endpoint is not moved, one wit
   assert.deepEqual(await registry.add({ name: "late", endpoint: "http://l", ...lifecycle }, {}), {}, "the next registry read starts it afresh");
 });
 
-witness("THE DAEMON FOLLOWS ONLY A REGISTRY THAT PARSES: its own statement, run", () => {
-  // bin/aify-env.mjs is never imported (it runs the daemon), so its one follow statement is taken out
-  // and run, as production-picker-bootstrap does with the bootstrap.
-  const daemon = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
-  const statements = daemon.split(/\r?\n/).filter((line) => line.includes("followServices?.("));
-  assert.equal(statements.length, 1, "the daemon's follow statement must remain identifiable");
-  for (const [text, expected] of [['{"version":1,"services":{}}', [[]]], ["{", []], ["", []]]) {
-    const calls = [];
-    runInNewContext(statements[0], { registryText: text, followServices: (services) => calls.push(services), registryIsReadable, readServices });
-    assert.deepEqual(calls, expected, JSON.stringify(text));
-  }
-});
+// THE DAEMON FOLLOWS ONLY A REGISTRY THAT PARSES: held as behaviour in the-host-advertiser-keeps-its-own-rules.test.js,
+// since the follow moved with the beat into lib/host-advertiser.mjs.
 
 witness("THE DEFINITION SYNC runs while the plugin claims, stops while it is held, and turns again on resume", async () => {
   // A store that is always complete and empty: what is pushed is witnessed elsewhere; this counts passes.

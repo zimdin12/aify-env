@@ -43,7 +43,4 @@ test("the daemon's advertisement fetch refuses to follow a redirect", () => {
   assert.match(fetchCall, /redirect: "manual"/, "the fetch right after it sets redirect: manual");
 });
 
-test("an advertisement pass that throws is logged, never an unhandled rejection", () => {
-  assert.equal((DAEMON.match(/void advertiseOnce\(\)/g) || []).length, 0, "no bare void advertiseOnce()");
-  assert.match(DAEMON, /advertiseOnce\(\)\.catch\(/, "every pass has a catch");
-});
+// A PASS THAT THROWS IS A LOG LINE: held as behaviour in the-host-advertiser-keeps-its-own-rules.test.js (lib/host-advertiser.mjs).

@@ -147,14 +147,19 @@ test("through the store: an ACL widened after a good read refuses the very next 
 });
 
 // ── the daemon reads through the cache ───────────────────────────────────────────────────────
-// bin/aify-env.mjs cannot be imported (it starts a daemon), so its calls are read from source. EVERY
-// credential read there runs per request or per plugin call, so every one must carry the cache.
+// bin/aify-env.mjs cannot be imported (it starts a daemon), so its calls are read from source, and so are its
+// advertiser's (lib/host-advertiser.mjs), which reads through the `credentialReading` the daemon hands it. EVERY
+// credential read there runs per request, per beat or per plugin call, so every one must carry the cache.
 test("every credential read in the daemon carries the cached reading options", () => {
   const source = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
-  const calls = [...source.matchAll(/\b(credentialForTarget|credentialReadinessFor|readCredentialFile)\(([^()]*(?:\([^()]*\))?[^()]*)\)/g)];
+  const advertiser = fs.readFileSync(new URL("../lib/host-advertiser.mjs", import.meta.url), "utf8");
+  const callsIn = (text) => [...text.matchAll(/\b(credentialForTarget|credentialReadinessFor|readCredentialFile)\(([^()]*(?:\([^()]*\))?[^()]*)\)/g)];
+  const calls = [...callsIn(source), ...callsIn(advertiser)];
   assert.ok(calls.length >= 3, `CONTROL: expected the daemon's three credential reads, found ${calls.length}`);
   for (const [whole, , args] of calls) {
-    assert.match(args, /,\s*credentialReading\(\)\s*$/, `reads without the ACL cache: ${whole}`);
+    assert.match(args, /,\s*(this\.#)?credentialReading\(\)\s*$/, `reads without the ACL cache: ${whole}`);
   }
   assert.match(source, /acl: CREDENTIAL_ACL/, "credentialReading() no longer hands over the cache");
+  const handed = source.slice(source.indexOf("new HostAdvertiser({"), source.indexOf("\n});", source.indexOf("new HostAdvertiser({")));
+  assert.match(handed, /^\s*credentialReading,$/m, "the advertiser is not handed the cached reading options");
 });
