@@ -77,10 +77,10 @@ test("the pane menu lists every pane on screen with its state, and offers no hid
   const layout = layoutFrom(JSON.stringify({ collapsed: ["health"], hidden: ["traffic"] }));
   const lines = renderDashboard(SNAPSHOT, { columns: 120, keys: KEYS, view: view("panes"), layout });
   const rows = lines.filter((l) => /^ {4}\S [▾▸] /.test(l)).map((l) => l.trim());
-  assert.deepEqual(rows, ["s ▾ services", "h ▸ health  collapsed", "a ▾ agents", "x ▾ exits", "n ▾ notices"]);
+  assert.deepEqual(rows, ["s ▾ services", "h ▸ health  collapsed", "a ▾ agents", "r ▾ roster", "x ▾ exits", "n ▾ notices"]);
   assert.ok(lines.some((l) => /letter collapses or expands that pane/.test(l)));
   assert.deepEqual(layoutFrom(JSON.stringify({ collapsed: ["helth"] })).problems,
-    ['collapsed names "helth", which is not a pane (panes: services, health, agents, exits, notices, traffic)']);
+    [`collapsed names "helth", which is not a pane (panes: ${PANES.map((pane) => pane.name).join(", ")})`]);
 });
 
 class FakeInput extends EventEmitter {

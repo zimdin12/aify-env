@@ -22,8 +22,10 @@ const SNAPSHOT = {
   history: { recentExits: [{ id: "x-p0", label: "gone", atMs: 990_000, exitCode: 0 }] },
   notices: [{ atMs: 999_000, count: 1, text: "said" }],
   traffic: { requests: 1, bytesOut: 2 },
+  // One agent defined and not running, so the ROSTER pane (0.9.7) has something to head.
+  agentRecords: { resting: { agentId: "resting", lifetime: null, state: "stopped", stateCause: "operator-stop" } },
 };
-const HEADINGS = { services: "SERVICES", health: "HEALTH", agents: "PROCESSES", exits: "RECENT EXITS", notices: "NOTICES", traffic: "TRAFFIC" };
+const HEADINGS = { services: "SERVICES", health: "HEALTH", agents: "PROCESSES", roster: "ROSTER", exits: "RECENT EXITS", notices: "NOTICES", traffic: "TRAFFIC" };
 const order = (lines) => lines.map((line) => Object.entries(HEADINGS).find(([, title]) => line.startsWith(title))?.[0]).filter(Boolean);
 const draw = (layout) => renderDashboard(SNAPSHOT, { columns: 120, layout });
 
@@ -44,12 +46,12 @@ test("no file, an empty one, or {} is the default view, line for line, with noth
 test("panes is the order; a known pane it leaves out comes after, in default order", () => {
   const layout = layoutFrom(JSON.stringify({ panes: ["traffic", "agents"] }));
   assert.deepEqual(layout.problems, []);
-  assert.deepEqual(order(draw(layout)), ["traffic", "agents", "services", "health", "exits", "notices"]);
+  assert.deepEqual(order(draw(layout)), ["traffic", "agents", "services", "health", "roster", "exits", "notices"]);
 });
 
 test("hidden panes are not drawn, but agents cannot be hidden: its keys act on it", () => {
   const layout = layoutFrom(JSON.stringify({ hidden: ["services", "traffic", "agents"] }));
-  assert.deepEqual(order(draw(layout)), ["health", "agents", "exits", "notices"]);
+  assert.deepEqual(order(draw(layout)), ["health", "agents", "roster", "exits", "notices"]);
   assert.deepEqual(layout.problems, ["hidden names agents, which cannot be hidden: its keys act on it"]);
 });
 
@@ -61,7 +63,7 @@ test("a reordered view separates its sections once: no two blank lines in a row"
 test("what it cannot use is SAID under the header, and the rest still applies", () => {
   const layout = layoutFrom(JSON.stringify({ panes: ["traffic", "trafic", "traffic"], hidden: "services" }));
   assert.deepEqual(layout.problems, [
-    'panes names "trafic", which is not a pane (panes: services, health, agents, exits, notices, traffic)',
+    `panes names "trafic", which is not a pane (panes: ${PANES.map((pane) => pane.name).join(", ")})`,
     "panes names traffic twice",
     "hidden is not a list of pane names",
   ]);
