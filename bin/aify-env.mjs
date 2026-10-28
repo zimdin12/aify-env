@@ -461,6 +461,7 @@ const server = createServer(createDaemonHttp({
         build: BUILD,
         codeOnDisk: PACKAGE_BUILD.onDisk(),
         cwdRoots: CWD_ROOTS,
+        screens: () => servicePlugins.capabilities("screens"),
         unknown,
         terminals: terminalSupport(),
         advertising: advertisingHealthNow().advertising,
@@ -684,6 +685,7 @@ server.listen(port, HOST, async () => {
       identity: { machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
         exists: existsSync, isWsl: hostIsWsl() }).machineId, instance, generation, build: BUILD },
       definitions: definitionStore, lifecycle: agentState.lifecycle, cwdRoots: CWD_ROOTS,
+      screens: () => servicePlugins.capabilities("screens"),
       observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
       readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"), credentialOptions: credentialReading, report: logLine, ...population,
     });

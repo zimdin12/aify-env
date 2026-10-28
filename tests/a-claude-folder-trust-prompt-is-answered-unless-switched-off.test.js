@@ -215,6 +215,10 @@ test("THE PLUGIN WIRES IT: the comms plugin answers on a terminal it started, fr
     listeners[0]("output");
     for (const until = Date.now() + 3000; Date.now() < until && !writes.length;) await new Promise((r) => setTimeout(r, 5));
     assert.deepEqual(writes, [["proc-1", DOWN]]);
+    // AND THE STALL IS NAMED. The vendored rule calls this screen `live_blocked_form`; the host's state reads the
+    // plugin's offer, which names the dialog it knows, so the word reads blocked/folder-trust.
+    for (const until = Date.now() + 3000; Date.now() < until && !plugin.capabilities.screens().length;) await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(plugin.capabilities.screens(), [{ handle: "proc-1", state: "blocked", rule: "folder-trust" }]);
   } finally {
     await plugin.stop();
     fs.rmSync(dir, { recursive: true, force: true });
