@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -272,4 +273,55 @@ test("A REAL DAEMON: its start removes what was left, keeps the rest, and answer
   assert.equal(removed.status, 0, removed.stderr);
   assert.match(removed.stdout, /its session folder was removed/);
   assert.ok(!fs.existsSync(path.join(root, "kept")));
+});
+
+test("A REAL DAEMON, A SERVICE'S REMOVAL: the request it claims removes the definition, and the folder goes", async (t) => {
+  // The call site in bin/aify-env.mjs that joins the daemon's store to its session folders: a removal the service asks
+  // for arrives by DefinitionSync's claim, never by `agents remove`, so only this run reaches it.
+  const scratch = tempDir(t, "aify-session-request-daemon-");
+  const env = sealedDaemonEnv({ AIFY_SERVICE_REGISTRY: path.join(scratch, "services.json"),
+    AIFY_ENV_PROCESS_RECORD: path.join(scratch, "owned.json") });
+  const home = env.USERPROFILE;
+  const root = sessionsRoot(home);
+  for (const name of ["worker", "other"]) fs.mkdirSync(path.join(root, name), { recursive: true });
+  const store = new DefinitionStore({ dir: path.join(home, ".aify", "agent-definitions") });
+  await store.set("worker", agent("worker", home), { installed: INSTALLED });
+  await store.set("other", agent("other", home), { installed: INSTALLED });
+  const listed = await store.list();
+  const worker = listed.definitions.find((d) => d.id === "worker");
+  const removal = { id: "req-remove-worker", agentId: "worker", storeId: listed.storeId, patch: { remove: true },
+    expectedIncarnation: worker.incarnation, expectedRevision: worker.revision };
+
+  // The service: one removal on the first claim, a result taken, everything else answered empty.
+  const reports = [];
+  let claims = 0;
+  const service = createServer((request, response) => {
+    let text = "";
+    request.on("data", (chunk) => { text += chunk; });
+    request.on("end", () => {
+      const send = (status, body) => { response.writeHead(status, { "Content-Type": "application/json" }); response.end(JSON.stringify(body)); };
+      if (/\/definition-requests\/claim$/.test(request.url)) return send(200, { requests: claims++ === 0 ? [removal] : [] });
+      if (/\/definition-requests\/[^/]+\/result$/.test(request.url)) { reports.push(JSON.parse(text || "{}")); return send(200, {}); }
+      if (/\/(spawn-requests|lifecycle-requests|model-reads)\/claim$|\/terminals\/controls\/claim$/.test(request.url)) return send(200, { requests: [] });
+      return send(200, {});
+    });
+  });
+  await new Promise((resolve) => service.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => service.close(resolve)));
+  fs.writeFileSync(path.join(scratch, "services.json"), JSON.stringify({ version: 1,
+    services: { "aify-comms": { endpoint: `http://127.0.0.1:${service.address().port}` } } }));
+
+  const child = spawn(process.execPath, [DAEMON, "--port", "0"], { stdio: ["ignore", "pipe", "pipe"], env });
+  let output = "";
+  child.stdout.on("data", (chunk) => { output += chunk; });
+  child.stderr.on("data", (chunk) => { output += chunk; });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) await new Promise((resolve) => { child.on("exit", resolve); child.kill(); });
+  });
+  const deadline = Date.now() + 45_000;
+  while (fs.existsSync(path.join(root, "worker")) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(claims > 0, true, `the daemon never claimed a definition request. Daemon said:\n${output}`);
+  assert.deepEqual(reports.map((r) => r.status ?? r.result?.status), ["done"], `reports: ${JSON.stringify(reports)}\n${output}`);
+  assert.ok(!fs.existsSync(path.join(root, "worker")), `the service's removal left the folder. Daemon said:\n${output}`);
+  assert.ok(fs.existsSync(path.join(root, "other")), "CONTROL: the agent still defined kept its folder");
 });
