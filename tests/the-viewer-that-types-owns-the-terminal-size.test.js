@@ -17,7 +17,7 @@ import { Runner } from "../lib/runner.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
 import { PluginProcesses } from "../lib/service-plugins.mjs";
 import { CONTROL_FAILED, createHandleBook, runOneControl } from "../lib/plugins/aify-comms/terminal-controls.mjs";
-import { DASHBOARD_VIEWER, viewerOfControl } from "../lib/plugins/aify-comms/control-viewer.mjs";
+import { DASHBOARD_SURFACE_PREFIX, DASHBOARD_VIEWER, viewerOfControl } from "../lib/plugins/aify-comms/control-viewer.mjs";
 import { MAX_VIEWERS, TerminalSizeOwner, viewerFrom } from "../lib/terminal-size-owner.mjs";
 
 const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
@@ -246,4 +246,12 @@ test("an auto-answer through the real control path types without resizing the pa
 
   await send({ action: "input", body: "d", requestedBy: "dashboard:console" });
   assert.deepEqual(log.slice(4), ["resize 157x32", "write d"], "CONTROL: a key typed IN the dashboard still takes its size");
+});
+
+test("DASHBOARD_SURFACE_PREFIX is a namespace no agent id can enter, and every surface in it is the dashboard viewer", () => {
+  // aify-comms' agent ids are [A-Za-z0-9._-] (SAFE_NAME_RE); its own suite holds this export to that rule across repos.
+  const agentId = /^[A-Za-z0-9._-]+$/;
+  assert.equal(agentId.test(`${DASHBOARD_SURFACE_PREFIX}x`), false, "an agent could be named into the dashboard's namespace");
+  assert.equal(viewerOfControl({ requestedBy: `${DASHBOARD_SURFACE_PREFIX}console-2` }), DASHBOARD_VIEWER);
+  assert.equal(viewerOfControl({ requestedBy: "dashboard-manager" }), "", "CONTROL: an agent named like the dashboard is not it");
 });
