@@ -5,6 +5,13 @@ import { ActivityState } from '../../lib/plugins/aify-dashboard/activity-state.m
 const [raw, endpoint, box, who, mode] = process.argv.slice(2);
 const storage = new ActivityState({ directory: raw, endpoint });
 const signal = name => path.join(box, `${who}-${name}`);
+// A PHASE FILE APPEARS WHOLE OR NOT AT ALL (2026-10-28). The parent waits for the name to exist and then parses it, and
+// writeFileSync creates the file before it writes: a writer stalled in between, as on a host short of memory, handed
+// the parent an empty file and "Unexpected end of JSON input". Written beside it and renamed into place instead.
+const say = (name, text) => {
+  const file = signal(name), temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, text); fs.renameSync(temporary, file);
+};
 function wait(name) {
   const deadline = Date.now() + 20000;
   while (!fs.existsSync(signal(name))) {
@@ -16,7 +23,7 @@ const originalRead = fs.readFileSync;
 fs.readFileSync = function(file, ...args) {
   const value = originalRead.call(this, file, ...args);
   if (mode === 'stale' && file === path.join(storage.directory, 'lock')) {
-    fs.writeFileSync(signal('read'), 'real-read'); wait('recover');
+    say('read', 'real-read'); wait('recover');
   }
   return value;
 };
@@ -27,21 +34,21 @@ if (sealedRoot) {
     if (!path.resolve(process.env[key] ?? '').toLowerCase().startsWith(path.resolve(sealedRoot).toLowerCase())) throw new Error('fixture-environment');
   }
 }
-fs.writeFileSync(signal('ready'), JSON.stringify({ version: process.version, executable: process.execPath, sealed: Boolean(sealedRoot) }));
+say('ready', JSON.stringify({ version: process.version, executable: process.execPath, sealed: Boolean(sealedRoot) }));
 wait('go');
 let entered = false;
 try {
   storage.transaction(state => {
     entered = true;
-    fs.writeFileSync(signal('entered'), String(process.pid));
+    say('entered', String(process.pid));
     wait('finish');
     for (const source of Object.values(state.sources)) source.generation++;
     storage.save(state);
-    fs.writeFileSync(signal('saved'), 'saved');
+    say('saved', 'saved');
     if (mode === 'die-after-save') wait('close');
   });
-  fs.writeFileSync(signal('result'), JSON.stringify({ entered, ok: true }));
+  say('result', JSON.stringify({ entered, ok: true }));
 } catch (error) {
-  fs.writeFileSync(signal('result'), JSON.stringify({ entered, ok: false, error: error.message }));
+  say('result', JSON.stringify({ entered, ok: false, error: error.message }));
   process.exitCode = 2;
 }

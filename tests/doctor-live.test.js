@@ -79,6 +79,23 @@ function runDoctor(endpoint, registryPath) {
   });
 }
 
+/**
+ * The doctor's JSON report, or an error that says why there is none.
+ *
+ * "Unexpected end of JSON input" WAS ALL A FAILED RUN SAID (2026-10-28, doctor-live:217 on a host short of memory):
+ * the doctor printed nothing, and the exit status, signal and stderr that would have said why were thrown away. A
+ * failing doctor still prints a report, so the status is not asserted here; only a report that does not parse is.
+ */
+function reportOf(result) {
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`the doctor printed no report (${error.message}): status ${result.status}, signal ${result.signal}, `
+      + `spawn error ${result.error?.code ?? "none"}, stdout ${JSON.stringify(String(result.stdout ?? "").slice(-200))}, `
+      + `stderr ${JSON.stringify(String(result.stderr ?? "").slice(-800))}`);
+  }
+}
+
 test("BOTH DIRECTIONS: the environment check passes against a live one and fails without it", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doc-live-"));
   const registry = path.join(dir, "services.json");
@@ -87,7 +104,7 @@ test("BOTH DIRECTIONS: the environment check passes against a live one and fails
   let live;
   try {
     // POSITIVE. This is the half every other doctor test is missing.
-    live = JSON.parse(runDoctor(base, registry).stdout);
+    live = reportOf(runDoctor(base, registry));
     const check = live.checks.find((c) => c.id === "environment");
     assert.equal(check.state, "passed", `a live environment was not seen: ${check.detail}`);
     assert.match(check.detail, /127\.0\.0\.1/);
@@ -97,7 +114,7 @@ test("BOTH DIRECTIONS: the environment check passes against a live one and fails
 
   // NEGATIVE, same endpoint, same run. If the probe answered "passed" for a port nothing is on, the
   // positive above would have proved nothing at all.
-  const dead = JSON.parse(runDoctor(base, registry).stdout);
+  const dead = reportOf(runDoctor(base, registry));
   const deadCheck = dead.checks.find((c) => c.id === "environment");
   assert.equal(deadCheck.state, "failed", "the probe reported a stopped environment as running");
   assert.ok(deadCheck.fix.length > 0);
@@ -112,7 +129,7 @@ test("against a live environment, owned processes are reported as PASSED rather 
   const registry = path.join(dir, "services.json");
   const { child, base } = await startDaemon();
   try {
-    const report = JSON.parse(runDoctor(base, registry).stdout);
+    const report = reportOf(runDoctor(base, registry));
     const check = report.checks.find((c) => c.id === "processes");
     assert.equal(check.state, "passed", `processes read ${check.state}: ${check.detail}`);
     assert.match(check.detail, /0 process/);
@@ -137,7 +154,7 @@ test("a live environment plus an unreachable SERVICE gives passed AND unanswered
   const { child, base } = await startDaemon();
   try {
     const result = runDoctor(base, registry);
-    const report = JSON.parse(result.stdout);
+    const report = reportOf(result);
     const states = Object.fromEntries(report.checks.map((c) => [c.id, c.state]));
     assert.equal(states.environment, "passed");
     assert.equal(states["aify-comms"], "unanswered", "a silent service must not read as passed or failed");
@@ -160,7 +177,7 @@ test("PROVEN ON A REAL DAEMON: code-current passes, and the two identities it co
   const registry = path.join(dir, "services.json");
   const { child, base } = await startDaemon();
   try {
-    const report = JSON.parse(runDoctor(base, registry).stdout);
+    const report = reportOf(runDoctor(base, registry));
     const check = report.checks.find((c) => c.id === "code-current");
     assert.ok(check, "the report carried no code-current row");
     assert.equal(check.state, "passed",
@@ -214,7 +231,7 @@ test("NEGATIVE CONTROL, ON THE SAME REAL DAEMON: change the disk and the row goe
       "the BOOT build moved. It is the identity of what this process loaded and must not change while "
       + "it runs, or `did my restart take?` becomes unanswerable");
 
-    const report = JSON.parse(runDoctor(base, registry).stdout);
+    const report = reportOf(runDoctor(base, registry));
     const check = report.checks.find((c) => c.id === "code-current");
     assert.equal(check.state, "failed", `the disk changed and the row still read ${check.state}`);
     assert.match(check.fix, /reaps the managed workers/,
