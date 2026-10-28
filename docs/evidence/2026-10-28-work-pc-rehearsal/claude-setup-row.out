@@ -1,0 +1,19 @@
+== 1. no claude agent defined, claude never run
+doctor exit 0
+  passed skipped | no claude agents are defined or offered here and there are no claude credentials, so there is no login to age
+== 1b. no definition, but claude-aify on PATH (the rehearsal's ad-hoc case)
+doctor exit 0
+  failed not-set-up | Claude Code's first-run setup was never completed on this host, and claude-aify is installed, so this host offers claude agents to its services: each claude started here waits on its first screen, which asks for a theme
+  fix: Run `claude` once by hand in a terminal on this host: choose a theme, then log in.
+== 2. one managed claude agent defined, claude never run
+  defined probe
+doctor exit 0
+  failed not-set-up | Claude Code's first-run setup was never completed on this host, and 1 claude agent(s) are defined here (probe): each claude started here waits on its first screen, which asks for a theme
+  fix: Run `claude` once by hand in a terminal on this host: choose a theme, then log in.
+== 3. setup completed (hasCompletedOnboarding), no login
+doctor exit 0
+  failed no-login | no claude login on this host, and 1 claude agent(s) are defined here (probe): no claude agent can work here until someone logs in
+  fix: Run `claude` once by hand in a terminal on this host: choose a theme, then log in.
+== 4. and a login fixture good for 240h
+doctor exit 0
+  passed ok | the claude login is good for Nh. The access token has Nh left and renews itself.

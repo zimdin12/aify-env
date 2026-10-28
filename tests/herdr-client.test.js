@@ -9,7 +9,14 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { sealedDaemonEnv } from './_sealed-daemon-env.mjs';
-import { attachCommand, endpoint, socketPath, selectWorker, detectHerdr, openWorker, HerdrClient, listWorkers } from '../lib/herdr.mjs';
+import { attachCommand, endpoint, socketPath, selectWorker, detectHerdr, openWorker, HerdrClient, listWorkers, unsupportedPlatform } from '../lib/herdr.mjs';
+
+test('off Windows the refusal names the command that works there, herdr-aify env', () => {
+  // Seen 2026-10-28 in the work-PC rehearsal (docs/evidence/2026-10-28-work-pc-rehearsal): on Linux the refusal named
+  // nothing to do instead.
+  for (const platform of ['linux', 'darwin']) assert.match(unsupportedPlatform(platform), /herdr-aify env/, platform);
+  assert.equal(unsupportedPlatform('win32'), '', 'the control: Windows is not refused');
+});
 
 test('endpoint and socket validation fail closed before network activity', () => {
   for (const value of ['', 'http://example.com:8802', 'http://127.0.0.1:1/path', 'http://u:p@127.0.0.1:1', 'http://127.1:8802', 'http://127.0.0.1:70000']) assert.throws(() => endpoint(value));

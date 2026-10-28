@@ -77,6 +77,20 @@ test("with no service registered, only the core's own rows are asked", async () 
   assert.deepEqual(rows.map((row) => row.id), ["claude-login", "gateway-orphans"]);
 });
 
+test("claude-login is asked about the claude agents defined here and the claude launcher offered", async () => {
+  // The row fails a never-set-up claude only where claude is wanted, so both reasons must reach it.
+  const asked = [];
+  const listing = { definitions: [{ id: "a", agent: { harness: "claude" } }, { id: "b", agent: { harness: "codex" } }], unreadable: [] };
+  for (const [definitions, launchers] of [[listing, []], [null, [{ client: "codex" }, { client: "claude" }]]]) {
+    await collectHostChecks({
+      services: [], endpoint: "e", knock: async () => ({}), machineId: "m", listProcesses: () => [], gatewayRecords: () => [],
+      credentialFor: async () => "", definitions, harnesses: () => launchers,
+      claudeLogin: (input) => { asked.push(input); return { id: "claude-login" }; },
+    });
+  }
+  assert.deepEqual(asked, [{ claudeAgents: ["a"], claudeLauncher: false }, { claudeAgents: null, claudeLauncher: true }]);
+});
+
 test("the registry maps aify-comms to its doctor rows, and nothing else to any", () => {
   assert.equal(doctorChecksFor("aify-comms"), commsDoctorChecks);
   assert.equal(doctorChecksFor("aify-dashboard"), null);
@@ -280,6 +294,18 @@ test("the doctor's report ends with the host rows, given the registry's services
   assert.deepEqual(given.services.map((service) => service.name), ["aify-comms"]);
   assert.equal(given.endpoint, "http://127.0.0.1:1");
   assert.equal(given.roots, null, "no aify-env answered, so its roots are unknown, not empty");
+});
+
+test("the definitions reach the host rows even when no aify-env answers", async () => {
+  // claude-login needs them most on a host where nothing is running yet.
+  let given = null;
+  const listing = { definitions: [{ id: "a", agent: { harness: "claude" } }], unreadable: [] };
+  await collectEnvironmentChecks({
+    ...quiet,
+    listDefinitions: async () => listing,
+    hostChecks: async (input) => { given = input; return []; },
+  });
+  assert.equal(given.definitions, listing);
 });
 
 test("the roots the running aify-env reports reach the host rows", async () => {

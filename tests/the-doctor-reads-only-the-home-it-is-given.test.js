@@ -16,6 +16,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { freshHome, sealedDoctorEnv, writeClaudeLogin } from "./_sealed-doctor-env.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -24,21 +25,45 @@ const PROBE = pathToFileURL(path.join(HERE, "_home-read-probe.mjs")).href;
 const NOWHERE = "http://127.0.0.2:1";
 const HOUR = 3_600_000;
 
+/**
+ * `env` with PATH stripped of every directory holding a claude-aify launcher, and `launcherDir` first when given.
+ * claude-aify on PATH means this host offers claude, which the claude-login row reads, so the operator's own
+ * launcher must not decide a sealed doctor's row. One PATH key: Windows spells it Path, and two would race.
+ */
+function withLaunchers(env, launcherDir) {
+  const key = Object.keys(env).find((name) => name.toUpperCase() === "PATH");
+  const kept = String(env[key] ?? "").split(path.delimiter).filter((dir) => {
+    try { return !fs.readdirSync(dir).some((name) => name.startsWith("claude-aify")); } catch { return true; }
+  });
+  const sealed = { ...env };
+  for (const name of Object.keys(sealed)) if (name.toUpperCase() === "PATH") delete sealed[name];
+  return { ...sealed, PATH: [launcherDir, ...kept].filter(Boolean).join(path.delimiter) };
+}
+
+/** A directory holding a claude-aify launcher that carries the wrapper marker, and nothing that runs. */
+function claudeLauncherDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doctor-launcher-"));
+  fs.writeFileSync(path.join(dir, "claude-aify"), '#!/bin/sh\nHARNESS_WRAPPER_VERSION="1"\nexit 64\n');
+  return dir;
+}
+
 /** Run the doctor sealed into `home`, optionally recording reads under `watch`. */
-function doctor(home, { watch = [] } = {}) {
+function doctor(home, { watch = [], launcherDir = "" } = {}) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doctor-seal-"));
   const log = path.join(scratch, "reads.log");
   fs.writeFileSync(log, "");
   const res = spawnSync(process.execPath, ["--import", PROBE, DOCTOR, "--json"], {
     encoding: "utf8",
     timeout: 60_000,
-    env: sealedDoctorEnv({
+    env: withLaunchers(sealedDoctorEnv({
       AIFY_SERVICE_REGISTRY: path.join(scratch, "no-registry.json"),
       AIFY_ENV_ENDPOINT: NOWHERE,
       AIFY_PROBE_TIMEOUT_MS: "300",
       AIFY_TEST_WATCH_DIRS: watch.join(path.delimiter),
       AIFY_TEST_WATCH_LOG: log,
-    }, { home }),
+      ANTHROPIC_API_KEY: "",
+      CLAUDE_CODE_OAUTH_TOKEN: "",
+    }, { home }), launcherDir),
   });
   assert.equal(res.status, 0, `the doctor did not run: ${res.stderr}`);
   const reads = fs.readFileSync(log, "utf8").split("\n").filter(Boolean);
@@ -58,10 +83,32 @@ test("each claude-login code comes from the fixture in the home it is given", ()
     assert.equal(row.code, code, `fixture expiring at ${new Date(stamp).toISOString()}: ${row.detail}`);
     assert.equal(row.state, state);
   }
-  // ABSENT: a home with no claude login is not applicable here, whatever the operator's login holds.
-  const { row } = doctor(freshHome());
+  // ABSENT: a home with no claude login and no claude agent is not applicable here, whatever the operator's
+  // login holds. Asking found no definitions store, and the doctor made none.
+  const home = freshHome();
+  const { row } = doctor(home);
   assert.equal(row.code, "skipped");
   assert.match(row.detail, /no claude credentials/);
+  assert.ok(!fs.existsSync(path.join(home, ".aify", "agent-definitions")), "the doctor made a definitions store");
+});
+
+test("a claude agent defined in a home where claude was never set up fails the row", async () => {
+  // The 2026-10-28 work-PC rehearsal: this row passed while a managed claude sat on its first screen.
+  const home = freshHome();
+  const store = new DefinitionStore({ dir: path.join(home, ".aify", "agent-definitions") });
+  await store.set("probe", { id: "probe", name: "probe", role: "worker", harness: "claude", mode: "managed", workspace: home,
+    model: "", effort: "", instructions: "", env: {}, herdrSpace: false }, { installed: new Set(["claude"]) });
+  const { row } = doctor(home);
+  assert.equal(row.code, "not-set-up", row.detail);
+  assert.equal(row.state, "failed");
+  assert.match(row.detail, /\(probe\)/);
+});
+
+test("claude-aify on PATH with claude never set up fails the row, with no definition at all", () => {
+  // The rehearsal's own case: its agent was an ad-hoc `aify-env run --launcher claude-aify`, defined nowhere.
+  const { row } = doctor(freshHome(), { launcherDir: claudeLauncherDir() });
+  assert.equal(row.code, "not-set-up", row.detail);
+  assert.match(row.detail, /claude-aify is installed/);
 });
 
 test("CONTROL: the probe records the credentials read under the home it watches", () => {

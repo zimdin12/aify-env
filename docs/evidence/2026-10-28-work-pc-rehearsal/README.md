@@ -45,6 +45,16 @@ before it ran (sha256 `bf83668c…93dd`); the container ran exactly those bytes.
    nothing is left.
 9. **`aify-herdr-pane install`** links the restore plugin, and `herdr plugin list` shows it enabled.
 
+## Since
+
+- **Finding 4 has a doctor row.** `claude-login` now fails with `not-set-up` when claude is wanted on the host
+  (a claude agent defined, or `claude-aify` on PATH, as here) and `~/.claude.json` has no
+  `hasCompletedOnboarding: true`, and with `no-login` when setup was done but nobody logged in. The fix it names:
+  run `claude` once by hand. `claude-setup-row.sh` -> `claude-setup-row.out` walks the five states in a throwaway
+  node:22 container with the dev worktree mounted read-only:
+  `docker run --rm --init -v <worktree>:/repo:ro -v <script>:/probe.sh:ro -u node node:22-bookworm bash /probe.sh`.
+- **Finding 7's refusal names what works off Windows:** `herdr-aify env`.
+
 ## Not shown here
 
 - WSL itself: its init, `/mnt/c` paths, Windows-side `claude` logins and `WSLENV` are not in a container.

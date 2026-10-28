@@ -88,11 +88,16 @@ const checks = await collectEnvironmentChecks({
   terminalSupport,
   readCredentialStore: () => listCredentialStore(credentialRoot()),
   readInvocationRegistries: () => liveInvocationRegistries(HERDR_PROFILE),
-  listDefinitions: () => new DefinitionStore().list(),
-  hostChecks: ({ services, endpoint, roots }) => collectHostChecks({
+  // list() makes the store's folders, so a host that has none is answered as having no definitions.
+  listDefinitions: () => {
+    const store = new DefinitionStore();
+    return store.exists() ? store.list() : { definitions: [], unreadable: [], conflict: null, enumerationFailed: null };
+  },
+  hostChecks: ({ services, endpoint, roots, definitions }) => collectHostChecks({
     services,
     endpoint,
     roots,
+    definitions,
     knock,
     machineId: machineIdFor({ platform: process.platform, hostname: hostname(), env: process.env, isWsl: hostIsWsl() }),
     listProcesses: () => listHostProcesses(),

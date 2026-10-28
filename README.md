@@ -417,7 +417,9 @@ What `--help` does not say, and belongs here:
 - **`aify-env doctor --json`** gives `{summary, counts, exitCode, checks:[{id, state, detail, fix}]}`.
   The host rows that moved here from `aify-comms doctor` in aify-comms 0.9.7 (aify-env 0.9.4) carry a `code` as well, the one they
   had there: `env-processes`, `context-window` and `managed-orphans` (from the aify-comms plugin, when
-  aify-comms is registered), `claude-login`, and `code-current` (`current`, `stale`, `unknown`), which
+  aify-comms is registered), `claude-login` (`ok`, `expiring`, `expired`; and where claude is wanted here, meaning
+  a claude agent is defined or `claude-aify` is on PATH, `not-set-up` when claude's first-run setup was never
+  done and `no-login` when nobody logged in), and `code-current` (`current`, `stale`, `unknown`), which
   answers what `env-code-currency` asked. A row that does not apply here passes with code `skipped`.
 - **`aify-env registry check <file|--stdin>`** is what a registry writer asks before publishing: it checks the
   fields aify-env reads that aify-wrapper's parser drops (every `*CredentialRef`, cross-service collisions,

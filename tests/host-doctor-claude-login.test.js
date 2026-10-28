@@ -19,6 +19,8 @@ import {
   CLAUDE_LOGIN_OK,
   CLAUDE_LOGIN_UNKNOWN,
   CLAUDE_REFRESH_WARN_HOURS,
+  claudeAgentIds,
+  claudeConfigPath,
   claudeLoginCheck,
   claudeCredentialsPath,
   claudeLoginStateAt,
@@ -103,12 +105,14 @@ test("AN UNREADABLE STAMP IS UNKNOWN, NEVER EXPIRED", () => {
   }
 });
 
-test("the ROW passes as not applicable, with code skipped, when the file is absent", () => {
-  // Not a failure and not unanswered: a host with no claude login is not broken and has no question
-  // here. The code keeps it distinguishable from a measured pass.
+test("the ROW passes as not applicable, with code skipped, when the file is absent and no claude agent is defined", () => {
+  // Not a failure and not unanswered: a codex- or hermes-only host with no claude login is not broken
+  // and has no question here. The code keeps it distinguishable from a measured pass.
   const row = claudeLoginCheck({
     readFile: () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); },
     now: () => NOW,
+    claudeAgents: [],
+    env: {},
   });
   assert.equal(row.id, "claude-login");
   assert.equal(row.state, "passed", "a host with no claude login was reported as a failure");
@@ -155,4 +159,108 @@ test("it reads the file claude keeps, under the home it is given", () => {
   claudeLoginCheck({ home: "/home/op", readFile: (path) => { read.push(path); return "{}"; }, now: () => NOW });
   assert.deepEqual(read, [join("/home/op", ".claude", ".credentials.json")]);
   assert.equal(claudeCredentialsPath("/home/op"), join("/home/op", ".claude", ".credentials.json"));
+});
+
+// NEVER SET UP. The 2026-10-28 work-PC rehearsal (docs/evidence/2026-10-28-work-pc-rehearsal) started a
+// managed claude agent on a host where nobody had ever run claude: it sat on "Choose the text style" with
+// nobody to answer, and this row passed with "no claude credentials on this host, so there is no login to age".
+const ENOENT = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+/** A readFile over a fixture home holding `files` by basename; anything else is absent. */
+const homeWith = (files) => (path) => {
+  const name = Object.keys(files).find((key) => path.endsWith(key));
+  return name === undefined ? ENOENT() : files[name];
+};
+const SET_UP = JSON.stringify({ hasCompletedOnboarding: true });
+const LOGGED_IN = JSON.stringify(creds({ refreshTokenExpiresAt: hours(500) }));
+
+test("CLAUDE AGENTS DEFINED AND CLAUDE NEVER STARTED: the row FAILS and names the fix", () => {
+  const row = claudeLoginCheck({ readFile: homeWith({}), now: () => NOW, claudeAgents: ["probe"], env: {}, platform: "linux" });
+  assert.equal(row.state, "failed");
+  assert.equal(row.code, "not-set-up");
+  assert.match(row.detail, /first-run setup was never completed/);
+  assert.match(row.detail, /1 claude agent\(s\) are defined here \(probe\)/);
+  assert.match(row.fix, /Run `claude` once by hand/);
+});
+
+test("a config claude wrote on a first start that went no further is still not set up, login or none", () => {
+  // Claude writes ~/.claude.json before the theme is chosen; only hasCompletedOnboarding says it was.
+  const started = JSON.stringify({ firstStartTime: "2026-10-28T04:30:00.000Z", numStartups: 1 });
+  for (const files of [{ ".claude.json": started }, { ".claude.json": started, ".credentials.json": LOGGED_IN }]) {
+    const row = claudeLoginCheck({ readFile: homeWith(files), now: () => NOW, claudeAgents: ["probe"], env: {}, platform: "linux" });
+    assert.equal(row.code, "not-set-up", `with ${Object.keys(files).join(", ")}: ${row.detail}`);
+  }
+});
+
+test("SET UP BUT NEVER LOGGED IN, with claude agents defined, FAILS too; it does not pass on 'no login to age'", () => {
+  const row = claudeLoginCheck({
+    readFile: homeWith({ ".claude.json": SET_UP }), now: () => NOW, claudeAgents: ["a", "b", "c", "d", "e"], env: {}, platform: "win32",
+  });
+  assert.equal(row.state, "failed");
+  assert.equal(row.code, "no-login");
+  assert.match(row.detail, /5 claude agent\(s\) are defined here \(a, b, c and 2 more\)/);
+  assert.match(row.fix, /Run `claude` once by hand/);
+});
+
+test("CONTROL: set up and logged in, the row ages the login exactly as before", () => {
+  const row = claudeLoginCheck({
+    readFile: homeWith({ ".claude.json": SET_UP, ".credentials.json": LOGGED_IN }), now: () => NOW, claudeAgents: ["probe"], env: {}, platform: "linux",
+  });
+  assert.equal(row.state, "passed");
+  assert.equal(row.code, CLAUDE_LOGIN_OK);
+});
+
+test("claude-aify installed is reason enough, with no claude agent defined", () => {
+  // aify-env advertises claude when its launcher is on PATH, so a service routes claude spawns here.
+  const never = claudeLoginCheck({ readFile: homeWith({}), now: () => NOW, claudeAgents: [], claudeLauncher: true, env: {}, platform: "linux" });
+  assert.equal(never.code, "not-set-up");
+  assert.match(never.detail, /claude-aify is installed, so this host offers claude agents/);
+  const unread = claudeLoginCheck({ readFile: homeWith({ ".claude.json": SET_UP }), now: () => NOW, claudeAgents: null, claudeLauncher: true, env: {}, platform: "linux" });
+  assert.equal(unread.code, "no-login", "unread definitions do not hide the launcher's reason");
+});
+
+test("a codex- or hermes-only host never set claude up and is not broken", () => {
+  const row = claudeLoginCheck({ readFile: homeWith({}), now: () => NOW, claudeAgents: [], env: {}, platform: "linux" });
+  assert.equal(row.state, "passed");
+  assert.equal(row.code, "skipped");
+});
+
+test("definitions that could not be read leave a missing login UNANSWERED, not passed", () => {
+  const row = claudeLoginCheck({ readFile: homeWith({}), now: () => NOW, claudeAgents: null, env: {}, platform: "linux" });
+  assert.equal(row.state, "unanswered");
+  assert.match(row.detail, /agent definitions could not be read/);
+});
+
+test("on macOS the login is in the Keychain, so an absent file is unanswered rather than failed", () => {
+  const row = claudeLoginCheck({ readFile: homeWith({ ".claude.json": SET_UP }), now: () => NOW, claudeAgents: ["probe"], env: {}, platform: "darwin" });
+  assert.equal(row.state, "unanswered");
+  assert.match(row.detail, /Keychain/);
+});
+
+test("a login from the environment is named by its variable and never by its value", () => {
+  const row = claudeLoginCheck({
+    readFile: homeWith({ ".claude.json": SET_UP }), now: () => NOW, claudeAgents: ["probe"], env: { ANTHROPIC_API_KEY: "sk-ant-SECRET-DO-NOT-PRINT" }, platform: "linux",
+  });
+  assert.equal(row.code, "skipped");
+  assert.match(row.detail, /ANTHROPIC_API_KEY/);
+  assert.ok(!/SECRET-DO-NOT-PRINT/.test(row.detail));
+});
+
+test("an unparseable ~/.claude.json is not read as 'never set up'", () => {
+  // claude-trust-roots reports that file as unreadable; this row does not turn it into a setup verdict.
+  const row = claudeLoginCheck({
+    readFile: homeWith({ ".claude.json": "{not json", ".credentials.json": LOGGED_IN }), now: () => NOW, claudeAgents: ["probe"], env: {}, platform: "linux",
+  });
+  assert.equal(row.code, CLAUDE_LOGIN_OK);
+  assert.equal(claudeConfigPath("/home/op"), join("/home/op", ".claude.json"));
+});
+
+test("claudeAgentIds: the claude harness only, and null when the listing cannot say there are none", () => {
+  const reading = (id, harness) => ({ id, agent: { id, harness } });
+  const listing = (definitions, more = {}) => ({ definitions, unreadable: [], conflict: null, enumerationFailed: null, ...more });
+  assert.deepEqual(claudeAgentIds(listing([reading("a", "claude"), reading("b", "codex"), reading("c", "claude")])), ["a", "c"]);
+  assert.deepEqual(claudeAgentIds(listing([reading("b", "hermes")])), []);
+  assert.equal(claudeAgentIds(listing([reading("b", "hermes")], { unreadable: ["x.json"] })), null);
+  assert.equal(claudeAgentIds(listing([], { enumerationFailed: "EACCES" })), null);
+  assert.deepEqual(claudeAgentIds(listing([reading("a", "claude")], { unreadable: ["x.json"] })), ["a"]);
+  assert.equal(claudeAgentIds(null), null);
 });
