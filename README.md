@@ -200,6 +200,22 @@ A changed model reaches each agent at its next start, including a Claude session
 
 Status is still not here: alive is not working, and turn status belongs to the service.
 
+### Dialogs it answers for a managed agent
+
+The first time claude starts in a folder with no trusted ancestor, it asks "Is this a project you trust?" with the
+cursor on **No, exit**. For a managed claude it starts, aify-env answers that dialog on the screen: one Down, then
+Enter once the cursor is on **Yes, I trust this folder**. Claude then records the trust itself. aify-env never writes
+`~/.claude.json`. Each answer can be switched off in `~/.aify/config.json`, and an edit applies without a restart:
+
+```json
+{ "plugins": { "aify-comms": { "autoConfirm": { "folderTrust": false } } } }
+```
+
+A missing file, section or key leaves the answer on. A section that cannot be read, or a value that is not `true` or
+`false`, turns it off. `aify-env doctor` shows what is in force (`auto-confirm`), and says whether claude already
+trusts the folders this host runs work in (`claude-trust-roots`). Trusting a root once, by opening claude in it and
+choosing Yes, covers every folder below it.
+
 ## Starting a second one takes over
 
 `aify-env` supersedes the environment already running: it stops the incumbent and takes the port. That

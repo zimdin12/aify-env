@@ -27,20 +27,24 @@ test("each plugin's reader asks for its own registry name, on every call", () =>
 
 test("a section is an object under plugins[name]; anything else is no section, with the reason", () => {
   // The bug: a malformed file or section read as a configuration, when a plugin may treat a value in it as a grant.
+  // The third column: nobody wrote a section (a plugin's defaults stand), or one was written and cannot be read.
   const rows = [
-    ["", /does not exist or is empty/],
-    ["{ not json", /is not JSON/],
-    ["{}", /has no plugins\["svc"\] section/],
-    ['{"plugins": []}', /has no plugins\["svc"\] section/],
-    ['{"plugins": {"other": {}}}', /has no plugins\["svc"\] section/],
-    ['{"plugins": {"svc": [1]}}', /plugins\["svc"\] in ~\/\.aify\/config\.json is not an object/],
-    ['{"plugins": {"svc": "x"}}', /is not an object/],
-    ['{"plugins": {"svc": null}}', /is not an object/],
+    ["", /does not exist or is empty/, true],
+    ["{ not json", /is not JSON/, false],
+    ["{}", /has no plugins\["svc"\] section/, true],
+    ['{"plugins": []}', /has no plugins\["svc"\] section/, false],
+    ['{"plugins": "x"}', /has no plugins\["svc"\] section/, false],
+    ["[]", /has no plugins\["svc"\] section/, false],
+    ['{"plugins": {"other": {}}}', /has no plugins\["svc"\] section/, true],
+    ['{"plugins": {"svc": [1]}}', /plugins\["svc"\] in ~\/\.aify\/config\.json is not an object/, false],
+    ['{"plugins": {"svc": "x"}}', /is not an object/, false],
+    ['{"plugins": {"svc": null}}', /is not an object/, false],
   ];
-  for (const [text, why] of rows) {
+  for (const [text, why, absent] of rows) {
     const read = pluginConfigFrom(text, "svc");
     assert.equal(read.config, null, text);
     assert.match(read.problem, why, text);
+    assert.equal(read.absent === true, absent, text);
   }
   assert.deepEqual(pluginConfigFrom('{"plugins": {"svc": {"a": 1}, "other": {"b": 2}}}', "svc"), { config: { a: 1 }, problem: "" });
 });
@@ -48,6 +52,10 @@ test("a section is an object under plugins[name]; anything else is no section, w
 test("the file is read from the home it is given, and a missing one is no section", () => {
   const home = mkdtempSync(join(tmpdir(), "aify-plugin-config-"));
   assert.match(readPluginConfig({ name: "svc", home }).problem, /does not exist or is empty/);
+  assert.equal(readPluginConfig({ name: "svc", home }).absent, true);
+  // A file that is there and cannot be read is not absent: somebody wrote it.
+  const locked = readPluginConfig({ name: "svc", home, readFile: () => { throw Object.assign(new Error("denied"), { code: "EACCES" }); } });
+  assert.deepEqual([locked.config, locked.absent, /could not be read: EACCES/.test(locked.problem)], [null, undefined, true]);
   const file = hostConfigPath(home);
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify({ plugins: { svc: { providerCheckout: "C:/apg" } } }));
