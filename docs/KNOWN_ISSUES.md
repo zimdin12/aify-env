@@ -3,12 +3,14 @@
 What is known to be wrong or unproven, with the evidence it rests on. An entry leaves when it is fixed or attributed,
 and says which.
 
-## `lib/agent-definitions.mjs` is 848 lines: next to split (noted for 0.9.9)
+## `lib/agent-definitions.mjs` is 663 lines after its split: still past the 400-line signal (0.9.9)
 
-Past the 400-line signal since 0.9.9 added `readOnlySummary()`, the view's lock-free read. The read lives in the store
-because only the store may name its folder (`tests/agent-definitions-have-one-writer.test.js`), so the split has to
-keep that gate: the lock, recovery and adoption are the separable parts, with the folder still named in one place.
-Not in 0.9.9 (comms-tech-lead, 2026-10-28).
+It was 848 when 0.9.9 added the view's read-only summary. Two subjects other code needs have left it: that read
+(`lib/definition-summary.mjs`, 57) and the lock with the process probe it judges holders by (`lib/definition-lock.mjs`,
+182; process-probe.mjs and serving-endpoint.mjs imported `processState` from the store), with the store's two errors in
+`lib/definition-errors.mjs`. What remains is the store's own job: its public calls, recovery, adoption and the
+four-step operation. Recovery and adoption are the next separable parts if it grows; each must keep the folder named
+here alone (`tests/agent-definitions-have-one-writer.test.js`).
 
 ## "Unexpected end of JSON input" in two unrelated live tests (seen 2026-10-28; one fixed, one instrumented)
 

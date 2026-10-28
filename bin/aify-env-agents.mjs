@@ -17,7 +17,8 @@ import { LifecycleJournal } from "../lib/agent-lifecycle.mjs";
 import { ResidentStarts } from "../lib/resident-starts.mjs";
 
 import { installedHarnesses } from "../lib/advertise.mjs";
-import { DefinitionRefused, DefinitionStore, DefinitionStoreError } from "../lib/agent-definitions.mjs";
+import { DefinitionStore } from "../lib/agent-definitions.mjs";
+import { DefinitionRefused, DefinitionStoreError } from "../lib/definition-errors.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { DECISION, definitionCheck, importPlan, parsePrefer, planLines } from "../lib/agent-import.mjs";
 import { actualModel } from "../lib/actual-model.mjs";

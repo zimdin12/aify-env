@@ -11,7 +11,9 @@ import path from "node:path";
 import test from "node:test";
 
 import { definitionBytesProblems, MAX_COUNTER } from "../lib/agent-definition-schema.mjs";
-import { DefinitionRefused, DefinitionStore, DefinitionStoreError, processAlive, processState } from "../lib/agent-definitions.mjs";
+import { DefinitionStore } from "../lib/agent-definitions.mjs";
+import { DefinitionRefused, DefinitionStoreError } from "../lib/definition-errors.mjs";
+import { processAlive, processState } from "../lib/definition-lock.mjs";
 
 const ALL = new Set(["claude", "codex", "hermes"]);
 const agent = (over = {}) => ({

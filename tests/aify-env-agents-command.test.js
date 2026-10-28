@@ -115,7 +115,7 @@ test("SET MANY end to end: before and after, nothing written without --yes, then
 
 test("SET MANY writes each agent only as it was read: one changed in between is not overwritten", async () => {
   const { runAgents } = await import("../bin/aify-env-agents.mjs");
-  const { DefinitionRefused } = await import("../lib/agent-definitions.mjs");
+  const { DefinitionRefused } = await import("../lib/definition-errors.mjs");
   const asked = [];
   const store = {
     list: async () => ({ definitions: [{ id: "a", incarnation: 3, revision: 7, agent: { harness: "claude", model: "" } }],
