@@ -9,6 +9,7 @@
  * credential, what every service knows of this machine's agents. A dry run unless `--write`.
  */
 
+import { existsSync } from "node:fs";
 import process from "node:process";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +21,8 @@ import { DefinitionRefused, DefinitionStore, DefinitionStoreError } from "../lib
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { DECISION, definitionCheck, importPlan, parsePrefer, planLines } from "../lib/agent-import.mjs";
 import { actualModel } from "../lib/actual-model.mjs";
-import { importableAgents } from "../lib/client-actions.mjs";
+import { forgetSessionFolder, importableAgents } from "../lib/client-actions.mjs";
+import { sessionFolderLine, sessionsRoot } from "../lib/session-folders.mjs";
 import { findEnvEndpoint } from "../lib/serving-endpoint.mjs";
 
 const EOL = String.fromCharCode(10);
@@ -161,7 +163,7 @@ function conflictLines(conflict) {
 
 /** Run one parsed intent against a store. Returns the lines to print and the exit code. */
 export async function runAgents(intent, { store, installed, unlock = () => DefinitionStore.unlock(), importable = null,
-  actual = actualModel, residentStarts = null }) {
+  actual = actualModel, residentStarts = null, sessionFolder = null }) {
   if (intent.verb === "resident-start-binding") {
     const captured = await residentStarts?.capture(intent.id, intent.harness, intent.producer);
     return !captured || captured.refused
@@ -203,7 +205,10 @@ export async function runAgents(intent, { store, installed, unlock = () => Defin
     return { code: EXIT_OK, lines: [`${result.id}: incarnation ${result.incarnation} revision ${result.revision}`] };
   }
   const removed = await store.remove(intent.id);
-  return { code: EXIT_OK, lines: [`${removed.id} removed to .trash/${removed.trashName}`] };
+  // The running aify-env decides whether the agent's session folder can go now (lib/session-folders.mjs).
+  const folder = sessionFolder ? sessionFolderLine(removed.id, await sessionFolder(removed.id),
+    existsSync(join(sessionsRoot(homedir()), removed.id))) : "";
+  return { code: EXIT_OK, lines: [`${removed.id} removed to .trash/${removed.trashName}`, ...(folder ? [folder] : [])] };
 }
 
 /**
@@ -329,6 +334,10 @@ async function main() {
       importable: async () => {
         const found = await findEnvEndpoint();
         return found.problem ? { problem: found.problem, services: [] } : importableAgents({ endpoint: found.endpoint });
+      },
+      sessionFolder: async (agentId) => {
+        const found = await findEnvEndpoint();
+        return found.problem ? { problem: found.problem } : forgetSessionFolder({ endpoint: found.endpoint, agentId });
       } });
     process.stdout.write(lines.join(EOL) + EOL);
     process.exitCode = code;

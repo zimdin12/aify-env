@@ -81,6 +81,7 @@ import { readServices, registryIsReadable } from "../lib/services.mjs";
 import { ServicePlugins } from "../lib/service-plugins.mjs";
 import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
+import { SessionFolders, sessionsRoot } from "../lib/session-folders.mjs";
 import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
 import { AgentStateSender, REPORT_EVERY_MS } from "../lib/agent-state-sender.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
@@ -309,7 +310,8 @@ const runner = new Runner({ ownedFile: OWNED_FILE,
 const servicePlugins = new ServicePlugins();
 // THIS HOST'S AGENT DEFINITIONS (P0 C3, C4, C7, C10), shared by the plugins and `/agents/importable`. Made
 // outside the statements the bootstrap tests evaluate, so those hand the plugin a stand-in, never this one.
-const definitionStore = new DefinitionStore();
+// A removed definition may leave a session folder to remove (lib/session-folders.mjs).
+const definitionStore = new DefinitionStore({ onRemoved: (id) => agentState?.sessionFolders?.notice(id) });
 
 /**
  * WHERE THIS HOST WILL RUN WORK: the directory it was started in, and below.
@@ -453,6 +455,7 @@ const server = createServer(createDaemonHttp({
         gateways: agentState?.gateways,
         stateHost: agentState?.host ?? null,
         lifecycle: agentState?.lifecycle ?? null,
+        sessionFolders: agentState?.sessionFolders ?? null,
         residents: agentState?.residents?.report() ?? null,
         observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
         inputSocket: inputSocketAddress,
@@ -661,7 +664,7 @@ server.listen(port, HOST, async () => {
   const bound = server.address();
   const support = terminalSupport();
   try { agentState = bootDaemonAgentState({ aifyHome: join(homedir(), ".aify"), context: instanceContext,
-    url: `http://${HOST}:${bound.port}`, report: logLine });
+    url: `http://${HOST}:${bound.port}`, report: logLine, onAgentEnded: (id) => agentState?.sessionFolders?.notice(id) });
     agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine, onApplied: evaluateAgentState });
     agentState.lifecycle = createAgentLifecyclePorts({ aifyHome: join(homedir(), ".aify"), owner: agentState.lifecycleOwner,
       machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(),
@@ -670,6 +673,9 @@ server.listen(port, HOST, async () => {
       installed: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) });
   }
   catch (error) { process.stderr.write(`[aify-env] agent state boot failed: ${error.message}\n`); process.exit(2); }
+  agentState.sessionFolders = new SessionFolders({ root: sessionsRoot(homedir()), definitions: definitionStore,
+    identity: agentState.lifecycle.rawIdentity, report: logLine });
+  void agentState.sessionFolders.reconcile().catch((error) => logLine(`session folders: ${error?.message || error}`));
   // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
   // reapLeftovers.
   if (instanceContext) {

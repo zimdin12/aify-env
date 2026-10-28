@@ -8,6 +8,7 @@ import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
 import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
+import { SessionFolders, sessionsRoot } from "../lib/session-folders.mjs";
 let AgentStateSender, REPORT_EVERY_MS;
 try { ({ AgentStateSender, REPORT_EVERY_MS } = await import("../lib/agent-state-sender.mjs")); }
 catch (e) { if (e.code !== "ERR_MODULE_NOT_FOUND") throw e; }
@@ -54,7 +55,7 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
       return lifecycle;
     },
     AgentTurnEvents, server: { address: () => ({ port: 0 }) }, terminalSupport: () => ({ available: true }),
-    join: path.join, homedir: () => home, HOST: "127.0.0.1", instanceContext: context,
+    join: path.join, homedir: () => home, HOST: "127.0.0.1", instanceContext: context, SessionFolders, sessionsRoot,
     logLine: () => {}, definitionStore: definitions,
     reapLeftovers: async () => events.push("reap"), process: fakeProcess,
     startInputSocket: async () => null, HOST_CONFIG: { localSocket: false }, handleRequest: () => {}, runner: { instance: () => "fixture-runner" }, BUILD: "fixture-build",
