@@ -42,7 +42,13 @@ function exportedNames(source) {
   return [...names];
 }
 
-const libFiles = fs.readdirSync(LIB).filter((n) => n.endsWith(".mjs"));
+// EVERY MODULE UNDER lib/, AT ANY DEPTH (0.9.8b). This read lib/*.mjs alone, so the plugins, the panes and the view's
+// parts -- 75 modules, 245 exports, 67 of them named by no test -- were outside a gate that says "every lib module".
+// Paths are relative to lib/, with forward slashes, which is how the orphan list names them.
+const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory()
+  ? walk(path.join(dir, entry.name))
+  : entry.name.endsWith(".mjs") ? [path.relative(LIB, path.join(dir, entry.name)).split(path.sep).join("/")] : []));
+const libFiles = walk(LIB);
 const testSource = fs.readdirSync(TESTS)
   .filter((n) => n.endsWith(".js") || n.endsWith(".mjs"))
   .map((n) => fs.readFileSync(path.join(TESTS, n), "utf8"))
@@ -66,6 +72,13 @@ test("POSITIVE CONTROL: the extractor finds what is unmistakably in allowlist.mj
   const names = exportedNames(fs.readFileSync(path.join(LIB, "allowlist.mjs"), "utf8"));
   for (const expected of ["mayExecute", "markerOf"]) {
     assert.ok(names.includes(expected), `the extractor missed ${expected}; it can no longer see`);
+  }
+});
+
+test("POSITIVE CONTROL: the walk reaches modules below lib/, and the gate reads them", () => {
+  // The walk is what this gate's reach depends on; a walk that stopped descending would shrink it back to lib/*.mjs.
+  for (const expected of ["plugins/aify-comms/doctor-checks.mjs", "tui-panes/roster.mjs", "console-session/subjects.mjs"]) {
+    assert.ok(libFiles.includes(expected), `the walk missed lib/${expected}`);
   }
 });
 

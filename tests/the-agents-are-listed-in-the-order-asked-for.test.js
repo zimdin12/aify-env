@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { ROW_SORTS, attentionRank, sortRows } from "../lib/tui-panes/row-order.mjs";
+import { DEFAULT_ROW_SORT, ROW_SORTS, attentionRank, sortRows } from "../lib/tui-panes/row-order.mjs";
 import { layoutFrom, readLayout } from "../lib/tui-layout.mjs";
 import { initialFocus, routeKey } from "../lib/keys.mjs";
 import { ConsoleSession } from "../lib/console-session.mjs";
@@ -113,4 +113,12 @@ test("THROUGH THE VIEW: rows by name, `o` to attention and back, each kept in tu
     Object.assign(process.env, saved);
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("DEFAULT_ROW_SORT is a sort that exists, and an unknown sort is it", () => {
+  // tui-layout.mjs falls back to it; a default naming no sort would order every row by whatever ROW_SORTS[undefined] did.
+  assert.ok(Object.hasOwn(ROW_SORTS, DEFAULT_ROW_SORT));
+  const records = { bravo: { state: "error" } };
+  assert.deepEqual(labels(sortRows(rows("charlie", "bravo"), records, "no-such-sort")),
+    labels(sortRows(rows("charlie", "bravo"), records, DEFAULT_ROW_SORT)));
 });

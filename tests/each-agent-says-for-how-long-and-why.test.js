@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 
 import { renderDashboard, width } from "../lib/tui.mjs";
 import { layoutFrom } from "../lib/tui-layout.mjs";
-import { stateSuffix } from "../lib/tui-panes/agent-columns.mjs";
+import { stateSuffix, statusWord } from "../lib/tui-panes/agent-columns.mjs";
+import { statusCell } from "../lib/tui-parts.mjs";
 
 const NOW_MS = 1_000_000_000;
 const minutesAgoUs = (minutes) => (NOW_MS - minutes * 60_000) * 1000;
@@ -83,4 +84,12 @@ test("THE TITLE GETS THE ROOM: a 73-character title shows at least 59 of them at
   };
   assert.ok(shown(100) >= 59, `only ${shown(100)} of 73 at 100 columns`);
   assert.equal(shown(140), 73, "the control: a wide terminal shows the whole title");
+});
+
+test("statusWord: the word the dot stands for, then the same suffix the dot gets", () => {
+  // The roster and the extended `status-word` column both read this; the dot alone (`status`) drops the word.
+  const record = { state: "working", turn: { open: true, startedAtUs: minutesAgoUs(12) } };
+  assert.equal(statusWord(record, NOW_MS, false), `${statusCell("working", false)} ${stateSuffix(record, NOW_MS)}`);
+  assert.match(statusWord(record, NOW_MS, false), /working 12m$/);
+  assert.equal(statusWord({ state: "idle" }, NOW_MS, false), statusCell("idle", false), "CONTROL: with no suffix, no trailing space");
 });

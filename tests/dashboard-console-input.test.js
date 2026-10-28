@@ -569,3 +569,34 @@ test("PROGRESS THAT ARRIVES AFTER stop() DRAWS NOTHING", async () => {
   assert.equal(frames.length, afterStop,
     "a frame was written after stop(); it would land over the shutdown output");
 });
+
+// TWO RULES OF startDashboard's OWN that no test reached until 0.9.8b's mutants asked (both equally unprobed before it).
+
+test("a resize to the SAME size still repaints the whole frame", async () => {
+  // The previous frame is no description of a screen that was resized under it; a diff against it writes nothing.
+  const writes = [];
+  const view = await start(new FakeInput(), { clearScreen: true, write: (text) => writes.push(text), processEvents: null });
+  const before = writes.length;
+  view.resize({ columns: 120, rows: 20 });
+  view.stop();
+  assert.ok(writes.slice(before).some((text) => text.length > 0 && !text.startsWith(String.fromCharCode(27) + "[?2004l")),
+    "a resize to the same size wrote no frame");
+});
+
+test("a frame that fails to write REVOKES input, so the next key is not sent to a screen nobody sees", async () => {
+  const sent = [];
+  const input = new FakeInput();
+  let failing = false;
+  const view = await start(input, { clearScreen: true, processEvents: null,
+    write: () => { if (failing) throw new Error("terminal gone"); },
+    onInput: (target, data) => sent.push([target?.id, data]) });
+  input.emit("data", ENTER);
+  await new Promise((r) => setTimeout(r, 120));
+  input.emit("data", "a");
+  assert.deepEqual(sent, [["p1", "a"]], "positive control: the attached pane was not live before the failure");
+  failing = true;
+  view.resize({ columns: 120, rows: 20 });
+  input.emit("data", "b");
+  view.stop();
+  assert.deepEqual(sent, [["p1", "a"]], "a key reached the process after the frame showing it failed to write");
+});

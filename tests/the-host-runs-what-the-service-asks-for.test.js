@@ -23,6 +23,8 @@ import {
   TERMINAL_ENDED,
   createHandleBook,
   launchEnv,
+  preparedEnv,
+  prepareTerminalLaunch,
   runOneControl,
   runTerminalControlPass,
 } from "../lib/plugins/aify-comms/terminal-controls.mjs";
@@ -1229,4 +1231,31 @@ test("a failure to stop the orphan still forgets it, so the pass cannot loop on 
   await passWith(apiWithMissingTerminal(), { handles: book, processes, log: (m) => logs.push(String(m)), quietFor: LONG_SILENCE });
   assert.equal(book.handleFor("term-1"), "");
   assert.ok(logs.some((l) => /could not stop the orphaned worker/.test(l)));
+});
+
+test("preparedEnv: the service's overlay wins over this host's env, a name it unsets is gone, and a defined start asks the plugins", async () => {
+  const launch = { env: { AIFY_AGENT_ID: "lead" }, unsetEnv: ["CLAUDE_CODE_CHILD_SESSION"] };
+  const base = { AIFY_AGENT_ID: "inherited", PATH: "/bin", claude_code_child_session: "1" };
+  assert.deepEqual(await preparedEnv({ launch, baseEnv: base }), { env: { AIFY_AGENT_ID: "lead", PATH: "/bin" } });
+  let asked = 0;
+  const spawnEnv = () => { asked += 1; return [{}]; };
+  const defined = await preparedEnv({ launch: { ...launch, definition: { revision: 1 }, agentId: "lead" }, baseEnv: base, spawnEnv });
+  assert.equal(asked, 1, "a defined start was prepared without asking the plugins what they add");
+  assert.ok(defined.refused, "a defined start with contributors and no definition store must be refused, not started bare");
+});
+
+test("prepareTerminalLaunch: each refusal says why, and the first launcher the spec builder accepts is the one built", () => {
+  const base = { terminalId: "t1", cwdRoots: ["C:/w"], windows: true, withinRoots: (cwd) => cwd.startsWith("C:/w"),
+    resolveCandidates: () => ["C:/bin/a.cmd", "C:/bin/a.exe"],
+    buildSpec: ({ launcher, env }) => (launcher.endsWith(".cmd") ? { error: { detail: "no marker" } } : { launcher, env }) };
+  const launch = { argv: ["claude-aify", "--x"], cwd: "C:/w/p", agentId: "lead" };
+  assert.deepEqual(prepareTerminalLaunch({ ...base, launch, env: { A: "1" } }), { built: { launcher: "C:/bin/a.exe", env: { A: "1" } } });
+  assert.match(prepareTerminalLaunch({ ...base, launch: { ...launch, definition: {} }, env: null }).detail, /carries no prepared environment/);
+  assert.ok(prepareTerminalLaunch({ ...base, launch: { ...launch, definition: {} }, env: {} }).built, "an empty env map is legal");
+  assert.equal(prepareTerminalLaunch({ ...base, launch: { ...launch, cwd: "D:/x" }, env: {} }).rootRefusal, true);
+  assert.match(prepareTerminalLaunch({ ...base, launch: { ...launch, argv: [] }, env: {} }).detail, /only a command string/);
+  assert.match(prepareTerminalLaunch({ ...base, resolveCandidates: () => [], launch, env: {} }).detail, /does not resolve/);
+  const refused = prepareTerminalLaunch({ ...base, buildSpec: () => ({ error: { detail: "refused" } }), launch, env: {} });
+  assert.equal(refused.launcherRefusal, true);
+  assert.match(refused.detail, /a\.cmd: refused; .*a\.exe: refused/, "every file looked at is named");
 });

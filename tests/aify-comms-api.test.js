@@ -12,6 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ADVERTISEMENT_PATH,
   CLAIM_WAIT_MS,
   CLAIM_TIMEOUT_MS,
   CommsApi,
@@ -222,4 +223,12 @@ test("the definition calls send what the service's routes take", async () => {
     // by name, never whatever agent id sits in the environment.
     ["POST", "/agents/lead/control", { action: "start", from_agent: "aify-env" }],
   ]);
+});
+
+test("ADVERTISEMENT_PATH is the route the claimer heartbeat posts to, so the host's two beats reach one place", async () => {
+  // The host's advertiser builds no route of its own (lib/plugins/index.mjs); a path that drifted from the claimer's
+  // would describe the host somewhere the service never reads it.
+  const f = fakeFetch();
+  await api(f).heartbeat({});
+  assert.equal(new URL(f.calls[0].url).pathname, ADVERTISEMENT_PATH);
 });

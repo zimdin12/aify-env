@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { fromVerdict } from "../lib/health.mjs";
-import { autoConfirmVerdict, claudeTrustRootsVerdict } from "../lib/plugins/aify-comms/auto-confirm-checks.mjs";
+import { autoConfirmVerdict, checkAutoConfirm, claudeTrustRootsVerdict } from "../lib/plugins/aify-comms/auto-confirm-checks.mjs";
 
 const claude = (projects) => JSON.stringify({ projects });
 const row = (verdict) => fromVerdict("x", verdict);
@@ -72,4 +72,19 @@ test("claude-trust-roots: unknown roots or an unreadable claude config is UNANSW
   ]) {
     assert.equal(row(claudeTrustRootsVerdict({ ...facts, folderTrustOn: true, windows: true })).state, "unanswered", JSON.stringify(facts));
   }
+});
+
+test("checkAutoConfirm adds both rows, and the trust row reads the folderTrust switch from the same config", () => {
+  const added = [];
+  const add = (name, ok, code) => added.push([name, ok, code]);
+  const config = (folderTrust) => () => ({ config: { autoConfirm: { folderTrust } }, problem: "" });
+  checkAutoConfirm({ add, roots: ["C:/w"], config: config(false), readClaudeConfig: () => claude({}), windows: true });
+  assert.deepEqual(added.map(([name]) => name), ["auto-confirm", "claude-trust-roots"]);
+  assert.equal(added[1][2], "untrusted", "the switch the auto-confirm row read did not reach the trust row");
+  added.length = 0;
+  checkAutoConfirm({ add, roots: ["C:/w"], config: config(true), readClaudeConfig: () => claude({}), windows: true });
+  assert.equal(added[1][2], "answered", "CONTROL: the same untrusted root with the switch on is answered");
+  added.length = 0;
+  checkAutoConfirm({ add, roots: ["C:/w"], config: config(true), readClaudeConfig: () => { throw new Error("ENOENT"); }, windows: true });
+  assert.equal(added[1][2], "unknown-claude-config", "an unreadable ~/.claude.json must be said, not thrown");
 });

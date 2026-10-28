@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { HARNESS_RUNTIME } from "../lib/agent-definition-requests.mjs";
 import { DECISION, definitionCheck, importPlan, parsePrefer, planLines } from "../lib/agent-import.mjs";
-import { importRecord, importRecords } from "../lib/plugins/aify-comms/agent-import-records.mjs";
+import { HARNESS_OF_RUNTIME, importRecord, importRecords } from "../lib/plugins/aify-comms/agent-import-records.mjs";
 
 const agent = (over = {}) => ({ name: "Lead", role: "coder", harness: "claude", mode: "managed", workspace: "C:/w",
   model: "opus", effort: "", instructions: "", env: {}, herdrSpace: true, ...over });
@@ -142,4 +142,9 @@ test("PROVENANCE: absent and null are unreported and written neutral; an explici
   assert.deepEqual(effort({}), ["", true]);
   const lines = planLines(importPlan({ reports: [{ service: "aify-comms", agents: [{ id: "a", ...absent }] }], defined: [], check: () => [] })).join("\n");
   assert.match(lines, /not reported by aify-comms: model \(written as ""\), effort \(written as ""\), instructions \(written as ""\), env \(written as \{\}\)/);
+});
+
+test("HARNESS_OF_RUNTIME is HARNESS_RUNTIME inverted, so both directions read one table", () => {
+  for (const [harness, runtime] of Object.entries(HARNESS_RUNTIME)) assert.equal(HARNESS_OF_RUNTIME[runtime], harness);
+  assert.equal(Object.keys(HARNESS_OF_RUNTIME).length, Object.keys(HARNESS_RUNTIME).length, "two harnesses share one runtime");
 });
