@@ -12,6 +12,16 @@ It was 848 when 0.9.9 added the view's read-only summary. Two subjects other cod
 four-step operation. Recovery and adoption are the next separable parts if it grows; each must keep the folder named
 here alone (`tests/agent-definitions-have-one-writer.test.js`).
 
+## The attach-client test's process crashed natively in two full runs (seen 2026-10-28; unattributed)
+
+`tests/an-attach-client-names-itself-as-a-viewer.test.js` failed at file level in 2 of 3 full runs of the 0.9.9
+definition-binding change: exit code 3 once, after both its subtests had passed, and 3221225477 (0xC0000005, an access
+violation) once. It passed in the third run, alone 3 times in 3, and in both full runs of main (ce78e2e) on the same
+host the same afternoon. The test drives `bin/aify-env-attach.mjs` in a real terminal through node-pty (ConPTY), with
+the test's environment plus two endpoint variables; nothing in that change reaches it. Other repositories' suites
+(aify-wrapper, aify-comms, planetary_golf) were running at the same time. ASSUMED: a ConPTY fault under load,
+unattributed. A crash with the host otherwise idle would make it this repository's to chase.
+
 ## "Unexpected end of JSON input" in two unrelated live tests (seen 2026-10-28; one fixed, one instrumented)
 
 Two causes behind one message, found by reading each failure's stack in the recorded runs. Both parsed an empty input.
