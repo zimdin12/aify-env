@@ -9,7 +9,7 @@ import { buildStartSpec } from '../lib/start-spec.mjs';
 import { workspaceWithinRoots } from '../lib/plugins/aify-comms/claim.mjs';
 
 const request = { id: 'r', agentId: 'a', machineId: 'm', storeId: 's', expectedIncarnation: 2,
-  expectedRevision: 3, expectedLifetime: null, action: 'start' };
+  expectedRevision: 3, expectedLifetime: null, action: 'start', requestedBy: 'operator' };
 const agent = { id: 'a', mode: 'managed', harness: 'hermes' };
 const launcher = 'C:/sealed/wrapper';
 const launch = { agentId: 'a', runtime: 'hermes', terminalId: 't', argv: [launcher, '--session', 'native'],

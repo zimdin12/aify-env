@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCommsPlugin } from '../lib/plugins/aify-comms/index.mjs';
 import { REQUEST_POLL_MS } from '../lib/plugins/aify-comms/definition-sync.mjs';
+import { LIFECYCLE_ACTIONS } from '../lib/agent-lifecycle.mjs';
 
-const row = { id: 'request-1', agentId: 'agent-1', action: 'stop', expectedLifetime: 'life-1' };
+const row = { id: 'request-1', agentId: 'agent-1', machineId: 'machine-1', storeId: 'store-1', expectedIncarnation: 1, expectedRevision: 1,
+  action: 'stop', expectedLifetime: 'life-1', requestedBy: 'operator' };
 const result = { status: 'done', outcome: 'stop', resultLifetime: null, finishedAt: '2026-10-07T00:00:00Z' };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 async function flush() { for (let i = 0; i < 40; i++) await Promise.resolve(); }
@@ -32,7 +34,7 @@ function fixture({ claim, execute, report, agents = true, advertisement } = {}) 
 test('plugin.start claims lifecycle requests, executes exact row and reports exact result', async () => {
   const f = fixture();
   await f.plugin.start(f.host); await flush();
-  assert.deepEqual(f.calls.claims, [['test:host:default', 'machine-1']]);
+  assert.deepEqual(f.calls.claims, [['test:host:default', 'machine-1', [...LIFECYCLE_ACTIONS]]]);
   assert.deepEqual(f.calls.executions, [row]);
   assert.deepEqual(f.calls.reports, [['test:host:default', 'request-1', 'machine-1', result]]);
   assert.deepEqual(f.plugin.state().lifecycle, { requestsHandled: 1, lastError: '', accepted: true });
