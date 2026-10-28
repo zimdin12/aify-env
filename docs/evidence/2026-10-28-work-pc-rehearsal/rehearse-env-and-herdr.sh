@@ -11,6 +11,9 @@
 #   KEEP=1 leaves the containers up for a look; run again without it to tear down.
 #   AIFY_ENV_TARBALL=<npm pack of an aify-env commit> installs that aify-env through the same chain
 #   (AIFY_INSTALL_ENV_SOURCE), in place of GitHub's main: how a release candidate is rehearsed before its tag.
+#   herdr-aify is aify-wrapper's, installed globally by aify-env's installer from GitHub's main at install time, NOT
+#   from aify-comms' pin (that copy is the bridge's). Re-pinning the bridge to another wrapper commit is refused, and
+#   rightly: aify-wrapper-connect finds package.json and package-lock.json no longer match the bridge's manifest.
 set -uo pipefail
 export MSYS_NO_PATHCONV=1
 S="${REHEARSE_DIR:?set REHEARSE_DIR to a scratch directory}"
@@ -112,8 +115,9 @@ in_c 'cd ~/new && bash scripts/herdr-state.sh --probe 2>&1 | head -5'
 say "7. aify-env herdr on Linux"
 in_c 'export PATH="$HOME/.local/bin:$PATH"; timeout 10 aify-env herdr > /tmp/eh.out 2>&1; echo "aify-env herdr exit $?"; cat /tmp/eh.out'
 
-say "8. herdr-aify env: first with no terminal size, then attached again in a 120x40 one, then stopped"
-in_c 'export PATH="$HOME/.local/bin:$PATH"; timeout 25 script -qfec "herdr-aify env" /dev/null > ~/hae.typescript 2>&1; echo "herdr-aify env exit $?"; sed "s/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\x1b[()][A-Z0-9]//g; s/\x1b[=>]//g" ~/hae.typescript | tr -s " \r" | grep -a -E "^(herdr|herdr-aify):" | head -8; echo "--- running after it returned:"; ps -eo args | grep -E "^(/home/node/.local/bin/herdr server|node /usr/local/bin/aify-env --instance-context)" || echo none; echo "--- herdr-aify --status:"; herdr-aify --status 2>&1 | grep -E "invocation|spent"'
+say "8. herdr-aify env: refused with no terminal size, started with --no-attach, attached in a 120x40 one, then stopped"
+in_c 'export PATH="$HOME/.local/bin:$PATH"; timeout 25 script -qfec "herdr-aify env" /dev/null > ~/hae.typescript 2>&1; echo "herdr-aify env (0x0 terminal) exit $?"; sed "s/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\x1b[()][A-Z0-9]//g; s/\x1b[=>]//g" ~/hae.typescript | tr -s " \r" | grep -a -E "herdr" | head -6; echo "--- running after it returned:"; ps -eo args | grep -E "^(/home/node/.local/bin/herdr server|node /usr/local/bin/aify-env --instance-context)" || echo none'
+in_c 'export PATH="$HOME/.local/bin:$PATH"; timeout 25 herdr-aify env --no-attach > ~/hae-na.out 2>&1; echo "herdr-aify env --no-attach exit $?"; tail -3 ~/hae-na.out; sleep 3; echo "--- running:"; ps -eo args | grep -E "^(/home/node/.local/bin/herdr server|node /usr/local/bin/aify-env --instance-context)" || echo none; echo "--- herdr-aify --status:"; herdr-aify --status 2>&1 | grep -E "invocation|spent|current|serving"'
 in_c 'export PATH="$HOME/.local/bin:$PATH"; timeout 15 script -qfec "stty cols 120 rows 40; herdr-aify env" /dev/null > ~/hae2.typescript 2>&1; echo "second herdr-aify env exit $? (124: still attached at the 15 s timeout)"; sed "s/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\x1b[()][A-Z0-9]//g; s/\x1b[=>]//g" ~/hae2.typescript | tr -s " \r" | grep -a -o -E "herdr-aify: attaching[^\x1b]{0,40}|aify-env [0-9][^ ]*|terminals [a-z]+" | sort -u'
 in_c 'export PATH="$HOME/.local/bin:$PATH"; herdr-aify env --stop 2>&1 | tail -2; sleep 3; echo "--- left running:"; ps -eo args | grep -E "^(/home/node/.local/bin/herdr server|node /usr/local/bin/aify-env --instance-context)" || echo none'
 

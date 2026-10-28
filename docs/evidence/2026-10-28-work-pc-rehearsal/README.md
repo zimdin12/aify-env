@@ -61,6 +61,29 @@ before it ran (sha256 `bf83668c…93dd`); the container ran exactly those bytes.
 - A logged-in agent doing work; the restore plugin across a real reboot; hermes on Linux.
 - Herdr inside a real terminal emulator: the attach was observed through `script` in a 120x40 pseudo-terminal.
 
+## Step 8 again, after aify-wrapper fixed it (2026-10-28, later)
+
+aify-wrapper 4a41952 made `herdr-aify env` refuse a terminal with no size, and 83f5712 added `current` and `serving` to
+`--status`. Step 8 now asks for the new contract. `rehearse-env-and-herdr-step8.out` is the run, with aify-comms
+68b7f0e4's chain and aify-env from GitHub's main (512a72d). The chain completed.
+
+| Check | Result |
+|---|---|
+| `herdr-aify env` in a 0x0 `script` terminal | exit 2, "cannot attach: the terminal has no size (0x0); nothing was started", naming `--no-attach`; nothing left running |
+| `herdr-aify env --no-attach` | exit 0, started headless; `herdr server` and `aify-env --instance-context` running |
+| `herdr-aify --status` | `spent: true`, `current: true`, `serving: true` for that invocation |
+| attach in a 120x40 terminal, then `--stop` | attaches to the running instance; stop confirmed gone; nothing left running |
+
+**Which aify-wrapper.** `herdr-aify` is installed globally by aify-env's installer ("installing aify-wrapper
+(github:zimdin12/aify-wrapper)"), from GitHub's main at install time. The run does not record that sha. Its `--status`
+fields put it at 83f5712 or later, and main read 25ba554 before the run and 8f8096b after it. aify-comms' own wrapper
+pin (c4818238) is the bridge's copy, a different install.
+
+**A rig input that was tried and removed:** re-pinning the container's aify-comms copy to a newer wrapper. The chain
+refused it and ended "not complete": `aify-wrapper-connect: comms-bridge ... does not match its manifest (2):
+package-lock.json hashes ..., not its manifest line`. The bridge's integrity check doing its job against an edited
+package. The run without it is the one above.
+
 ## Reproduce
 
 ```bash
