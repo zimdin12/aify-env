@@ -57,3 +57,19 @@ test("an inherited binding never reaches the child: replaced by the admitted one
     }
   }
 });
+
+test("a start with no agent never carries a binding, whether the spec's env or the inherited one holds it", () => {
+  const stray = { AIFY_DEFINITION_INCARNATION: "3", aify_definition_revision: "17", PATH: "/bin" };
+  const named = childEnv({ env: stray });
+  assert.deepEqual(Object.keys(named).sort(), ["PATH"], "a spec's stray pair reached a start with no agent");
+  const saved = { ...process.env };
+  try {
+    Object.assign(process.env, { AIFY_DEFINITION_INCARNATION: "3", AIFY_DEFINITION_REVISION: "17" });
+    const inherited = childEnv({});
+    assert.ok(inherited, "CONTROL: an inherited pair makes the env explicit, so it can be cleaned");
+    assert.ok(!Object.keys(inherited).some((key) => BINDING_CARRIERS.includes(key.toUpperCase())), "aify-env's own pair reached a start with no agent");
+  } finally {
+    for (const name of BINDING_CARRIERS) if (!(name in saved)) delete process.env[name];
+  }
+  assert.equal(childEnv({}), undefined, "CONTROL: with no pair anywhere an unset env stays unset, inherited as before");
+});
