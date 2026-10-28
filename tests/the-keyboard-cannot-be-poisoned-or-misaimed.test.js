@@ -192,8 +192,11 @@ test("AND ON A PANE THAT IS ALREADY FOLLOWING SOMETHING, which is where the reco
   s.handleInput(ESC + "[B");                       // cursor to p2
   s.handleInput("m");                              // menu bound to p2
   assert.equal(s.actionTargetId, "p2", "positive control: the menu did not bind a subject");
-  s.syncProcesses(FLEET.slice(1));                 // p1 exits; the pane follows p3 now
-  assert.equal(s.watchedId, "p3", "positive control: the pane really did shift under the cursor");
+  s.syncProcesses(FLEET.slice(1));                 // p1 exits
+  // SINCE 0.9.7 THE CURSOR STAYS ON ITS AGENT when rows shift (console-session.mjs, for `o`'s reordering), so the
+  // pane no longer drifts to p3 here: the drift this test was written against is now unreachable this way, and the
+  // menu's subject and the cursor agree. Before 0.9.7 this line read "p3", the shift the review found.
+  assert.equal(s.watchedId, "p2", "the cursor left its agent when the list shifted");
   const result = s.handleInput(ENTER);             // Enter on `attach`
   assert.equal(result.action, "attach");
   assert.equal(s.selected?.id, "p2", "the keyboard went to the agent the MENU named");

@@ -268,6 +268,7 @@ decisions rather than bindings.
 | `m` | actions for the selected agent |
 | `s` | start an agent this host knows that has no worker: the list replaces the table, typing searches it, arrows move, Enter starts, Tab switches whether the highlighted agent gets a herdr space from its next start (aify-comms keeps the setting) |
 | `v` | more or fewer columns in the agents list: the status word, id, pid, service, io and uptime are in the extended set; kept in `~/.aify/tui.json` |
+| `o` | the agents by name (the default), or what needs looking at first: blocked and unknown, then working, then the rest; kept in `~/.aify/tui.json` as `sort` |
 | `c` | the pane menu: each pane's letter (`s` services, `h` health, `a` agents, `r` roster, `x` exits, `n` notices, `t` traffic) collapses it to its heading or expands it; kept in `~/.aify/tui.json` |
 | `ctrl+]` | back, from anywhere |
 | `ctrl+l` | redraw the screen, if anything has smeared it (outside an attached pane, where it is the agent's) |
@@ -314,7 +315,7 @@ trustworthy baseline exists, it says so rather than showing a reconstruction tha
 
 ### Its layout: `~/.aify/tui.json` (0.9.6)
 
-The view's own file, read when the view starts. `v` and the pane menu write it; the rest is edited by hand:
+The view's own file, read when the view starts. `v`, `o` and the pane menu write it; the rest is edited by hand:
 
 ```json
 {"version": 1,
@@ -322,6 +323,7 @@ The view's own file, read when the view starts. `v` and the pane menu write it; 
  "hidden": ["traffic"],
  "collapsed": ["health"],
  "extended": false,
+ "sort": "name",
  "columns": {"agents": {"normal": ["cursor", "status", "agent", "out", "title"],
                         "extended": ["#", "status-word", "agent", "out", "id", "pid", "service", "io", "up", "title"]}}}
 ```
@@ -332,9 +334,10 @@ The view's own file, read when the view starts. `v` and the pane menu write it; 
   names are `id`, `pid`, `service`, `io`, `up`, `status` and `status-word`.
 - `status` is the agent's dot and, after it, how long it has been in that state (`● 12m`), or why, when the state
   needs looking at (`● folder-trust` for a blocked agent). `status-word` adds the word: `● working 12m`.
+- `sort` is the agents table's row order: `name`, or `attention` (blocked and unknown first, then working).
 
 Every field is optional. A file that cannot be read, or names something unknown, does not stop the view: it draws
-the defaults, or the parts it could use, and says what is wrong under its header. `v` and `c` never rewrite such a
+the defaults, or the parts it could use, and says what is wrong under its header. `v`, `o` and `c` never rewrite such a
 file, so a typo in a hand edit is not lost to a keypress.
 
 ## Why it exists
