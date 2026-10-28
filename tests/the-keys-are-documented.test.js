@@ -163,13 +163,13 @@ console.log("the-keys-are-documented.test.js: all assertions passed");
 const widthsToCheck = [30, 40, 60, 80, 100, 140];
 
 /** The hint line at a given width, or "" if none was drawn. */
-function hintAt(columns) {
+function hintAt(columns, extended = true) {
   // THE EXTENDED COLUMNS (0.9.6), where the rows are numbered: the default view offers no `1-9 jump`, so only here
   // does the line carry every hint and the drop order below have all of them to choose between.
   const lines = renderDashboard(SNAPSHOT, {
     columns, color: false, keys: { enabled: true, canQuit: true },
     view: { rows: SNAPSHOT.processes, selected: 0, mode: "dashboard", query: "", paneHidden: true },
-    layout: layoutFrom(JSON.stringify({ extended: true })),
+    layout: layoutFrom(JSON.stringify({ extended })),
   });
   return lines.find((line) => line.includes("quit") || line.includes("start")) || "";
 }
@@ -220,6 +220,15 @@ test("THE UNDISCOVERABLE KEYS OUTLAST THE OBVIOUS ONES", () => {
   for (const piece of ["↑↓ move", "1-9 jump", "g find", "enter attach", "m actions", "s start", "q quit"]) {
     assert.ok(wide.includes(piece), `a wide terminal is missing ${piece}: ${JSON.stringify(wide)}`);
   }
+});
+
+test("ATTACHING OUTLASTS THE PANE MENU, and is on the default 100-column line as it was before `c`", () => {
+  // Attaching is what the list is for; `c panes` is a setting used once and remembered (0.9.6 review). The default
+  // columns, because they are what an operator first sees: there `enter attach` holds from 100 columns up.
+  const ordinary = hintAt(100, false);
+  assert.match(ordinary, /enter attach/, `attach was dropped at 100 columns: ${JSON.stringify(ordinary)}`);
+  assert.doesNotMatch(ordinary, /c panes/, "both fit, so this width proves nothing about which goes first");
+  assert.match(hintAt(140, false), /c panes/, "the control: given room, the pane menu is offered");
 });
 
 test("THE HINT NEVER EXCEEDS THE TERMINAL, which is what a wrapped row costs here", () => {

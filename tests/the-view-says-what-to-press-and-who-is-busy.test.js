@@ -100,8 +100,7 @@ test("the DAEMON'S view does not offer `q`, and the client's does", () => {
   // only mean stopping the environment, and that is Ctrl+C's job, held to one key nobody presses by
   // accident. Offering `q` there would be the screen advertising a way to reap the fleet.
   const daemon = render({}, { keys: { enabled: true, canQuit: false } });
-  // `actions`, NOT `attach`: attach is among the first a narrow line drops, and at this width it went in 0.9.6.
-  assert.match(daemon, /actions/, "the daemon lost its hint line entirely");
+  assert.match(daemon, /attach/, "the daemon lost its hint line entirely");
   assert.doesNotMatch(daemon, /\bq\b\s*quit|quit/, "the daemon's view offered a quit key");
 
   const client = render({}, { keys: { enabled: true, canQuit: true } });
