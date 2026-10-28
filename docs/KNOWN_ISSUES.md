@@ -3,6 +3,13 @@
 What is known to be wrong or unproven, with the evidence it rests on. An entry leaves when it is fixed or attributed,
 and says which.
 
+## `lib/agent-definitions.mjs` is 848 lines: next to split (noted for 0.9.9)
+
+Past the 400-line signal since 0.9.9 added `readOnlySummary()`, the view's lock-free read. The read lives in the store
+because only the store may name its folder (`tests/agent-definitions-have-one-writer.test.js`), so the split has to
+keep that gate: the lock, recovery and adoption are the separable parts, with the folder still named in one place.
+Not in 0.9.9 (comms-tech-lead, 2026-10-28).
+
 ## "Unexpected end of JSON input" in two unrelated live tests (seen 2026-10-28; one fixed, one instrumented)
 
 Two causes behind one message, found by reading each failure's stack in the recorded runs. Both parsed an empty input.
