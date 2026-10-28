@@ -89,9 +89,10 @@ const checks = await collectEnvironmentChecks({
   readCredentialStore: () => listCredentialStore(credentialRoot()),
   readInvocationRegistries: () => liveInvocationRegistries(HERDR_PROFILE),
   listDefinitions: () => new DefinitionStore().list(),
-  hostChecks: ({ services, endpoint }) => collectHostChecks({
+  hostChecks: ({ services, endpoint, roots }) => collectHostChecks({
     services,
     endpoint,
+    roots,
     knock,
     machineId: machineIdFor({ platform: process.platform, hostname: hostname(), env: process.env, isWsl: hostIsWsl() }),
     listProcesses: () => listHostProcesses(),

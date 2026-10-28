@@ -52,15 +52,20 @@ test("only a registered service whose plugin answers adds rows, and the core's o
     listProcesses: () => [], gatewayRecords: () => [],
     credentialFor: async (service) => `key-for-${service.name}`,
     claudeLogin: () => ({ id: "claude-login", state: "passed", detail: "", fix: "", code: "skipped" }),
+    roots: ["C:/w"],
+    readConfig: ({ name }) => ({ config: { for: name }, problem: "" }),
     doctorChecksFor: (name) => (name === "aify-comms"
       ? async (deps) => {
-        asked.push({ endpoint: deps.service.endpoint, key: await deps.credential(), env: deps.envEndpoint, machine: deps.machineId });
+        asked.push({ endpoint: deps.service.endpoint, key: await deps.credential(), env: deps.envEndpoint, machine: deps.machineId,
+          roots: deps.roots, config: deps.config() });
         return [{ id: "from-comms", state: "passed", detail: "", fix: "" }];
       }
       : null),
   });
   assert.deepEqual(rows.map((row) => row.id), ["from-comms", "claude-login", "gateway-orphans"]);
-  assert.deepEqual(asked, [{ endpoint: "http://c", key: "key-for-aify-comms", env: "http://127.0.0.1:8802", machine: "win32:host" }]);
+  // The roots the doctor was given, and the plugin's OWN config section, by its registry name.
+  assert.deepEqual(asked, [{ endpoint: "http://c", key: "key-for-aify-comms", env: "http://127.0.0.1:8802", machine: "win32:host",
+    roots: ["C:/w"], config: { config: { for: "aify-comms" }, problem: "" } }]);
 });
 
 test("with no service registered, only the core's own rows are asked", async () => {
@@ -113,11 +118,16 @@ test("the comms rows arrive in order, each with its id, state and code", async (
       consoles: { worker: { live: true, output: " │ 922.4k/900k │ " } },
       bridges: [{ id: LIVE_BRIDGE }],
     })),
+    roots: ["C:/w"],
+    config: () => ({ config: null, problem: "~/.aify/config.json does not exist or is empty", absent: true }),
+    readClaudeConfig: () => JSON.stringify({ projects: { "C:/w": { hasTrustDialogAccepted: true } } }),
   });
   assert.deepEqual(rows.map((row) => [row.id, row.state, row.code]), [
     ["env-processes", "passed", "ok"],
     ["context-window", "failed", "exhausted"],
     ["managed-orphans", "passed", "none"],
+    ["auto-confirm", "passed", "default"],
+    ["claude-trust-roots", "passed", "trusted"],
   ]);
 });
 
@@ -131,7 +141,9 @@ test("a service that does not answer leaves every comms row UNANSWERED, never pa
     listProcesses: () => [{ pid: process.pid, ppid: 0, commandLine: "node doctor" }],
     reads: readsOf(async () => null),
   });
-  assert.deepEqual(rows.map((row) => [row.id, row.state]), [
+  // auto-confirm and claude-trust-roots ask the service nothing, so they are not among its rows.
+  const asksTheService = rows.filter((row) => !["auto-confirm", "claude-trust-roots"].includes(row.id));
+  assert.deepEqual(asksTheService.map((row) => [row.id, row.state]), [
     ["env-processes", "unanswered"],
     ["context-window", "unanswered"],
     ["managed-orphans", "unanswered"],
@@ -267,6 +279,18 @@ test("the doctor's report ends with the host rows, given the registry's services
   assert.equal(checks.at(-1).id, "host-row");
   assert.deepEqual(given.services.map((service) => service.name), ["aify-comms"]);
   assert.equal(given.endpoint, "http://127.0.0.1:1");
+  assert.equal(given.roots, null, "no aify-env answered, so its roots are unknown, not empty");
+});
+
+test("the roots the running aify-env reports reach the host rows", async () => {
+  let given = null;
+  const health = { ok: true, status: 200, body: { processes: [], terminals: {}, cwdRoots: ["C:\\"] } };
+  await collectEnvironmentChecks({
+    ...quiet,
+    knock: async (url) => (url.endsWith("/health") && url.startsWith("http://127.0.0.1:1") ? health : { ok: false, error: "ECONNREFUSED" }),
+    hostChecks: async (input) => { given = input; return []; },
+  });
+  assert.deepEqual(given.roots, ["C:\\"]);
 });
 
 test("the view, which passes no hostChecks, gets none", async () => {
