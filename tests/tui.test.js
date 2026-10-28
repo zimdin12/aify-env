@@ -331,7 +331,8 @@ const drawFleet = (procs, notices, rows) => renderDashboard(
   fleetSnapshot(procs, notices),
   { rows, columns: 100, keys: { enabled: true, canQuit: true }, view: { rows: procs, selected: 0 } },
 );
-const agentRows = (out) => out.filter((line) => /agent-\d/.test(line)).length;
+// Table rows only: DETAIL's heading (0.9.9) names the selected agent too, and is not a row of the list.
+const agentRows = (out) => out.filter((line) => /agent-\d/.test(line) && !/DETAIL/.test(line)).length;
 const noticeRows = (out) => out.filter((line) => /not delivered/.test(line)).length;
 
 test("A BURST OF NOTICES DOES NOT COST THE AGENT LIST", () => {

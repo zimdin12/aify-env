@@ -25,9 +25,12 @@ const SNAPSHOT = {
   // One agent defined and not running, so the ROSTER pane (0.9.7) has something to head.
   agentRecords: { resting: { agentId: "resting", lifetime: null, state: "stopped", stateCause: "operator-stop" } },
 };
-const HEADINGS = { services: "SERVICES", health: "HEALTH", agents: "PROCESSES", roster: "ROSTER", exits: "RECENT EXITS", notices: "NOTICES", traffic: "TRAFFIC" };
-const order = (lines) => lines.map((line) => Object.entries(HEADINGS).find(([, title]) => line.startsWith(title))?.[0]).filter(Boolean);
-const draw = (layout) => renderDashboard(SNAPSHOT, { columns: 120, layout });
+const HEADINGS = { services: "SERVICES", health: "HEALTH", agents: "PROCESSES", detail: "DETAIL", roster: "ROSTER", exits: "RECENT EXITS", notices: "NOTICES", traffic: "TRAFFIC" };
+// A collapsed pane's heading is marked "▸ " (DETAIL starts collapsed, 0.9.9), so the mark is not part of its title.
+const order = (lines) => lines.map((line) => Object.entries(HEADINGS).find(([, title]) => line.replace(/^▸ /, "").startsWith(title))?.[0]).filter(Boolean);
+// WITH A KEYBOARD AND A SELECTION, so DETAIL has an agent to head: with none it draws nothing.
+const draw = (layout) => renderDashboard(SNAPSHOT, { columns: 120, layout, keys: { enabled: true, canQuit: true },
+  view: { rows: SNAPSHOT.processes, selected: 0, mode: "dashboard", query: "", paneHidden: true } });
 
 test("every pane has a heading here, so the order checks below see all of them", () => {
   assert.deepEqual(Object.keys(HEADINGS).sort(), PANES.map((pane) => pane.name).sort());
@@ -46,12 +49,13 @@ test("no file, an empty one, or {} is the default view, line for line, with noth
 test("panes is the order; a known pane it leaves out comes after, in default order", () => {
   const layout = layoutFrom(JSON.stringify({ panes: ["traffic", "agents"] }));
   assert.deepEqual(layout.problems, []);
-  assert.deepEqual(order(draw(layout)), ["traffic", "agents", "services", "health", "roster", "exits", "notices"]);
+  assert.deepEqual(order(draw(layout)), ["traffic", "agents", "detail", "services", "health", "roster", "exits", "notices"],
+    "DETAIL follows the agents wherever they are; the others come after, in default order");
 });
 
 test("hidden panes are not drawn, but agents cannot be hidden: its keys act on it", () => {
   const layout = layoutFrom(JSON.stringify({ hidden: ["services", "traffic", "agents"] }));
-  assert.deepEqual(order(draw(layout)), ["health", "agents", "roster", "exits", "notices"]);
+  assert.deepEqual(order(draw(layout)), ["health", "agents", "detail", "roster", "exits", "notices"]);
   assert.deepEqual(layout.problems, ["hidden names agents, which cannot be hidden: its keys act on it"]);
 });
 

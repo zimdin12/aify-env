@@ -269,7 +269,7 @@ decisions rather than bindings.
 | `s` | start an agent this host knows that has no worker: the list replaces the table, typing searches it, arrows move, Enter starts, Tab switches whether the highlighted agent gets a herdr space from its next start (aify-comms keeps the setting) |
 | `v` | more or fewer columns in the agents list: the status word, id, pid, service, io and uptime are in the extended set; kept in `~/.aify/tui.json` |
 | `o` | the agents by name (the default), or what needs looking at first: blocked and unknown, then working, then the rest; kept in `~/.aify/tui.json` as `sort` |
-| `c` | the pane menu: each pane's letter (`s` services, `h` health, `a` agents, `r` roster, `x` exits, `n` notices, `t` traffic) collapses it to its heading or expands it; kept in `~/.aify/tui.json` |
+| `c` | the pane menu: each pane's letter (`s` services, `h` health, `a` agents, `d` detail, `r` roster, `x` exits, `n` notices, `t` traffic) collapses it to its heading or expands it; kept in `~/.aify/tui.json` |
 | `ctrl+]` | back, from anywhere |
 | `ctrl+l` | redraw the screen, if anything has smeared it (outside an attached pane, where it is the agent's) |
 | `q` | leave, where leaving is offered |
@@ -330,6 +330,10 @@ The view's own file, read when the view starts. `v`, `o` and the pane menu write
 
 - `panes` is the order. A pane it leaves out is drawn after the ones it names, so a pane added later still appears.
 - `hidden` panes are not drawn at all; `agents` cannot be hidden, because the keys act on its list.
+- `collapsed` panes are drawn as their heading line. `detail` (0.9.9) is the selected agent in full: its whole title,
+  role, cwd, harness, model and effort, and how long it has been in its state. It starts collapsed, as one heading line
+  naming the agent and its state, and `expanded` lists it once `c` then `d` has opened it. So a file written before it
+  existed gets it collapsed.
 - `columns` are the agents list's two sets, the values above being the defaults. Each must include `agent`. Every
   column either set may name:
   - `cursor`: which row the keys are on (`❯`), and `▶` when they are inside its agent; `#` is that mark with the
