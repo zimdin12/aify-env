@@ -34,10 +34,15 @@ const forward = value => value.replaceAll('\\', '/');
 const q = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 const PAYLOAD = JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'native-fixture-session', source: 'startup' });
 
+// THE BOUNDS END A HANG, NOT A SLOW HOST (2026-10-28). Each bash child was killed at 20 s and each test at 60 s. Alone,
+// a test here takes 11-22 s; in a full run on this shared host the prepare child of "a real stop change ..." took over 20 s,
+// was killed, and failed with status null (21.6 s), the same four titles having failed once before with no text kept.
+// A child now has 90 s and a test 240 s: still minutes, not hours, for a real hang.
+const CHILD_MS = 90_000;
 function execute(bash, script, env, args = [], input = '') {
   return new Promise((resolve, reject) => {
     const child = spawn(bash, ['--noprofile', '--norc', script, ...args], {
-      env, stdio: ['pipe', 'pipe', 'pipe'], timeout: 20000,
+      env, stdio: ['pipe', 'pipe', 'pipe'], timeout: CHILD_MS,
     });
     let stdout = '', stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk; });
@@ -200,7 +205,7 @@ async function fixture(t, harness = 'claude', alteration = '') {
   const f = new StartupComposition(fs.mkdtempSync(path.join(os.tmpdir(), 'native-start-')), harness, alteration);
   t.after(() => f.close()); await f.initialize(); return f;
 }
-const options = { skip: SKIP, timeout: 60000 };
+const options = { skip: SKIP, timeout: 240_000 };
 
 test('composed native SessionStart clears once, while applied turn-end remains non-clearing', options, async t => {
   const f = await fixture(t); await f.prepare();
