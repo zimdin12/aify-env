@@ -215,6 +215,20 @@ test("keys meant for a process are HANDED BACK, not written from inside the view
   assert.deepEqual(sent, [["p1", "hello"]]);
 });
 
+test("and they are handed back WITH THE AGENT THEY WERE TYPED AT, not the first row", async () => {
+  // The test above attaches to the first row, where "the selected agent" and "the top row" are the same agent, so a
+  // view that sent every key to the top row passed it (0.9.8b's mutants found that, and found it on main too).
+  const sent = [];
+  const input = new FakeInput();
+  const { stop } = await start(input, { onInput: (target, data) => sent.push([target?.id, data]) });
+  input.emit("data", DOWN);
+  input.emit("data", ENTER);
+  await new Promise((r) => setTimeout(r, 120));
+  input.emit("data", "hello");
+  stop();
+  assert.deepEqual(sent, [["p2", "hello"]]);
+});
+
 test("moving the selection does not call onInput", async () => {
   // An arrow key is three bytes. Routing it to the process would type escape sequences at an agent.
   const sent = [];
