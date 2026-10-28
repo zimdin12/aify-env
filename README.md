@@ -312,6 +312,29 @@ cropped to the pane's width and, when the screen is taller than the pane, to its
 where an agent's prompt and input box are. The title says when either crop happens. Without the emulator, or before a
 trustworthy baseline exists, it says so rather than showing a reconstruction that may be wrong.
 
+### Its layout: `~/.aify/tui.json` (0.9.6)
+
+The view's own file, read when the view starts. `v` and the pane menu write it; the rest is edited by hand:
+
+```json
+{"version": 1,
+ "panes": ["agents", "services", "health", "exits", "notices", "traffic"],
+ "hidden": ["traffic"],
+ "collapsed": ["health"],
+ "extended": false,
+ "columns": {"agents": {"normal": ["cursor", "status", "agent", "out", "up", "title"],
+                        "extended": ["#", "status-word", "agent", "out", "id", "pid", "service", "io", "up", "title"]}}}
+```
+
+- `panes` is the order. A pane it leaves out is drawn after the ones it names, so a pane added later still appears.
+- `hidden` panes are not drawn at all; `agents` cannot be hidden, because the keys act on its list.
+- `columns` are the agents list's two sets, the values above being the defaults. Each must include `agent`. The other
+  names are `id`, `pid`, `service`, `io`, `status` (a dot) and `status-word` (the dot and its word).
+
+Every field is optional. A file that cannot be read, or names something unknown, does not stop the view: it draws
+the defaults, or the parts it could use, and says what is wrong under its header. `v` and `c` never rewrite such a
+file, so a typo in a hand edit is not lost to a keypress.
+
 ## Why it exists
 
 Spawning used to live inside a coordinating service. That is fine with one service and impossible with
