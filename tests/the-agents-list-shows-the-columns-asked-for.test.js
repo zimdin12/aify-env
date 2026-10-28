@@ -26,7 +26,7 @@ const SNAPSHOT = {
   services: [], checks: [], history: { startedTotal: 1 }, traffic: {},
   processes: [{ id: "1f15df98-7d5e-4f24-92fe-51ddd4a3a24e-p1", pid: 4242, label: "worker", service: "aify-comms",
     terminal: true, uptimeMs: 600_000, title: "Claude Code", lastOutputAtMs: 999_000 }],
-  agentStates: { worker: "working" },
+  agentRecords: { worker: { agentId: "worker", state: "working" } },
 };
 const KEYS = { enabled: true, canQuit: true };
 const VIEW = { rows: SNAPSHOT.processes, selected: 0, mode: "dashboard", query: "", paneHidden: true };
@@ -35,12 +35,13 @@ const headerOf = (lines) => lines.find((line) => /\bAGENT\b/.test(line)) ?? "";
 const rowOf = (lines) => lines.find((line) => line.includes("worker")) ?? "";
 const hintOf = (lines) => lines.find((line) => line.includes("quit")) ?? "";
 
-test("the default view: the dot, the agent, out right after it, up and title; nothing else", () => {
+test("the default view: the dot, the agent, out right after it, and title; `up` is in the extended set (0.9.7)", () => {
   const lines = renderDashboard(SNAPSHOT, { columns: 160, keys: KEYS, view: VIEW });
-  assert.match(headerOf(lines), /^\s+STATUS\s+AGENT\s+OUT\s+UP\s+TITLE$/);
+  // NO HEADER over the dot (0.9.7): it padded a one-character column to the six of "status".
+  assert.match(headerOf(lines), /^\s+AGENT\s+OUT\s+TITLE$/);
   const row = rowOf(lines);
-  assert.match(row, /^\s*❯\s+●\s+worker\s+●\s+10m\s+Claude Code$/, "the cursor, the status dot alone, then agent and out");
-  for (const hidden of ["a24e-p1", "4242", "aify-comms", "pty", "working"]) assert.ok(!row.includes(hidden), `the default row shows ${hidden}`);
+  assert.match(row, /^\s*❯\s+●\s+worker\s+●\s+Claude Code$/, "the cursor, the status dot alone, then agent, out and title");
+  for (const hidden of ["a24e-p1", "4242", "aify-comms", "pty", "working", "10m"]) assert.ok(!row.includes(hidden), `the default row shows ${hidden}`);
   assert.doesNotMatch(hintOf(lines), /1-9 jump/, "a jump hint over rows that carry no numbers");
   assert.match(hintOf(lines), /v more columns/);
 });
@@ -54,9 +55,11 @@ test("the extended view: numbered rows, the status word, id, pid, service and io
 });
 
 test("no keyboard, no cursor and no numbers: a piped view has nothing to point or jump with", () => {
-  for (const layout of [null, EXTENDED]) {
-    const header = headerOf(renderDashboard(SNAPSHOT, { columns: 200, layout }));
-    assert.match(header, /^\s+STATUS\s/, `a keyless view drew a cursor or number column: ${header}`);
+  // THE ROW, NOT THE HEADER: the cursor's header is blank, and since 0.9.7 so is the dot's, so a header cannot show
+  // whether a cursor column was drawn. A keyless row starts at its dot.
+  for (const [layout, start] of [[null, /^\s*●\s+worker/], [EXTENDED, /^\s*● working\s+worker/]]) {
+    const row = rowOf(renderDashboard(SNAPSHOT, { columns: 200, layout }));
+    assert.match(row, start, `a keyless view drew a cursor or number column: ${row}`);
   }
   assert.deepEqual(agentColumns(["cursor", "#", "agent"], { enabled: false }).map((c) => c.name), ["agent"]);
 });
@@ -178,4 +181,14 @@ test("THROUGH THE VIEW: a broken hand-edited file survives `v` byte for byte, an
     view?.restore();
     h.done();
   }
+});
+
+test("THE README'S tui.json EXAMPLE is a file the view takes whole, and its columns are the defaults it says they are", () => {
+  // It said so in 0.9.6 and went stale in 0.9.7, when `up` left the default set: found by reading, not by a test.
+  const readme = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", "README.md"), "utf8");
+  const example = readme.split("### Its layout")[1]?.split("```json\n")[1]?.split("```")[0];
+  assert.ok(example, "the README has no tui.json example under \"### Its layout\"");
+  const parsed = layoutFrom(example);
+  assert.deepEqual(parsed.problems, []);
+  assert.deepEqual(parsed.columns, { normal: [...DEFAULT_AGENT_COLUMNS.normal], extended: [...DEFAULT_AGENT_COLUMNS.extended] });
 });

@@ -8,17 +8,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { collectSnapshot, statesById } from "../lib/dashboard.mjs";
+import { agentRecordsById, collectSnapshot } from "../lib/dashboard.mjs";
 import { dashboardWord, hueOf } from "../lib/agent-status-palette.mjs";
 import { renderDashboard } from "../lib/tui.mjs";
 import { layoutFrom } from "../lib/tui-layout.mjs";
 
 const ESC = String.fromCharCode(27);
-const snapshot = (agentStates) => ({
+// Records as /agents/state gives them (0.9.7: the view keeps the record, not its word); only the word matters here.
+const snapshot = (states) => ({
   version: "0.9.8", endpoint: "http://127.0.0.1:8802", terminals: { available: true },
   services: [], checks: [], history: { startedTotal: 3 },
   processes: [{ id: "p1", label: "alpha" }, { id: "p2", label: "bravo" }, { id: "p3", label: "charlie" }],
-  agentStates,
+  agentRecords: Object.fromEntries(Object.entries(states).map(([agentId, state]) => [agentId, { agentId, state }])),
 });
 const rowOf = (lines, label) => lines.find((line) => line.includes(label)) ?? "";
 
@@ -58,11 +59,12 @@ test("the palette speaks the dashboard's words, and an unknown word gets no hue"
   assert.equal(hueOf("unknown"), "");
 });
 
-test("statesById keeps well-formed rows of an answered /agents/state, and nothing from any other answer", () => {
-  const answered = { ok: true, body: { agents: [{ agentId: "a", state: "idle" }, { agentId: 7, state: "x" }, { agentId: "b" }] } };
-  assert.deepEqual(statesById(answered), { a: "idle" });
-  assert.deepEqual(statesById({ ok: false, error: "timed out" }), {});
-  assert.deepEqual(statesById({ ok: true, body: { error: "nope" } }), {});
+test("agentRecordsById keeps well-formed rows of an answered /agents/state whole, and nothing from any other answer", () => {
+  const a = { agentId: "a", state: "idle", stateCause: "at-prompt", turn: { open: false, lastEventAtUs: 5 } };
+  const answered = { ok: true, body: { agents: [a, { agentId: 7, state: "x" }, { agentId: "b" }] } };
+  assert.deepEqual(agentRecordsById(answered), { a });
+  assert.deepEqual(agentRecordsById({ ok: false, error: "timed out" }), {});
+  assert.deepEqual(agentRecordsById({ ok: true, body: { error: "nope" } }), {});
 });
 
 test("the snapshot asks the environment for its agents' states and keys them by id", async () => {
@@ -70,12 +72,12 @@ test("the snapshot asks the environment for its agents' states and keys them by 
   const fetchImpl = async (url) => {
     asked.push(String(url));
     const body = String(url).endsWith("/agents/state")
-      ? { agents: [{ agentId: "alpha", state: "working" }], complete: true }
+      ? { agents: [{ agentId: "alpha", state: "working", stateCause: "turn-open", turn: { open: true, startedAtUs: 1 } }], complete: true }
       : { ok: true, version: "0.9.8", processes: [{ id: "p1", label: "alpha" }] };
     return { ok: true, status: 200, json: async () => body };
   };
   const shot = await collectSnapshot({ endpoint: "http://127.0.0.2:1", registryPath: "/nonexistent/services.json",
     fetchImpl, readFile: () => "", readCredentialStore: async () => ({ names: [] }), readInvocationRegistries: () => [] });
   assert.ok(asked.includes("http://127.0.0.2:1/agents/state"), asked.join(", "));
-  assert.deepEqual(shot.agentStates, { alpha: "working" });
+  assert.deepEqual(shot.agentRecords, { alpha: { agentId: "alpha", state: "working", stateCause: "turn-open", turn: { open: true, startedAtUs: 1 } } });
 });

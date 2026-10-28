@@ -267,7 +267,7 @@ decisions rather than bindings.
 | `enter` | attach -- every keystroke then goes into that agent's terminal |
 | `m` | actions for the selected agent |
 | `s` | start an agent this host knows that has no worker: the list replaces the table, typing searches it, arrows move, Enter starts, Tab switches whether the highlighted agent gets a herdr space from its next start (aify-comms keeps the setting) |
-| `v` | more or fewer columns in the agents list: id, pid, service and io are in the extended set; kept in `~/.aify/tui.json` |
+| `v` | more or fewer columns in the agents list: the status word, id, pid, service, io and uptime are in the extended set; kept in `~/.aify/tui.json` |
 | `c` | the pane menu: each pane's letter (`s` services, `h` health, `a` agents, `x` exits, `n` notices, `t` traffic) collapses it to its heading or expands it; kept in `~/.aify/tui.json` |
 | `ctrl+]` | back, from anywhere |
 | `ctrl+l` | redraw the screen, if anything has smeared it (outside an attached pane, where it is the agent's) |
@@ -322,14 +322,16 @@ The view's own file, read when the view starts. `v` and the pane menu write it; 
  "hidden": ["traffic"],
  "collapsed": ["health"],
  "extended": false,
- "columns": {"agents": {"normal": ["cursor", "status", "agent", "out", "up", "title"],
+ "columns": {"agents": {"normal": ["cursor", "status", "agent", "out", "title"],
                         "extended": ["#", "status-word", "agent", "out", "id", "pid", "service", "io", "up", "title"]}}}
 ```
 
 - `panes` is the order. A pane it leaves out is drawn after the ones it names, so a pane added later still appears.
 - `hidden` panes are not drawn at all; `agents` cannot be hidden, because the keys act on its list.
 - `columns` are the agents list's two sets, the values above being the defaults. Each must include `agent`. The other
-  names are `id`, `pid`, `service`, `io`, `status` (a dot) and `status-word` (the dot and its word).
+  names are `id`, `pid`, `service`, `io`, `up`, `status` and `status-word`.
+- `status` is the agent's dot and, after it, how long it has been in that state (`● 12m`), or why, when the state
+  needs looking at (`● folder-trust` for a blocked agent). `status-word` adds the word: `● working 12m`.
 
 Every field is optional. A file that cannot be read, or names something unknown, does not stop the view: it draws
 the defaults, or the parts it could use, and says what is wrong under its header. `v` and `c` never rewrite such a
