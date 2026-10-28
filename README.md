@@ -119,7 +119,9 @@ own socket, config and state roots), runs this daemon in its first space with `-
 and attaches the Herdr TUI. In that instance the daemon opens a Herdr space for every worker a
 service plugin starts -- the pane runs `aify-env attach --id <id>` against the worker that is already
 running, so the worker stays this daemon's and its console keeps streaming -- and closes that pane
-when the worker exits. The view there offers `s` to start an agent and no console pane or Enter
+when the worker exits. A managed agent's pane shows the word the dashboard shows on Herdr's status
+dot: idle, working, blocked or unknown, with the word itself as its message (`shell` is idle,
+`starting` working, `misconfigured` blocked). The view there offers `s` to start an agent and no console pane or Enter
 attach, because every worker already has a space. **Leaving that Herdr session ends the environment
 and every worker in it**; that lifetime is the launcher's, and it is described with the rest of the
 mode in [aify-wrapper's HERDR.md](https://github.com/zimdin12/aify-wrapper/blob/main/HERDR.md).

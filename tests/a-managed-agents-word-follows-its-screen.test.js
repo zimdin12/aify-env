@@ -85,13 +85,18 @@ test("THROUGH /agents/state: every plugin's offer is read, and one that throws i
   said(broken);
 });
 
-test("the daemon hands the plugins' screens to both state reads: /agents/state and the sender", () => {
+test("the daemon hands the plugins' screens to every state read: /agents/state, the sender and the Herdr panes", () => {
   const source = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
   const offer = 'screens: () => servicePlugins.capabilities("screens"),';
-  const protocol = source.slice(source.indexOf("protocolDeps: async () => ("), source.indexOf("advertisingEnabled: ADVERTISE"));
-  const sender = source.slice(source.indexOf("const sendFor = ("), source.indexOf("agentStateSender = sendFor("));
+  const between = (from, to) => { const at = source.indexOf(from); return at < 0 ? "" : source.slice(at, source.indexOf(to, at)); };
+  const protocol = between("protocolDeps: async () => (", "advertisingEnabled: ADVERTISE");
+  const observation = between("const stateObservation = {", "};");
+  const sender = between("const sendFor = (", "agentStateSender = sendFor(");
+  const panes = between("paneOpener = paneOpenerFor({", "});");
   assert.ok(protocol.includes(offer), "GET /agents/state is not given the plugins' screens");
-  assert.ok(sender.includes(offer), "the agent-state sender is not given the plugins' screens");
+  assert.ok(observation.includes(offer), "the observation the sender and the panes read is not given the plugins' screens");
+  assert.ok(sender.includes("...stateObservation,"), "the agent-state sender does not read that observation");
+  assert.ok(panes.includes("observation: { stateHost: agentState.host, ...stateObservation }"), "the Herdr panes do not read that observation");
 });
 
 test("THROUGH THE SENDER: the published snapshot carries the word the screen decides", async (t) => {

@@ -528,13 +528,14 @@ let stopAdvertising = null;
 //: Set once the service plugins have started: brings them level with a registry that was read.
 let followServices = null;
 let agentState = null;
-let agentStateSender = null, stateEvaluationTimer = null, stateSendingStopped = false;
+let agentStateSender = null, stateEvaluationTimer = null, stateSendingStopped = false, paneOpener = null;
 // The residents role is tried at the first evaluation and on every sweep while not held, and its population published
 // on the same beat (lib/daemon-residents.mjs).
 function evaluateAgentState() {
   if (viewOnly || stateSendingStopped) return;
   void agentStateSender?.tick().catch(() => logLine("agent state: evaluation-failed"));
   void agentState?.residents?.tick().catch(() => logLine("residents: evaluation-failed"));
+  void paneOpener?.report().catch(() => logLine("herdr: pane reports failed"));
 }
 function stopAgentStateSending() {
   stateSendingStopped = true;
@@ -683,6 +684,8 @@ server.listen(port, HOST, async () => {
     catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }
   } else await reapLeftovers();
 
+  const stateObservation = { definitions: definitionStore, lifecycle: agentState.lifecycle, cwdRoots: CWD_ROOTS, screens: () => servicePlugins.capabilities("screens"),
+    observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) };
   // Only after serving and successful durable boot/readiness. Sweep cadence is configurable;
   // this fixed beat evaluates boot-anchored quiet epochs even when the sweep is much slower.
   if (!viewOnly && !stateSendingStopped) {
@@ -690,9 +693,7 @@ server.listen(port, HOST, async () => {
     const sendFor = ({ instance, generation, ...population }) => new AgentStateSender({
       identity: { machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
         exists: existsSync, isWsl: hostIsWsl() }).machineId, instance, generation, build: BUILD },
-      definitions: definitionStore, lifecycle: agentState.lifecycle, cwdRoots: CWD_ROOTS,
-      screens: () => servicePlugins.capabilities("screens"),
-      observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
+      ...stateObservation,
       readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"), credentialOptions: credentialReading, report: logLine, ...population,
     });
     agentStateSender = sendFor({ instance: agentState.instance, generation: agentState.generation, stateHost: agentState.host });
@@ -718,8 +719,9 @@ server.listen(port, HOST, async () => {
   //
   // The bootstrap test evaluates these statements without importing the daemon or binding a port.
   // Keep host identity in this payload so every plugin receives the canonical machine id.
-  const paneOpener = paneOpenerFor({ env: process.env, dedicatedRoot: instanceContext?.root, base: `http://${HOST}:${bound.port}`,
-    node: process.execPath, script: fileURLToPath(import.meta.url), log: logLine, watchExit: (id, on) => runner.subscribe(id, () => {}, on) });
+  paneOpener = paneOpenerFor({ env: process.env, dedicatedRoot: instanceContext?.root, base: `http://${HOST}:${bound.port}`,
+    node: process.execPath, script: fileURLToPath(import.meta.url), log: logLine, watchExit: (id, on) => runner.subscribe(id, () => {}, on),
+    observation: { stateHost: agentState.host, ...stateObservation } });
   // A DEDICATED INSTANCE STARTS THEM TOO. Was `if (!instanceContext)`, which left it with no `agents`
   // capability, so the picker answered 503 beside a service that was registered and healthy.
   try {

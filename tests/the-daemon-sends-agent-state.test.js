@@ -76,7 +76,7 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
     REPORT_EVERY_MS: TIMER_PROBE_MS,
   };
   // No import.meta value is needed by fake pane creation. Replace only that syntactic argument.
-  const code = `let agentState=null, agentStateSender=null, stateEvaluationTimer=null, inputSocketServer=null, inputSocketAddress='', followServices=null, stopDashboard=()=>{}, dashboardOwnsScreen=false;
+  const code = `let agentState=null, agentStateSender=null, stateEvaluationTimer=null, inputSocketServer=null, inputSocketAddress='', followServices=null, paneOpener=null, stopDashboard=()=>{}, dashboardOwnsScreen=false;
     ${setup}
     ${body.replaceAll("import.meta.url", "'fixture-module'")}
     return { sender:agentStateSender, evaluateAgentState, stopAgentStateSending, intervals: stateEvaluationTimer };`;
