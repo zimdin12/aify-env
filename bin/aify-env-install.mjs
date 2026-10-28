@@ -17,6 +17,7 @@ import { createInterface } from "node:readline/promises";
 
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
+import { wrapperInstallSource } from "../lib/wrapper-pin.mjs";
 import { approvedInstaller, connectRecorded, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const plan = parseChainArgs(process.argv.slice(2));
@@ -40,8 +41,9 @@ async function runChain(plan) {
   }
   const root = npmRoot();
   const wrapperRoot = path.join(root, "aify-wrapper");
-  // Where aify-wrapper comes from when it is missing: its git form (TARGET_ARCHITECTURE), or a package spec a test names.
-  const wrapperSource = env.AIFY_INSTALL_WRAPPER_SOURCE || "github:zimdin12/aify-wrapper";
+  // Where aify-wrapper comes from when it is missing: the commit this aify-env was tested against (lib/wrapper-pin.mjs),
+  // or a package spec a test names.
+  const wrapperSource = wrapperInstallSource(env);
   let wrapper = null;
 
   const io = {
