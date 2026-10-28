@@ -42,6 +42,15 @@ test("claude-trust-roots: a sibling sharing a prefix does not count, and with th
     claudeConfig: claude({ "C:/work": { hasTrustDialogAccepted: true } }) }).code, "untrusted");
 });
 
+test("claude-trust-roots: the fix for a drive root says it trusts the whole drive", () => {
+  for (const root of ["C:\\", "C:/", "c:", "/"]) {
+    const verdict = claudeTrustRootsVerdict({ roots: [root], folderTrustOn: false, windows: true, claudeConfig: claude({}) });
+    assert.match(verdict.fix, /which trusts the WHOLE DRIVE/, root);
+  }
+  const folder = claudeTrustRootsVerdict({ roots: ["C:/work"], folderTrustOn: false, windows: true, claudeConfig: claude({}) });
+  assert.match(folder.fix, /which covers every folder below it/);
+});
+
 test("claude-trust-roots: with the answer on, an untrusted root passes and says the dialog is answered", () => {
   const verdict = claudeTrustRootsVerdict({ roots: ["C:/work"], folderTrustOn: true, windows: true, claudeConfig: claude({}) });
   assert.deepEqual([row(verdict).state, verdict.code], ["passed", "answered"]);
