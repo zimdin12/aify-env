@@ -9,6 +9,8 @@
 #
 #   REHEARSE_DIR=<scratch dir> AIFY_COMMS_REPO=<comms checkout> bash rehearse-env-and-herdr.sh
 #   KEEP=1 leaves the containers up for a look; run again without it to tear down.
+#   AIFY_ENV_TARBALL=<npm pack of an aify-env commit> installs that aify-env through the same chain
+#   (AIFY_INSTALL_ENV_SOURCE), in place of GitHub's main: how a release candidate is rehearsed before its tag.
 set -uo pipefail
 export MSYS_NO_PATHCONV=1
 S="${REHEARSE_DIR:?set REHEARSE_DIR to a scratch directory}"
@@ -54,6 +56,12 @@ docker build -q -t aify-wpc-client -f "$S/wpc-client.Dockerfile" "$S" > "$S/wpc-
 # stayed as <defunct> under PID 1 and read as still running (first run of this script, 2026-10-28).
 docker run -d --init --name "$CLIENT" --network "$NET" aify-wpc-client sleep infinity >/dev/null
 in_c 'claude --version; node --version; uname -sm'
+ENV_SOURCE=""
+if [ -n "${AIFY_ENV_TARBALL:-}" ]; then
+  docker cp "$(cygpath -m "$AIFY_ENV_TARBALL" 2>/dev/null || echo "$AIFY_ENV_TARBALL")" "$CLIENT":/tmp/aify-env.tgz >/dev/null && docker exec -u root "$CLIENT" chmod 644 /tmp/aify-env.tgz
+  ENV_SOURCE="AIFY_INSTALL_ENV_SOURCE=/tmp/aify-env.tgz"
+  echo "aify-env from $(basename "$AIFY_ENV_TARBALL"), sha256 $(sha256sum < "$AIFY_ENV_TARBALL" | cut -c1-16)"
+fi
 
 say "1. the OLD install: aify-comms v0.5.7 from GitHub, claude client"
 in_c "git clone -q https://github.com/zimdin12/aify-comms.git old && cd old && git checkout -q v0.5.7 && AIFY_API_KEY=$KEY bash install.sh --client claude $SVC > ../old-install.log 2>&1; echo old install exit \$?"
@@ -63,13 +71,13 @@ say "BONUS setup: a v0.5 environment bridge still running, as the old bare aify-
 in_c 'cd ~/old && ls mcp/stdio/server.js >/dev/null && (AIFY_SERVER_URL='"$SVC"' AIFY_API_KEY='"$KEY"' nohup node mcp/stdio/server.js --environment-bridge > ~/old-bridge.log 2>&1 &) ; sleep 4; pgrep -af -- "[-]-environment-bridge" || { echo "the v0.5.7 bridge did not stay up; its log:"; tail -15 ~/old-bridge.log; }'
 
 say "2. the UPGRADE through today's chain at the service's commit (three passes, as the comms rehearsal found)"
-in_c "git clone -q https://github.com/zimdin12/aify-comms.git new && cd new && git checkout -q $SHA && git log -1 --format='%h %s' && AIFY_API_KEY=$KEY bash install.sh --client claude $SVC > ../new-install-1.log 2>&1; echo first pass exit \$?"
+in_c "git clone -q https://github.com/zimdin12/aify-comms.git new && cd new && git checkout -q $SHA && git log -1 --format='%h %s' && AIFY_API_KEY=$KEY $ENV_SOURCE bash install.sh --client claude $SVC > ../new-install-1.log 2>&1; echo first pass exit \$?"
 DIGEST=$(in_c "grep -oE -- '--approve [^ )]+' new-install-1.log | head -1 | cut -d' ' -f2")
 echo "approval digest: ${DIGEST:-NONE}"
-in_c "cd new && AIFY_API_KEY=$KEY AIFY_INSTALL_APPROVE=$DIGEST bash install.sh --client claude $SVC > ../new-install-2.log 2>&1; echo second pass exit \$?"
+in_c "cd new && AIFY_API_KEY=$KEY $ENV_SOURCE AIFY_INSTALL_APPROVE=$DIGEST bash install.sh --client claude $SVC > ../new-install-2.log 2>&1; echo second pass exit \$?"
 POLICY=$(in_c "grep -E '^sudo -- ' new-install-2.log | head -1")
 [ -n "$POLICY" ] && docker exec -u root "$CLIENT" bash -lc "${POLICY#sudo -- }" >/dev/null && echo "channel policy written (the printed sudo step, run as root)"
-in_c "cd new && AIFY_API_KEY=$KEY AIFY_INSTALL_APPROVE=$DIGEST bash install.sh --client claude $SVC > ../new-install-3.log 2>&1; echo third pass exit \$?; grep -E 'chain' ../new-install-3.log | tail -2"
+in_c "cd new && AIFY_API_KEY=$KEY $ENV_SOURCE AIFY_INSTALL_APPROVE=$DIGEST bash install.sh --client claude $SVC > ../new-install-3.log 2>&1; echo third pass exit \$?; grep -E 'chain' ../new-install-3.log | tail -2"
 in_c 'for c in aify-comms claude-aify aify-env herdr-aify; do printf "%s -> %s\n" $c "$(command -v $c || echo none)"; done; aify-env --version 2>&1 | head -1'
 
 say "3. before aify-env: the comms doctor's three aify-env rows"

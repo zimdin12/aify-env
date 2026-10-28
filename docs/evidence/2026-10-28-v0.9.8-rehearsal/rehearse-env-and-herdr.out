@@ -1,0 +1,170 @@
+
+== clean
+
+== service: today's live image on a fresh volume (the image of the running aify-comms-service)
+service http://192.168.0.2:8800 build 667b6992c874bbdcae7fe99d223e35b0087f61b2
+
+== client container (Debian bookworm, node 22, the claude CLI for its mcp config only; never logged in)
+2.1.312 (Claude Code)
+v22.23.4
+Linux x86_64
+aify-env from aify-env-0.9.8.tgz, sha256 \bb68f328c8ed8fd
+
+== 1. the OLD install: aify-comms v0.5.7 from GitHub, claude client
+old install exit 0
+--- v0.5 environment bridge after the old install:
+none running
+
+== BONUS setup: a v0.5 environment bridge still running, as the old bare aify-comms left one
+338 bash -lc cd ~/old && ls mcp/stdio/server.js >/dev/null && (AIFY_SERVER_URL=http://192.168.0.2:8800 AIFY_API_KEY=rehearse-key nohup node mcp/stdio/server.js --environment-bridge > ~/old-bridge.log 2>&1 &) ; sleep 4; pgrep -af -- "[-]-environment-bridge" || { echo "the v0.5.7 bridge did not stay up; its log:"; tail -15 ~/old-bridge.log; }
+347 node mcp/stdio/server.js --environment-bridge
+
+== 2. the UPGRADE through today's chain at the service's commit (three passes, as the comms rehearsal found)
+667b6992 aify-wrapper pinned to c3be03e: a refused second launch no longer rewrites the running agent's session MCP file
+first pass exit 78
+approval digest: 501f05ba9740504afe2b95db76864e99cdbaa8ae5d5bf3760f12e50d2d5d42c1
+second pass exit 78
+channel policy written (the printed sudo step, run as root)
+third pass exit 0
+  Done (acquired; the chain connects and renders).
+[aify-env] chain: complete
+aify-comms -> /home/node/.local/bin/aify-comms
+claude-aify -> /home/node/.local/bin/claude-aify
+aify-env -> /usr/local/bin/aify-env
+herdr-aify -> /usr/local/bin/herdr-aify
+aify-env 0.9.8 (build 6cadd07c)
+
+== 3. before aify-env: the comms doctor's three aify-env rows
+  ✗ agent-state-publishers 0 of 0 publisher(s) fresh
+  ✗ spawn-delegation   aify-env at http://127.0.0.1:8802 is not answering, and every managed spawn fails until it is: aify-env is the only spawner, and the service refuses rather than starting a second one.
+  ✓ env-bridge         1 online: docker:d38d499636a9:default
+  3 check(s) need attention. 3 skipped, so NOT verified here.
+
+== BONUS: start aify-env WITH the stale v0.5 bridge still running
+347 node mcp/stdio/server.js --environment-bridge
+{"status":"healthy","version":"0.9.8","build":"6cadd07c","codeOnDisk":"6cadd07c","cwdRoots":["/home/node"],"inputSocket":"/tmp/aify-env-1000/aify-env-8802.sock","pid":2671,"instance":"27516d79-4462-4c3e-a5f9-07bd720c8687","processes":[],"unknown":[],"history":{"startedTotal":0,"lastExitAtMs":null,"r
+--- aify-env log:
+[aify-env] residents role held, generation 1793170789978, publishing as residents-58f78ebe9f90
+[aify-env] hosting work for: aify-comms
+aify-env 0.9.8 listening on http://127.0.0.1:8802
+terminals: available
+--- comms doctor with both running:
+  ✓ agent-state-publishers 2 of 2 publisher(s) fresh
+  ✓ spawn-delegation   Managed spawns run on aify-env at http://127.0.0.1:8802, which is answering.
+  ✓ tier-version       every live aify-env is 0.9.0 or newer (1 judged).
+  ✓ bridge-running     no bridge processes are running
+  ✓ env-bridge         1 online: docker:d38d499636a9:default
+  14 check(s) passed. 3 skipped, so NOT verified here.
+--- the old bridge, still there?
+gone
+--- its log tail:
+[aify-comms bridge] version=0.5.7 build=3a0d4b094771 instance=c8ab950b-f8ee-4338-9257-953f5b1f2029 pid=347 cwd=/home/node/old script=/home/node/old/mcp/stdio/server.js
+[aify] bridge startup: runtime=(unset) agentId=(unset) sessionMode=(unset) wrapperChild=0 sessionId=(none) env=(no adapter)
+aify-comms-mcp v0.5.7 running on stdio
+Mode: REMOTE (http://192.168.0.2:8800)
+Working dir: /home/node/old
+[aify] environment docker:d38d499636a9:default was superseded by replacement bridge cf3bb6a8-5eb3-496b-a537-0b72a15c2385; this older bridge (c8ab950b-f8ee-4338-9257-953f5b1f2029) is exiting
+
+== 4. the guide's order: stop the old bridge, then restart aify-env
+v0.5 bridge stopped
+{"status":"healthy","version":"0.9.8","build":"6cadd07c","codeOnDisk":"6cadd07c","cwdRoots":["/home/node"],"inputSocket":"/tmp/aify-env-1000/aify-env-8802.sock","pid":2832,"instance":"7ecbfca2-3283-4d
+--- comms doctor:
+  ✓ service            healthy — build 667b6992 (no checkout to compare against)
+  ✓ agent-state-publishers 2 of 2 publisher(s) fresh
+  ✓ session-handles    no agent carries a session handle
+  ✓ api-exposure       The fleet listing requires an API key.
+  ✓ external-keys      No keys are issued to other machines (EXTERNAL_KEYS is unset).
+  ✓ bridge-installed   installed — 667b699 (no checkout to compare against)
+  – skills-installed   no repo checkout to compare against
+  ✓ spawn-delegation   Managed spawns run on aify-env at http://127.0.0.1:8802, which is answering.
+  ✓ spawn-queue        no spawn requests on this service.
+  ✓ tier-version       every live aify-env is 0.9.0 or newer (1 judged).
+  ✓ definitions-fresh  1 host(s) push their agent definitions, each within the last 10 minutes
+  ✓ client-api-key     http://192.168.0.2:8800 requires a key and the one this host resolves (from aify-env's credential store) is accepted.
+  ✓ bridge-running     no bridge processes are running
+  ✓ agent-identity     0 agent session(s), all carry an agent id
+  ✓ env-bridge         1 online: docker:d38d499636a9:default
+  – bridge-current     no checkout to compare running bridges against
+  – usage-openai       OpenAI/ChatGPT quota is not set up on this host (no codex or hermes login). It is optional; Claude agents do not use it.
+  14 check(s) passed. 3 skipped, so NOT verified here.
+--- aify-env doctor, every row that is not ok, and the count:
+  ??   claude-trust-roots ~/.claude.json could not be read as claude's config, so which folders it trusts is unknown
+18 passed, 1 failed (claude-login), 1 unanswered (claude-trust-roots)
+ FAIL  claude-login   Claude Code's first-run setup was never completed on this host, and claude-aify is installed, so this host offers claude agents to its services: each claude started here waits on its first screen, which asks for a theme
+18 passed, 1 failed (claude-login), 1 unanswered (claude-trust-roots)
+
+== 5. a spawn, with no claude login: the daemon starts claude-aify for a probe agent, and its screen is read
+aify-env run exit 64 (64: it will not attach without a terminal on both ends)
+started wpc-probe here (7ecbfca2-3283-4d1e-99b4-6ec34cb4d2c9-p1); it will outlive this terminal.
+worker: 7ecbfca2-3283-4d1e-99b4-6ec34cb4d2c9-p1
+its screen:
+  Let's get started.
+  Choose the text style that looks best with your terminal
+  To change this later, run /theme
+  Auto (match terminal)
+  ❯ ✔ Dark mode
+  Light mode
+  Dark mode (colorblind-friendly)
+  Light mode (colorblind-friendly)
+  Dark mode (ANSI colors only)
+  Light mode (ANSI colors only)
+--- the worker tree before the stop:
+   3002       0       0 bash -lc echo "--- the worker tree before the stop:"; ps -eo pid,ppid,etimes,args --forest | grep -E "[a]ify-env|[c]laude" | c
+   2832       1      21 node /usr/local/bin/aify-env
+   2926    2832      17  \_ /bin/bash /home/node/.local/bin/claude-aify
+   2957    2926      17      \_ claude --channels plugin:aify-channel@aify-local --settings /tmp/aify-hooks.awddf0.json --mcp-config=/home/node/.aify/
+--- 20 s after SIGTERM to the daemon, still running (zombies excluded):
+Ss      3002 bash -lc echo "--- the worker tree before the stop:"; ps -eo pid,ppid,etimes,args --forest | grep -E "[a]ify-env|[c]laude" | cut -c1-150;
+S       3094 bash -lc echo "--- the worker tree before the stop:"; ps -eo pid,ppid,etimes,args --forest | grep -E "[a]ify-env|[c]laude" | cut -c1-150;
+
+== 6. herdr from its official installer: the copy reviewed beside this script, run as the node user
+bf83668c944cff30b3365eee5a4fe15ff61a4b749ab0c73b98e7a203f70893dd  /tmp/herdr-install.sh
+  > detected linux/x86_64
+  > fetching latest release manifest...
+  > downloading v0.9.5...
+  > installed herdr to /home/node/.local/bin/herdr
+  > ready. run 'herdr' to get started.
+/home/node/.local/bin/herdr
+herdr 0.9.5
+{"installed":"installed","runnable":"yes","version":"0.9.5","onPath":true,"path":"/home/node/.local/bin/herdr","scope":"known-locations"}
+
+== 7. aify-env herdr on Linux
+aify-env herdr exit 69
+aify-env herdr: This adapter supports Windows PowerShell panes only. On Linux, WSL and macOS, `herdr-aify env` (aify-wrapper) runs aify-env in a Herdr of its own
+
+== 8. herdr-aify env: first with no terminal size, then attached again in a 120x40 one, then stopped
+herdr-aify env exit 0
+herdr-aify: invocation a0f1d0fb-5f82-44d7-be2f-06c245126c02
+herdr-aify: herdr socket /home/node/.aify/herdr/invocations/a0f1d0fb-5f82-44d7-be2f-06c245126c02/herdr-tui.sock
+herdr-aify: aify-env in w1:p1 — managed work runs here
+herdr-aify: attaching — leaving the Herdr session DETACHES; `herdr-aify env --stop` ends it
+herdr: cannot attach without a usable terminal: terminal reported a zero-sized grid; run inside a terminal
+herdr-aify: detached from instance a0f1d0fb-5f82-44d7-be2f-06c245126c02; `herdr-aify env` attaches again, `herdr-aify env --stop` ends it
+--- running after it returned:
+/home/node/.local/bin/herdr server
+node /usr/local/bin/aify-env --instance-context /home/node/.aify/herdr/invocations/a0f1d0fb-5f82-44d7-be2f-06c245126c02/instance.json
+--- herdr-aify --status:
+  "invocation": "a0f1d0fb-5f82-44d7-be2f-06c245126c02",
+  "root": "/home/node/.aify/herdr/invocations/a0f1d0fb-5f82-44d7-be2f-06c245126c02",
+  "spent": true
+second herdr-aify env exit 124 (124: still attached at the 15 s timeout)
+aify-env 0.9.8
+herdr-aify: attaching to the running instance a0f
+terminals available
+herdr-aify: invocation a0f1d0fb-5f82-44d7-be2f-06c245126c02 — stop accepted, confirmed gone
+--- left running:
+none
+
+== 9. the restore plugin aify-wrapper's HERDR.md asks to link once per machine
+aify-herdr-pane 2026-10-28T07:01:15.665Z: linked the aify plugin from /usr/local/lib/node_modules/aify-wrapper/herdr-plugin/
+aify-herdr-pane 2026-10-28T07:01:15.666Z: aify panes will be restored at the next Herdr start; 'herdr plugin unlink aify.wrappers' undoes it
+1 plugin installed:
+- aify.wrappers (aify wrappers) enabled [local:/usr/local/lib/node_modules/aify-wrapper/herdr-plugin]
+  config: /home/node/.config/herdr/plugins/config/aify.wrappers
+
+== teardown
+aify-wpc-client container: gone
+aify-wpc-svc container: gone
+aify-wpc-data volume: gone
+aify-wpc-net network: gone
+exit=0
