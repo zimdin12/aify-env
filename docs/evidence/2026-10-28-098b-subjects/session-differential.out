@@ -1,0 +1,7 @@
+menu, Ctrl+C asks: 91 steps, old and new agree on every step
+  executor calls: y: stop bravo; start it: start a2
+attach only, Ctrl+C leaves: 91 steps, old and new agree on every step
+  executor calls: start it: start a2
+without a console: 91 steps, old and new agree on every step
+  executor calls: y: stop bravo; start it: start a2
+CONTROL (target from the cursor): differs at step 49 (y on a gone agent), as it must

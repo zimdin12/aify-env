@@ -64,3 +64,29 @@ test("CONTROL: a stop confirmed in an open menu still names its process", () => 
   const result = s.handleInput("y");
   assert.deepEqual(result.perform, { action: "stop", process: ALPHA });
 });
+
+// THE OTHER TWO WAYS A MENU ENDS, with no poll in between to tidy up. 0.9.8b's mutants found both bindings outliving
+// their menu whenever no refresh landed before the next key: the same E1 report, reached by being quick.
+const DETACH = String.fromCharCode(29);
+
+test("a start chosen right after the menu was CLOSED performs nothing on alpha", () => {
+  const s = session();
+  s.handleInput("m");
+  assert.equal(s.actionTargetId, ALPHA.id, "positive control: the menu did not bind alpha");
+  s.handleInput(DETACH);
+  const result = startBravo(s);
+  assert.equal(result.startAgent?.id, "bravo");
+  assert.equal(result.perform, null, `a start of bravo also asked the caller to act on ${JSON.stringify(result.perform)}`);
+});
+
+test("a start chosen right after a STOP WAS CONFIRMED performs nothing on alpha again", () => {
+  const s = session();
+  s.handleInput("m");
+  s.handleInput(DOWN);
+  s.handleInput(ENTER);
+  const stopped = s.handleInput("y");
+  assert.deepEqual([stopped.perform?.action, stopped.perform?.process?.id], ["stop", ALPHA.id], "positive control: the stop was not confirmed");
+  const result = startBravo(s);
+  assert.equal(result.startAgent?.id, "bravo");
+  assert.equal(result.perform, null, `a start of bravo also asked the caller to act on ${JSON.stringify(result.perform)}`);
+});

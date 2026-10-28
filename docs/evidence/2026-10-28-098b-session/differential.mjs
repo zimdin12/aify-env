@@ -135,9 +135,16 @@ let failed = false;
 try {
   fs.writeFileSync(oldFile, execFileSync("git", ["-C", repo, "show", `${oldRef}:lib/console-session.mjs`]));
   const current = fs.readFileSync(path.join(lib, "console-session.mjs"), "utf8");
-  const anchor = "const target = performed && this.actionTargetId\n      ? (this.processes.find((row) => row?.id === this.actionTargetId) ?? null)\n      : null;";
-  if (current.split(anchor).length !== 2) throw new Error("the control's anchor is not in the new class exactly once");
-  fs.writeFileSync(controlFile, current.replace(anchor, "const target = performed ? this.selected : null;"));
+  // The confirmed action's target, taken from the cursor instead: as the class was before 0.9.8b's subjects part, and
+  // after it. Exactly one of the two must be there.
+  const controls = [
+    ["const target = performed && this.actionTargetId\n      ? (this.processes.find((row) => row?.id === this.actionTargetId) ?? null)\n      : null;",
+      "const target = performed ? this.selected : null;"],
+    ["const target = this.#subjects.takeActionTarget(performed, this.processes);",
+      "const target = (this.#subjects.takeActionTarget(performed, this.processes), performed ? this.selected : null);"],
+  ].filter(([anchor]) => current.split(anchor).length === 2);
+  if (controls.length !== 1) throw new Error("the control's anchor is not in the new class exactly once");
+  fs.writeFileSync(controlFile, current.replace(controls[0][0], controls[0][1]));
   const [Old, New, Control] = [await load(oldFile), await load(path.join(lib, "console-session.mjs")), await load(controlFile)];
   for (const [label, options] of CONFIGS) {
     const before = run(Old, options);

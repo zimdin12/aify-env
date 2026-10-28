@@ -1,0 +1,12 @@
+a live screen, old against old: agree
+a pipe, old against old: agree
+once, old against old: agree
+a live screen: 78 events (55 writes) over 68 steps, old and new agree on every event
+  callbacks: to-process bravo ls; to-process bravo hello; to-process bravo [20; action stop charlie; to-process delta x; herdr-space echo true; start echo; interrupt; quit
+a pipe: 100 events (78 writes) over 68 steps, old and new agree on every event
+  callbacks: to-process bravo ls; to-process bravo hello; to-process bravo [20; action stop charlie; to-process delta x; herdr-space echo true; start echo; interrupt; quit
+once: 1 events (1 writes) over 0 steps, old and new agree on every event
+  callbacks: none
+CONTROL (an action's process taken from the top row): differs at event 23 (step "y stops charlie"), as it must
+  old: ["action","stop","charlie"]
+  control: ["action","stop","aaron"]
