@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { collectSnapshot } from "../lib/dashboard.mjs";
+import { collectSnapshot } from "../lib/view-snapshot.mjs";
 
 /** A stand-in for the environment's /health, so this test is about the mapping and not a machine. */
 function fakeFetch(body, { answers = true } = {}) {

@@ -23,7 +23,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { MENU_ACTIONS, MODES, VIEW_KEYS, initialFocus, keyName, routeKey } from "../lib/keys.mjs";
+import { MODES, VIEW_KEYS, initialFocus, keyName, routeKey } from "../lib/keys.mjs";
+import { MENU_ACTIONS } from "../lib/menu-actions.mjs";
 import { CLIENT_ACTIONS } from "../lib/client-actions.mjs";
 import { USAGE } from "../lib/usage.mjs";
 import { renderDashboard, width } from "../lib/tui.mjs";

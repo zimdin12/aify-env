@@ -25,7 +25,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { collectSnapshot, knock } from "../lib/dashboard.mjs";
+import { collectSnapshot, knock } from "../lib/view-snapshot.mjs";
 import { collectEnvironmentChecks } from "../lib/environment-report.mjs";
 import { renderDashboard } from "../lib/tui.mjs";
 

@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { agentRecordsById, collectSnapshot } from "../lib/dashboard.mjs";
+import { agentRecordsById, collectSnapshot } from "../lib/view-snapshot.mjs";
 import { dashboardWord, hueOf } from "../lib/agent-status-palette.mjs";
 import { renderDashboard } from "../lib/tui.mjs";
 import { layoutFrom } from "../lib/tui-layout.mjs";

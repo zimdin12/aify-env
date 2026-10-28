@@ -25,7 +25,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { collectSnapshot, startDashboard } from "../lib/dashboard.mjs";
+import { startDashboard } from "../lib/dashboard.mjs";
+import { collectSnapshot } from "../lib/view-snapshot.mjs";
 import { createNotices } from "../lib/notices.mjs";
 import { renderDashboard } from "../lib/tui.mjs";
 

@@ -8,12 +8,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  DEFAULT_PROBE_TIMEOUT_MS,
-  collectSnapshot,
-  knock,
-  startDashboard,
-} from "../lib/dashboard.mjs";
+import { startDashboard } from "../lib/dashboard.mjs";
+import { DEFAULT_PROBE_TIMEOUT_MS, collectSnapshot, knock } from "../lib/view-snapshot.mjs";
 
 const REGISTRY = JSON.stringify({
   version: 1,

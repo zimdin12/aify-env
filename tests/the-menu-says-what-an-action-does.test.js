@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MENU_ACTIONS } from "../lib/keys.mjs";
+import { MENU_ACTIONS } from "../lib/menu-actions.mjs";
 import { ACTION_EFFECTS, renderDashboard } from "../lib/tui.mjs";
 
 const rows = [{ id: "p1", label: "alpha" }];

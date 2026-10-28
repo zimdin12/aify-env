@@ -6,7 +6,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { initialFocus, quitsOnQ, reconcileFocus, routeKey, typedText } from "../lib/keys.mjs";
+import { initialFocus, quitsOnQ, reconcileFocus, routeKey } from "../lib/keys.mjs";
+import { typedText } from "../lib/key-input.mjs";
 import { ConsoleSession } from "../lib/console-session.mjs";
 import { matchesQuery, offScreenNote, startListLines, startRowTexts } from "../lib/start-list.mjs";
 import { renderDashboard } from "../lib/tui.mjs";

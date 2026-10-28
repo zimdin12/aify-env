@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 
-import { isNavigationKey, splitKeys } from "../lib/keys.mjs";
+import { isNavigationKey, splitKeys } from "../lib/key-input.mjs";
 import { ConsoleSession } from "../lib/console-session.mjs";
 import { startDashboard } from "../lib/dashboard.mjs";
 

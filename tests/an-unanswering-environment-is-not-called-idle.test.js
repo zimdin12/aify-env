@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { collectSnapshot } from "../lib/dashboard.mjs";
+import { collectSnapshot } from "../lib/view-snapshot.mjs";
 import { renderDashboard } from "../lib/tui.mjs";
 
 const collect = (fetchImpl) => collectSnapshot({

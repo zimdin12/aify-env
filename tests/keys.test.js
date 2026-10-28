@@ -6,9 +6,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  DETACH, MENU_ACTIONS, MODES, initialFocus, menuActionsIn, needsConfirming, reconcileFocus, routeKey,
-} from "../lib/keys.mjs";
+import { DETACH, MODES, initialFocus, reconcileFocus, routeKey } from "../lib/keys.mjs";
+import { MENU_ACTIONS, menuActionsIn, needsConfirming } from "../lib/menu-actions.mjs";
 
 const ESC = String.fromCharCode(27);
 const UP = `${ESC}[A`;
