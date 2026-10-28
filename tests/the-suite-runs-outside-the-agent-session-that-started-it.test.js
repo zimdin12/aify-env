@@ -13,12 +13,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { LIFETIME_CARRIERS } from '../lib/managed-lifetimes.mjs';
+import { BINDING_CARRIERS, LIFETIME_CARRIERS } from '../lib/managed-lifetimes.mjs';
 
 const PLANTED = {
   HERDR_SOCKET_PATH: 'live-socket', AIFY_HERDR_PANE_FILE: 'live-pane', AIFY_AGENT_ID: 'live-agent',
   aify_agent_lease: 'live-lease', CLAUDE_CODE_CHILD_SESSION: '1',
-  ...Object.fromEntries(LIFETIME_CARRIERS.map((name, i) => [i % 2 ? name.toLowerCase() : name, `live-${name}`])),
+  ...Object.fromEntries([...LIFETIME_CARRIERS, ...BINDING_CARRIERS].map((name, i) => [i % 2 ? name.toLowerCase() : name, `live-${name}`])),
 };
 
 test('no test file sees a Herdr, an agent identity or a lifetime it did not set itself', () => {

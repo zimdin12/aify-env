@@ -16,11 +16,11 @@ function fixture(t, mode = 'managed') {
  const probe = pids => new Map(pids.map(pid=>[pid,{alive,createdAtUs:birth,commandLine:'bash C:/fixture/hermes-aify'}]));
  const host = new AgentStateHost({aifyHome:home,instance:'owner',probe,nowUs:()=>1700000000001000}); host.boot();
  const child = new EventEmitter(); child.pid=424242; child.stdout=new EventEmitter(); child.stderr=new EventEmitter(); child.stdin={write(){}}; child.kill=()=>kills.push('child');
- const runner = new Runner({openTerminal:null,spawnProcess:()=>child,managedHost:()=>({host,instance:'owner',url:'http://127.0.0.1:12345'}),isAlive:()=>alive,killTree:async()=>kills.push('tree')});
+ const spawned=[]; const runner = new Runner({openTerminal:null,spawnProcess:(command,args,options)=>{spawned.push(options?.env);return child;},managedHost:()=>({host,instance:'owner',url:'http://127.0.0.1:12345'}),isAlive:()=>alive,killTree:async()=>kills.push('tree')});
  const definitions = new DefinitionStore({dir:path.join(home,'definitions')});
  const ports = createAgentLifecyclePorts({aifyHome:home,machineId:'machine',stateHost:host,runner,definitions,probe,isAlive:()=>alive,killTree:async()=>{kills.push('resident');alive=false;},settleMs:0,installed:async()=>new Set(['hermes']),buildSpec:async()=>({service:'fixture',fileText:'#!/bin/bash\nHARNESS_WRAPPER_VERSION="1.0"',command:'fixture',args:[],env:{}})});
  const agent={id:'a',name:'Fixture',role:'worker',harness:'hermes',mode,workspace:home,model:'',effort:'',instructions:'',env:{},herdrSpace:false};
- return {home,host,runner,definitions,ports,kills,child,agent,probe,setAlive:v=>{alive=v;},setBirth:v=>{birth=v;}};
+ return {home,host,runner,definitions,ports,kills,child,agent,probe,spawned,setAlive:v=>{alive=v;},setBirth:v=>{birth=v;}};
 }
 async function request(f, action, id='request') { const listed=await f.definitions.list(); const row=listed.definitions[0]; return {id,agentId:'a',machineId:'machine',storeId:listed.storeId,expectedIncarnation:row.incarnation,expectedRevision:row.revision,expectedLifetime:f.host.rawIdentity('a').current?.lifetime??null,action,requestedBy:'fixture'}; }
 async function seed(f) { await f.definitions.set('a',f.agent,{installed:new Set(['hermes'])}); }
@@ -84,4 +84,14 @@ test('foreign resident cannot be interpreted as absence',async t=>{
  const f=fixture(t,'resident');await seed(f);fs.mkdirSync(path.join(f.home,'residents'));
  const r={agentId:'a',lifetime:'11111111-1111-4111-8111-111111111111',instance:'foreign',harness:'hermes',pid:424242,launcher:'C:/fixture/hermes-aify',writtenAtUs:1700000000001000};
  fs.writeFileSync(path.join(f.home,'residents',`a.${r.lifetime}.json`),JSON.stringify(r));assert.equal(f.host.rawIdentity('a').unknown,true);
+});
+
+test('a lifecycle start tells the spawned child exactly the revision it was admitted against', async t => {
+ // A SECOND REVISION, so the number the child is told can only be the admitted one, not a constant.
+ const f = fixture(t); await seed(f); await f.definitions.set('a', {...f.agent, model:'second'}, {installed:new Set(['hermes'])});
+ const r = await request(f, 'start');
+ assert.equal(r.expectedRevision, 2, 'CONTROL: the request was built against the second revision');
+ assert.equal((await f.ports.lifecycle.execute(r)).status, 'done');
+ assert.equal(f.spawned.length, 1, 'the start spawned nothing');
+ assert.deepEqual([f.spawned[0].AIFY_DEFINITION_INCARNATION, f.spawned[0].AIFY_DEFINITION_REVISION], [String(r.expectedIncarnation), '2']);
 });
