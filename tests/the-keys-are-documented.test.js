@@ -222,13 +222,19 @@ test("THE UNDISCOVERABLE KEYS OUTLAST THE OBVIOUS ONES", () => {
   }
 });
 
-test("ATTACHING OUTLASTS THE PANE MENU, and is on the default 100-column line as it was before `c`", () => {
-  // Attaching is what the list is for; `c panes` is a setting used once and remembered (0.9.6 review). The default
-  // columns, because they are what an operator first sees: there `enter attach` holds from 100 columns up.
-  const ordinary = hintAt(100, false);
-  assert.match(ordinary, /enter attach/, `attach was dropped at 100 columns: ${JSON.stringify(ordinary)}`);
-  assert.doesNotMatch(ordinary, /c panes/, "both fit, so this width proves nothing about which goes first");
-  assert.match(hintAt(140, false), /c panes/, "the control: given room, the pane menu is offered");
+test("ATTACHING OUTLASTS THE SETTINGS, and is on a 100-column line in either set of columns, as it was before `v` and `c`", () => {
+  // Attaching is what the list is for; `v` and `c` are settings used once and remembered (0.9.6 review). Measured by
+  // sweeping: attach holds from 81 columns in both views, `c panes` from 93, `v … columns` from 112.
+  for (const extended of [false, true]) {
+    const which = extended ? "the extended columns" : "the default columns";
+    assert.match(hintAt(100, extended), /enter attach/, `attach was dropped at 100 columns in ${which}`);
+    // 90 COLUMNS, where attach fits and neither setting does: so attach outranks both, not just whichever went first.
+    const narrow = hintAt(90, extended);
+    assert.match(narrow, /enter attach/, `attach was dropped at 90 columns in ${which}`);
+    assert.doesNotMatch(narrow, /c panes| columns/, `a setting outlasted attach in ${which}: ${JSON.stringify(narrow)}`);
+    const wide = hintAt(140, extended);
+    assert.ok(/c panes/.test(wide) && / columns/.test(wide), `the control: given room, ${which} offer both settings`);
+  }
 });
 
 test("THE HINT NEVER EXCEEDS THE TERMINAL, which is what a wrapped row costs here", () => {
