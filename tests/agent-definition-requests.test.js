@@ -81,6 +81,18 @@ test("A REQUEST NAMING secrets is refused, whatever it sets, and nothing else ab
   assert.deepEqual(decide({ model: "x" }), { verdict: "apply" }, "the control: the same request without it applies");
 });
 
+test("A REQUEST NAMING ANOTHER id is refused, not answered done with the id silently kept; the agent's own id is not", () => {
+  // mergePatch skips `id`, so before this a rename attempt applied its other fields and kept the old id behind a "done".
+  const decide = (req) => requestDecision({ request: request(req), storeId: "s1", current: current(), trashed: null });
+  const reason = 'an agent\'s id is not changed by request (a cannot become "b")';
+  for (const patch of [{ id: "b" }, { id: "b", model: "x" }]) assert.deepEqual(decide({ patch }), { verdict: "refused", reason }, JSON.stringify(patch));
+  assert.equal(decide({ patch: { id: null } }).verdict, "refused", "a null id is not the agent's own");
+  assert.deepEqual(decide({ patch: { id: "a", model: "x" } }), { verdict: "apply" }, "the agent's own id, as a full patch carries it");
+  const creation = requestDecision({ request: request({ expectedIncarnation: 0, expectedRevision: 0, patch: { id: "a", ...agent() } }),
+    storeId: "s1", current: undefined, trashed: null });
+  assert.deepEqual(creation, { verdict: "apply" }, "a creation's whole agent names its own id");
+});
+
 const launch = (over = {}) => ({ agentId: "a", runtime: "claude-code",
   definition: { storeId: "s1", incarnation: 1, revision: 2 }, ...over });
 const listing = (over = {}) => ({ storeId: "s1", definitions: [current()], ...over });
