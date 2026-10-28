@@ -56,10 +56,11 @@ const stopDaemon = (child) => new Promise((resolve) => {
   child.kill();
 });
 
-const frame = (endpoint, registry) => spawnSync(process.execPath, [TUI, "--once"], {
+const frame = (endpoint, registry, home = null) => spawnSync(process.execPath, [TUI, "--once"], {
   encoding: "utf8",
   timeout: 60_000,
-  env: { ...process.env, AIFY_ENV_ENDPOINT: endpoint, AIFY_SERVICE_REGISTRY: registry, AIFY_PROBE_TIMEOUT_MS: "1000" },
+  env: { ...process.env, AIFY_ENV_ENDPOINT: endpoint, AIFY_SERVICE_REGISTRY: registry, AIFY_PROBE_TIMEOUT_MS: "1000",
+    ...(home ? { HOME: home, USERPROFILE: home } : {}) },
 });
 
 test("BOTH DIRECTIONS: the view shows a live environment, and says so when there is none", async () => {
@@ -113,7 +114,11 @@ test("a process started through the daemon APPEARS in the view", async () => {
     assert.equal(started.status, 201, text);
     const handle = JSON.parse(text);
 
-    const rendered = frame(base, registry).stdout;
+    // THROUGH THE OPERATOR'S OWN FILE (0.9.6): the handle and the service are in the extended columns, so this view's
+    // home carries a ~/.aify/tui.json asking for them -- which also proves `aify-env tui --once` reads that file.
+    fs.mkdirSync(path.join(dir, ".aify"));
+    fs.writeFileSync(path.join(dir, ".aify", "tui.json"), JSON.stringify({ version: 1, extended: true }));
+    const rendered = frame(base, registry, dir).stdout;
     // THE PROJECTION, not the whole handle. A handle is `<uuid>-p<n>` so a consumer holding one across
     // a restart cannot match a process the next instance numbered the same; 39 characters is right for
     // identity and wrong for a table, so the view renders `shortHandle`. Asserting on the full id here

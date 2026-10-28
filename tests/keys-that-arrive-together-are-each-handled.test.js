@@ -107,5 +107,6 @@ test("THROUGH THE VIEW: a coalesced read moves the cursor on screen", async () =
   await new Promise((r) => setImmediate(r));
   input.emit("data", "jj");
   stop();
-  assert.match(written.at(-1), /❯3/, "the cursor did not reach the third row");
+  // The default view's cursor carries no number (0.9.6): the third row is the one naming charlie.
+  assert.match(written.at(-1), /❯[^\n]*charlie/, "the cursor did not reach the third row");
 });

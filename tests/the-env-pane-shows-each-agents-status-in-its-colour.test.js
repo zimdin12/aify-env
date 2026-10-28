@@ -11,6 +11,7 @@ import test from "node:test";
 import { collectSnapshot, statesById } from "../lib/dashboard.mjs";
 import { dashboardWord, hueOf } from "../lib/agent-status-palette.mjs";
 import { renderDashboard } from "../lib/tui.mjs";
+import { layoutFrom } from "../lib/tui-layout.mjs";
 
 const ESC = String.fromCharCode(27);
 const snapshot = (agentStates) => ({
@@ -21,18 +22,30 @@ const snapshot = (agentStates) => ({
 });
 const rowOf = (lines, label) => lines.find((line) => line.includes(label)) ?? "";
 
-test("each row carries its agent's word, and its dot is painted in that status's hue", () => {
-  const lines = renderDashboard(snapshot({ alpha: "working", bravo: "idle", charlie: "blocked" }), { columns: 140, color: true });
+// THE DEFAULT VIEW DRAWS THE DOT ALONE, the extended one the dot and its word (0.9.6, the operator's ask to drop the
+// status text by default). Both are held here: the hue is what the 2026-10-25 report was about, in either set.
+const EXTENDED = layoutFrom(JSON.stringify({ extended: true }));
+
+test("each row's dot is painted in its status's hue, and the extended view adds the word", () => {
+  const states = { alpha: "working", bravo: "idle", charlie: "blocked" };
+  const plain = renderDashboard(snapshot(states), { columns: 140, color: true });
+  assert.match(rowOf(plain, "alpha"), new RegExp(`${ESC}\\[33m●${ESC}\\[0m\\s`), "working is yellow");
+  assert.match(rowOf(plain, "bravo"), new RegExp(`${ESC}\\[32m●${ESC}\\[0m\\s`), "aify-env's idle is the dashboard's green");
+  assert.match(rowOf(plain, "charlie"), new RegExp(`${ESC}\\[31m●${ESC}\\[0m\\s`), "blocked is red");
+  assert.doesNotMatch(rowOf(plain, "alpha"), /working/, "the default view still draws the status word");
+  const lines = renderDashboard(snapshot(states), { columns: 140, color: true, layout: EXTENDED });
   assert.match(rowOf(lines, "alpha"), new RegExp(`${ESC}\\[33m●${ESC}\\[0m working`), "working is yellow");
   assert.match(rowOf(lines, "bravo"), new RegExp(`${ESC}\\[32m●${ESC}\\[0m online`), "aify-env's idle reads as the dashboard's green online");
   assert.match(rowOf(lines, "charlie"), new RegExp(`${ESC}\\[31m●${ESC}\\[0m blocked`), "blocked is red");
 });
 
 test("a row with no word draws a dash, never a guessed status", () => {
-  const lines = renderDashboard(snapshot({ alpha: "working" }), { columns: 140, color: false });
+  const plain = renderDashboard(snapshot({ alpha: "working" }), { columns: 140, color: false });
+  assert.match(rowOf(plain, "bravo"), /^\s*—\s/, "bravo has no state, so its status cell is a dash");
+  const lines = renderDashboard(snapshot({ alpha: "working" }), { columns: 140, color: false, layout: EXTENDED });
   assert.match(rowOf(lines, "bravo"), /^\s*—\s/, "bravo has no state, so its status cell is a dash");
   assert.match(rowOf(lines, "alpha"), /● working/, "control: alpha still draws its word");
-  const unknown = renderDashboard(snapshot({ alpha: "unknown" }), { columns: 140, color: false });
+  const unknown = renderDashboard(snapshot({ alpha: "unknown" }), { columns: 140, color: false, layout: EXTENDED });
   assert.match(rowOf(unknown, "alpha"), /○ unknown/, "a word with no hue is drawn plainly, hollow");
 });
 

@@ -128,7 +128,7 @@ test("none of this appears when something IS running", () => {
     history: { startedTotal: 9, lastExitAtMs: 1_000 },
     nowMs: 2_000,
   });
-  assert.match(text, /p1/);
+  assert.match(text, /sc-coder/);
   assert.doesNotMatch(text, /idle/, "a busy environment claimed to be idle");
   assert.doesNotMatch(text, /started since/);
 });

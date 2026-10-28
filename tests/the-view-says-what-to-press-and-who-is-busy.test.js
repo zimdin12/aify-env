@@ -16,6 +16,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { renderDashboard } from "../lib/tui.mjs";
+import { layoutFrom } from "../lib/tui-layout.mjs";
+
+// THE EXTENDED COLUMNS (0.9.6): the set `v` switches to, which numbers the rows and keeps id, pid, service and io.
+const EXTENDED = layoutFrom(JSON.stringify({ extended: true }));
 import { WORKING_SILENCE_MS } from "../lib/activity.mjs";
 
 const NOW = 1_800_000_000_000;
@@ -59,8 +63,9 @@ test("with a keyboard, the view says what to press", () => {
   // Left at 100 this would have gone red for a reason unrelated to what it is testing, and the
   // tempting repair -- deleting `jump` from the list -- would have stopped anyone noticing if the
   // digits were dropped from the view entirely.
-  const view = render({}, { columns: 140, keys: { enabled: true, canQuit: true } });
-  for (const hint of ["move", "jump", "find", "attach", "actions", "start"]) {
+  // In the extended set (0.9.6), which numbers the rows: `1-9 jump` is offered only where there are numbers.
+  const view = render({}, { columns: 160, keys: { enabled: true, canQuit: true }, layout: EXTENDED });
+  for (const hint of ["move", "jump", "find", "attach", "actions", "fewer columns", "start"]) {
     assert.match(view, new RegExp(hint), `the hint line does not mention ${hint}`);
   }
   assert.match(view, /1-9/, "the jump keys are not named");
@@ -139,7 +144,7 @@ test("the mark does not displace the columns that were already there", () => {
   // worse view than the one before the feature.
   const row = rowFor("sc-lead", {
     processes: [{ ...SNAPSHOT.processes[0], title: "Claude Code", lastOutputAtMs: NOW - 100 }],
-  });
+  }, { layout: EXTENDED });
   for (const cell of ["aaaa-p1", "11", "sc-lead", "aify-comms", "pty", "Claude Code"]) {
     assert.ok(row.includes(cell), `the row lost ${cell}`);
   }

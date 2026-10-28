@@ -11,6 +11,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { DEFAULT_NOTICE_ROWS, renderDashboard } from "../lib/tui.mjs";
+import { layoutFrom } from "../lib/tui-layout.mjs";
+
+// THE EXTENDED COLUMNS (0.9.6): id, pid, service and io left the default agents view for the set `v` switches to.
+const EXTENDED = layoutFrom(JSON.stringify({ extended: true }));
 
 const SNAPSHOT = {
   version: "0.6.0",
@@ -27,7 +31,7 @@ const SNAPSHOT = {
   traffic: { requests: 12, bytesOut: 34_567 },
 };
 
-const render = (overrides = {}) => renderDashboard({ ...SNAPSHOT, ...overrides }).join("\n");
+const render = (overrides = {}, options = {}) => renderDashboard({ ...SNAPSHOT, ...overrides }, options).join("\n");
 
 test("THE ACTIVITY DOT'S COLUMN IS NAMED, so a grey circle is not read as 'offline'", () => {
   // The operator reported this as a bug: "claude agents status dot is not green even tho they are
@@ -48,7 +52,7 @@ test("THE ACTIVITY DOT'S COLUMN IS NAMED, so a grey circle is not read as 'offli
       { id: "busy", pid: 1, service: "s", terminal: true, uptimeMs: 1000, lastOutputAtMs: now },
       { id: "idle", pid: 2, service: "s", terminal: true, uptimeMs: 1000, lastOutputAtMs: now - 300_000 },
     ],
-  });
+  }, { layout: EXTENDED });
   assert.match(view, /\bOUT\b/, "the activity column has no header, so its dot means whatever the reader guesses");
 
   // POSITIVE AND NEGATIVE CONTROL TOGETHER: the header would be worth nothing if both rows carried
@@ -157,7 +161,7 @@ test("a SILENT service is shown as unanswered, not as down", () => {
 });
 
 test("owned processes are shown with pid and owning service", () => {
-  const view = render();
+  const view = render({}, { layout: EXTENDED });
   assert.match(view, /4242/);
   assert.match(view, /p1/);
 });
@@ -243,24 +247,24 @@ const OWNED = {
 
 test("a process row names the agent the caller gave it", () => {
   // `p2  pid 129340  aify-comms` cannot tell an operator WHICH agent that is, which is what they asked.
-  const row = renderDashboard(OWNED).find((line) => line.includes("129340"));
+  const row = renderDashboard(OWNED, { layout: EXTENDED }).find((line) => line.includes("129340"));
   assert.match(row, /probe-one/);
 });
 
 test("a process with no label renders a placeholder, not an empty column", () => {
-  const row = renderDashboard(OWNED).find((line) => line.includes(" 7 "));
+  const row = renderDashboard(OWNED, { layout: EXTENDED }).find((line) => line.includes(" 7 "));
   assert.ok(row, "the unlabelled process vanished");
   assert.ok(!/undefined|null/.test(row), row);
 });
 
 test("the terminal title the process set is shown", () => {
-  const row = renderDashboard(OWNED).find((line) => line.includes("129340"));
+  const row = renderDashboard(OWNED, { layout: EXTENDED }).find((line) => line.includes("129340"));
   assert.match(row, /claude - C:/);
 });
 
 test("uptime is rendered from the field the collector supplies", () => {
   // It read `uptimeMs` while the registry only stored `startedAtMs`, so every row showed "up -".
-  const row = renderDashboard(OWNED).find((line) => line.includes("129340"));
+  const row = renderDashboard(OWNED, { layout: EXTENDED }).find((line) => line.includes("129340"));
   assert.match(row, /6m/);
 });
 
