@@ -268,6 +268,7 @@ decisions rather than bindings.
 | `m` | actions for the selected agent |
 | `s` | start an agent this host knows that has no worker: the list replaces the table, typing searches it, arrows move, Enter starts, Tab switches whether the highlighted agent gets a herdr space from its next start (aify-comms keeps the setting) |
 | `v` | more or fewer columns in the agents list: id, pid, service and io are in the extended set; kept in `~/.aify/tui.json` |
+| `c` | the pane menu: each pane's letter (`s` services, `h` health, `a` agents, `x` exits, `n` notices, `t` traffic) collapses it to its heading or expands it; kept in `~/.aify/tui.json` |
 | `ctrl+]` | back, from anywhere |
 | `ctrl+l` | redraw the screen, if anything has smeared it (outside an attached pane, where it is the agent's) |
 | `q` | leave, where leaving is offered |

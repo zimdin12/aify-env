@@ -179,7 +179,7 @@ test("NO HINT IS EVER CUT MID-ITEM, at any width a terminal can be", () => {
   // separated piece to be one this view actually produces, which cannot miss a shape nobody
   // predicted -- unlike hunting for a trailing ellipsis.
   const WHOLE = new Set(["↑↓ move", "1-9 jump", "g find", "p show console", "p hide console",
-    "enter attach", "m actions", "v more columns", "v fewer columns", "s start", "q quit"]);
+    "enter attach", "m actions", "v more columns", "v fewer columns", "c panes", "s start", "q quit"]);
   for (const columns of widthsToCheck) {
     const hint = hintAt(columns);
     assert.ok(hint, `no hint at all was drawn at ${columns} columns`);
@@ -207,12 +207,12 @@ test("THE UNDISCOVERABLE KEYS OUTLAST THE OBVIOUS ONES", () => {
   // AND THE ORDER AMONG THE OBVIOUS ONES IS PINNED WHERE IT SHOWS. At 40 columns both the arrows and
   // the digits are gone whichever way they are ranked, so that width proves nothing about their
   // relative order -- a mutant that dropped items in plain display order survived exactly this test.
-  // 120 columns is a width where one of them fits and the other does not: 113 to 125 since `v` joined the line
-  // (0.9.6, measured by sweeping the width); it was 100 before.
+  // 130 columns is a width where one of them fits and the other does not: 125 to 137 since `v` and `c` joined the
+  // line (0.9.6, measured by sweeping the width); it was 100 before.
   //
   // ARROWS OUTRANK DIGITS because they are the more universal of the two: `1-9` only reaches the
   // first nine rows, and an operator who knows the arrows can get everywhere.
-  const middling = hintAt(120);
+  const middling = hintAt(130);
   assert.match(middling, /↑↓ move/, "the arrows were dropped before the digits");
   assert.doesNotMatch(middling, /1-9 jump/, "both movement hints fit, so this width proves nothing");
   // POSITIVE CONTROL: given room, everything is there — so this is a fitting rule and not a deletion.
