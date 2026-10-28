@@ -34,7 +34,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -42,9 +42,11 @@ import { handleRequest } from "../lib/protocol.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Every `proc.<field>` the process table reads, taken from the view's own source. */
+/** Every `proc.<field>` the process table reads, taken from the view's own source: tui.mjs and, since the 0.9.6
+ *  split, its pieces and panes. Reading tui.mjs alone found nothing after the split, which the control below caught. */
 function fieldsTheViewRenders() {
-  const view = readFileSync(join(ROOT, "lib", "tui.mjs"), "utf8");
+  const panes = readdirSync(join(ROOT, "lib", "tui-panes")).filter((name) => name.endsWith(".mjs")).map((name) => join("tui-panes", name));
+  const view = ["tui.mjs", "tui-parts.mjs", ...panes].map((file) => readFileSync(join(ROOT, "lib", file), "utf8")).join("\n");
   // The table's row builder is the only place `proc.` appears; a stray match elsewhere would only
   // ever make this test STRICTER, never weaker.
   const found = new Set();
