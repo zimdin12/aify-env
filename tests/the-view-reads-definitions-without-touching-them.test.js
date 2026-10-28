@@ -13,6 +13,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
+import { readDefinitionSummary } from "../lib/definition-summary.mjs";
 import { formatDefinitionFile } from "../lib/agent-definition-schema.mjs";
 import { renderDashboard } from "../lib/tui.mjs";
 import { layoutFrom } from "../lib/tui-layout.mjs";
@@ -158,4 +159,11 @@ test("a definitions read that throws costs the view those fields, never its fram
     readInvocationRegistries: () => [], readDefinitions: () => { throw new Error("EACCES"); } });
   assert.deepEqual(snapshot.definitions, {});
   assert.equal(snapshot.answered, false, "CONTROL: the rest of the snapshot was still collected");
+});
+
+test("readDefinitionSummary reads only the folder it is handed, and the store hands it its own", async (t) => {
+  const { dir } = await definedStore(t);
+  assert.deepEqual(readDefinitionSummary(dir), new DefinitionStore({ dir }).readOnlySummary());
+  assert.equal(readDefinitionSummary(dir).get("lead")?.model, "opus", "CONTROL: the folder it was handed is read");
+  assert.equal(readDefinitionSummary(path.join(dir, "elsewhere")).size, 0, "another folder is not this store");
 });

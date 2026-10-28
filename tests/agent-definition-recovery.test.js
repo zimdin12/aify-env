@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { adoptionPlan, caseCollisions, ledgerEntry, recoveryDecision } from "../lib/agent-definition-recovery.mjs";
+import { adoptionPlan, caseCollisions, ledgerEntry, ledgerProblem, recoveryDecision } from "../lib/agent-definition-recovery.mjs";
 
 const OP = "op-2";
 const intent = (over = {}) => ({ operation: OP, op: "set", id: "a", before: "digest-before", ...over });
@@ -93,4 +93,16 @@ test("A LEDGER ENTRY is an own property: Object.prototype's members are not agen
   const ids = JSON.parse('{"a": {"incarnation": 1}}');
   assert.deepEqual(ledgerEntry(ids, "a"), { incarnation: 1 });
   for (const name of ["constructor", "toString", "hasOwnProperty", "missing"]) assert.equal(ledgerEntry(ids, name), undefined, name);
+});
+
+test("ledgerProblem: a usable ledger says nothing, and each way one is unusable is named", () => {
+  const good = { version: 1, storeId: "s", revision: 1, nextIncarnation: 2, snapshotDigest: "", lastOperation: null,
+    ids: { lead: { incarnation: 1, revision: 1, fileDigest: "d" } } };
+  assert.equal(ledgerProblem(good), "");
+  for (const [bad, said] of [[null, "not an object"], [[], "not an object"], [{ ...good, version: 99 }, "unsupported version"],
+    [{ ...good, storeId: "" }, "no storeId"], [{ ...good, revision: 0 }, "a counter is not a safe integer from 1"],
+    [{ ...good, snapshotDigest: 1 }, "no snapshotDigest"], [{ ...good, lastOperation: 7 }, "lastOperation is not a string"],
+    [{ ...good, ids: [] }, "ids is not an object"], [{ ...good, ids: { lead: { incarnation: 1, revision: 1 } } }, 'the entry for "lead" is malformed']]) {
+    assert.equal(ledgerProblem(bad), said, JSON.stringify(bad));
+  }
 });
