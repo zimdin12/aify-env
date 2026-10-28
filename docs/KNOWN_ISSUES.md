@@ -12,15 +12,25 @@ It was 848 when 0.9.9 added the view's read-only summary. Two subjects other cod
 four-step operation. Recovery and adoption are the next separable parts if it grows; each must keep the folder named
 here alone (`tests/agent-definitions-have-one-writer.test.js`).
 
-## The attach-client test's process crashed natively in two full runs (seen 2026-10-28; unattributed)
+## A test file's process sometimes ends early under concurrent suites, with no subtest to blame (seen 2026-10-28; unattributed)
 
-`tests/an-attach-client-names-itself-as-a-viewer.test.js` failed at file level in 2 of 3 full runs of the 0.9.9
-definition-binding change: exit code 3 once, after both its subtests had passed, and 3221225477 (0xC0000005, an access
-violation) once. It passed in the third run, alone 3 times in 3, and in both full runs of main (ce78e2e) on the same
-host the same afternoon. The test drives `bin/aify-env-attach.mjs` in a real terminal through node-pty (ConPTY), with
-the test's environment plus two endpoint variables; nothing in that change reaches it. Other repositories' suites
-(aify-wrapper, aify-comms, planetary_golf) were running at the same time. ASSUMED: a ConPTY fault under load,
-unattributed. A crash with the host otherwise idle would make it this repository's to chase.
+A PATTERN, not one test. Each time, a whole file failed at file level, passed alone and on a rerun, and other
+repositories' suites were running on the same Windows host. Four of the same shape that evening, across three
+repositories:
+- `tests/an-attach-client-names-itself-as-a-viewer.test.js`, 2 of 3 full runs of the definition-binding change:
+  `exitCode: 3` once, after both its subtests had passed, and `exitCode: 3221225477` (0xC0000005, an access violation)
+  once. It drives `bin/aify-env-attach.mjs` in a real terminal through node-pty (ConPTY).
+- `tests/the-daemon-receives-turn-hooks.test.js`, 1 of 3 full runs of the Herdr pane reporter: `exitCode: 1` at 4 s,
+  with no subtest reported. It spawns a real daemon in a sealed home.
+- aify-wrapper's `hermes-delivery-endpoint-is-the-launchers` (exit 1 at 22 s, no subtest reported) and aify-comms'
+  `claude-wrapper-contract` #11 (a helper exited non-zero with no stderr), in those repositories' runs.
+
+Nothing in the changes under test reached any of them, and the main branch passed the same files in the same
+afternoon's runs. ASSUMED: one host-level cause under load. A Windows `0xC0000142` (a DLL failing to initialise, as
+under desktop-heap pressure) would explain every instance; the exit status of the process that actually ended is what
+would settle it. The runner records each file's own status (`exitCode:` in the TAP failure); a status from inside the
+file, a spawned daemon's or helper's, is only as visible as that test makes it. A failure of this shape with the host
+otherwise idle would make it this repository's to chase.
 
 ## "Unexpected end of JSON input" in two unrelated live tests (seen 2026-10-28; one fixed, one instrumented)
 
