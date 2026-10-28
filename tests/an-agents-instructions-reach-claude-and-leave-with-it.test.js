@@ -8,8 +8,8 @@
 // session-folder rule about the folder that launch filled.
 //
 // Since aify-wrapper 343c98f a managed start gets the instructions only when it carries the revision aify-env admitted
-// (AIFY_DEFINITION_INCARNATION and _REVISION, which aify-env's managed start sets from the admitted launch); the pair
-// here is the store's own answer to the write, so the cases below meet the wrapper's comparison with aify-env's counters.
+// (AIFY_DEFINITION_INCARNATION and _REVISION). The pair here is what aify-env's managed start sets for the counters the
+// store answered the write with, so the cases below meet the wrapper's comparison with aify-env's own names and values.
 //
 // THE WRAPPER'S TEST HELPER IS IMPORTED BY PATH (tests/launch-to-a-stub-runtime.mjs, its `launch`), the way aify-comms
 // imports modules of this repo: aify-wrapper is told, so a change to that helper's interface is not a surprise.
@@ -24,6 +24,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
+import { BINDING_CARRIERS, ManagedLifetimes } from "../lib/managed-lifetimes.mjs";
 import { SessionFolders, sessionsRoot } from "../lib/session-folders.mjs";
 
 function peer() {
@@ -49,18 +50,28 @@ function scratch(t, name) {
 }
 
 /**
+ * The binding variables aify-env's managed start (ManagedLifetimes) hands a child admitted at this incarnation and
+ * revision, and only those: its lifetime names point at an aify-env this test does not run. The storeId is not carried.
+ */
+function bindingEnv({ incarnation, revision }) {
+  let env = null;
+  const managedHost = () => ({ host: { startManaged() {}, endManaged: () => ({}) }, instance: "default", url: "http://127.0.0.1:4000" });
+  new ManagedLifetimes({ managedHost }).spawn({ agentId: "lead", definition: { storeId: "store", incarnation, revision }, env: {} },
+    (prepared) => { env = prepared.env; return {}; });
+  return Object.fromEntries(Object.entries(env).filter(([name]) => BINDING_CARRIERS.includes(name)));
+}
+
+/**
  * aify-env's store with `lead` defined by these `instructions` and `harness`. `file()` is the bytes the launcher reads;
- * `binding` is the pair a start admitted now carries, from the store's own answer to the write, named as aify-env's
- * managed start names it (AIFY_DEFINITION_INCARNATION and _REVISION); `define` writes the next revision.
+ * `binding` is what a start admitted now carries, from the store's own answer to the write; `define` writes the next
+ * revision.
  */
 async function defineLead(t, { instructions, harness = "claude" }) {
   const dir = path.join(scratch(t, "aify-instructions-store-"), "agent-definitions");
   const store = new DefinitionStore({ dir });
-  const define = async (text) => {
-    const written = await store.set("lead", { id: "lead", name: "Lead", role: "reviewer", harness, mode: "managed",
-      workspace: os.tmpdir(), model: "", effort: "", instructions: text, env: {}, herdrSpace: false }, { installed: new Set([harness]) });
-    return { AIFY_DEFINITION_INCARNATION: String(written.incarnation), AIFY_DEFINITION_REVISION: String(written.revision) };
-  };
+  const define = async (text) => bindingEnv(await store.set("lead", { id: "lead", name: "Lead", role: "reviewer", harness,
+    mode: "managed", workspace: os.tmpdir(), model: "", effort: "", instructions: text, env: {}, herdrSpace: false },
+  { installed: new Set([harness]) }));
   return { binding: await define(instructions), define, file: () => fs.readFileSync(path.join(dir, "lead.json"), "utf8") };
 }
 
