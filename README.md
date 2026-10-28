@@ -330,8 +330,19 @@ The view's own file, read when the view starts. `v`, `o` and the pane menu write
 
 - `panes` is the order. A pane it leaves out is drawn after the ones it names, so a pane added later still appears.
 - `hidden` panes are not drawn at all; `agents` cannot be hidden, because the keys act on its list.
-- `columns` are the agents list's two sets, the values above being the defaults. Each must include `agent`. The other
-  names are `id`, `pid`, `service`, `io`, `up`, `status` and `status-word`.
+- `columns` are the agents list's two sets, the values above being the defaults. Each must include `agent`. Every
+  column either set may name:
+  - `cursor`: which row the keys are on (`❯`), and `▶` when they are inside its agent; `#` is that mark with the
+    row's number, drawn only with a keyboard;
+  - `status` and `status-word` (below), `agent`, `out` (whether it printed in the last three seconds), `title` (the
+    last terminal title it set);
+  - `id`, `pid`, `service`, `io` (`pty` or `pipe`) and `up` (since its process started);
+  - `role` (from its definition), `cwd` (where it was started), `age` (how long it has been in its state, whatever
+    the state) and `cause` (the environment's reason for the state);
+  - `harness`, `model` and `effort`, from the agent's definition on this host. The view reads the definitions store
+    without locking or changing it, so a hand edit shows once aify-env has adopted it.
+
+  These seven are in neither default (0.9.9).
 - `status` is the agent's dot and, after it, how long it has been in that state (`● 12m`), or why, when the state
   needs looking at (`● folder-trust` for a blocked agent). `status-word` adds the word: `● working 12m`.
 - `sort` is the agents table's row order: `name`, or `attention` (blocked and unknown first, then working).

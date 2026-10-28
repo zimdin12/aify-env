@@ -192,3 +192,36 @@ test("THE README'S tui.json EXAMPLE is a file the view takes whole, and its colu
   assert.deepEqual(parsed.problems, []);
   assert.deepEqual(parsed.columns, { normal: [...DEFAULT_AGENT_COLUMNS.normal], extended: [...DEFAULT_AGENT_COLUMNS.extended] });
 });
+
+// MORE COLUMNS TO CHOOSE (0.9.9, the operator's TUI upgrade, item 6): each a registry entry, so tui.json can name it.
+const DETAILED = { ...SNAPSHOT, agentRecords: { worker: { agentId: "worker", state: "blocked", stateCause: "folder-trust",
+  role: "coder", launch: { cwd: "C:/w/app" }, turn: { open: false, lastEventAtUs: (1_000_000 - 120_000) * 1000 } } } };
+const CHOSEN = layoutFrom(JSON.stringify({ columns: { agents: { normal: ["agent", "role", "cwd", "age", "cause"] } } }));
+
+test("role, cwd, age and cause are columns tui.json may name, and each draws the agent record's own field", () => {
+  assert.deepEqual(CHOSEN.problems, [], "the layout refused a column the registry offers");
+  const lines = renderDashboard(DETAILED, { columns: 160, keys: KEYS, view: VIEW, layout: CHOSEN });
+  assert.match(headerOf(lines), /^\s*AGENT\s+ROLE\s+CWD\s+AGE\s+CAUSE$/);
+  assert.match(rowOf(lines), /^\s*worker\s+coder\s+C:\/w\/app\s+2m\s+folder-trust$/,
+    "age is shown for a red state too: the dot shows the cause there, and this column is the duration");
+});
+
+test("a record that says nothing draws blanks in the new columns, never a guess", () => {
+  const lines = renderDashboard({ ...SNAPSHOT, agentRecords: {} }, { columns: 160, keys: KEYS, view: VIEW, layout: CHOSEN });
+  assert.match(rowOf(lines), /^\s*worker\s*$/);
+});
+
+test("the defaults are unchanged: none of the new columns is in either default set", () => {
+  for (const name of ["role", "cwd", "age", "cause"]) {
+    assert.ok(AGENT_COLUMNS.some((column) => column.name === name), `${name} is not in the registry`);
+    for (const set of ["normal", "extended"]) assert.ok(!DEFAULT_AGENT_COLUMNS[set].includes(name), `${name} joined the ${set} default`);
+  }
+});
+
+test("THE README names every column the registry offers, so a column added is a column documented", () => {
+  const readme = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", "README.md"), "utf8");
+  const section = readme.split("### Its layout")[1]?.split("\n## ")[0] ?? "";
+  assert.ok(section.includes("`status-word`"), "CONTROL: the layout section was not found");
+  const missing = AGENT_COLUMNS.map((column) => column.name).filter((name) => !section.includes(`\`${name}\``));
+  assert.deepEqual(missing, [], "the README's layout section does not name these columns");
+});
