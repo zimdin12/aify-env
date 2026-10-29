@@ -136,6 +136,6 @@ test("ViewRenderer: rows are ordered on a copy, and a view with no keyboard draw
   assert.deepEqual(ordered.processes.map((r) => r.id), ["alpha", "charlie"]);
   assert.deepEqual(collected.processes.map((r) => r.id), ["charlie", "alpha"], "the environment's own order was changed");
   const lines = new ViewRenderer({ color: false, endsWithHerdr: false, keys: { enabled: false, canQuit: false } })
-    .lines(ordered, { session: null, layout: readLayout({ home: path.join(os.tmpdir(), "aify-no-such-home") }), outcome: "", columns: 100, rows: 24 });
+    .frame(ordered, { session: null, layout: readLayout({ home: path.join(os.tmpdir(), "aify-no-such-home") }), outcome: "", columns: 100, rows: 24 }).lines;
   assert.ok(Array.isArray(lines) && lines.length > 0 && lines.some((line) => line.includes("alpha")), "the frame did not draw the rows");
 });

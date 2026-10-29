@@ -83,13 +83,19 @@ test("stateAge: an open turn since it started, a closed one since its last event
   assert.equal(stateAge({}, NOW), "");
 });
 
-test("when the heading is all that overflows, it gives way before any side section is compacted", () => {
+test("the blank lines go before the heading, and the heading before any side section gives way", () => {
+  // 0.9.10: the blank lines between sections say least, so they go first; DETAIL's ▸ heading at least says the pane is
+  // there (the operator could not find it on 2026-10-29). Then the heading, still before any pane is drawn ▹.
   const options = { columns: 100, keys: KEYS, view: view() };
   const full = renderDashboard(SNAPSHOT, options);
-  const without = renderDashboard(SNAPSHOT, { ...options, layout: layoutFrom(JSON.stringify({ hidden: ["detail"] })) });
-  assert.equal(full.length, without.length + 1, "CONTROL: the collapsed heading is one line");
+  const gapless = renderDashboard(SNAPSHOT, { ...options, gapless: true });
+  const without = renderDashboard(SNAPSHOT, { ...options, gapless: true, layout: layoutFrom(JSON.stringify({ hidden: ["detail"] })) });
+  assert.ok(full.length > gapless.length, "CONTROL: this frame has blank lines to give");
+  assert.equal(gapless.length, without.length + 1, "CONTROL: the collapsed heading is one line");
+  const oneShort = renderDashboard(SNAPSHOT, { ...options, rows: full.length - 1 });
+  assert.ok(oneShort.some((line) => line.startsWith("▸ DETAIL")), "one row short, the heading went before a blank line");
   assert.deepEqual(renderDashboard(SNAPSHOT, { ...options, rows: without.length }), without,
-    "one row short, the view compacted something instead of dropping the heading");
+    "the blank lines gone and one row short, the view gave up a side section instead of the heading");
 });
 
 test("an OPENED detail does not give way: the operator asked for it, so it stays however tight the view", () => {
