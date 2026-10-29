@@ -23,8 +23,8 @@ In a `herdr-aify env` instance, start one managed agent and watch its pane's dot
 3. Stopping the agent closes its pane and nothing more is reported to it (no `not told its word` line for that pane
    after the close).
 
-Until aify-wrapper's hooks stop reporting for a launch with `AIFY_HERDR_PANE_FILE` set (their gate waits on the version
-this ships in), both write the pane; Herdr keeps the highest seq, and this reporter says an unchanged word again after a
+Until aify-wrapper's hooks stop reporting for a launch with both `AIFY_HERDR_PANE_FILE` and `AIFY_HERDR_PANE_REPORTER`
+set (the second is 0.9.10's; the file alone is set by every aify-env since 0.9.0, so it cannot be the gate), both write the pane; Herdr keeps the highest seq, and this reporter says an unchanged word again after a
 minute, so the dot settles on aify-env's word within one minute of a hook's report.
 
 ## Seen live (2026-10-29, the daemon at 4a77d20 in a `herdr-aify env` instance, Herdr 0.9.5)

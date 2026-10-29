@@ -209,3 +209,33 @@ test("THE DAEMON ASKS FOR THE REPORTS wherever it evaluates agent state, read ra
   const evaluate = source.slice(source.indexOf("function evaluateAgentState() {"), source.indexOf("function stopAgentStateSending()"));
   assert.match(evaluate, /void paneOpener\?\.report\(\)\.catch\(/, "no evaluation tells a pane its word");
 });
+
+test("THE LAUNCHER STANDS DOWN ONLY WHERE A WORD WILL COME: AIFY_HERDR_PANE_REPORTER=herdr:aify, beside the pane file", async (t) => {
+  // aify-wrapper's contract (0.9.10): its Herdr hooks and exit report are skipped when this AND the pane file are set,
+  // and run as before on the pane file alone. Set where no word comes, that pane would hear from nobody.
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "aify-pane-reporter-env-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const openerWith = (observation, daemonEnv = {}) => paneOpenerFor({
+    env: { HERDR_SOCKET_PATH: path.join(root, "herdr.sock"), ...daemonEnv }, dedicatedRoot: root, base: "http://127.0.0.1:65000", node: "node",
+    script: "aify-env.mjs", platform: "linux", bin: "herdr", observation, call: () => ({}), callAsync: async () => ({}) });
+  const speaking = openerWith(screenObservation({ now: [] }));
+  const silent = openerWith(null);
+  const agent = { id: "term-1", agentId: "lead", launcher: "/bin/claude-aify", env: {} };
+
+  const told = speaking.prepare(agent).env;
+  assert.equal(HERDR_AGENT_SOURCE, "herdr:aify", "the value aify-wrapper keys on moved");
+  assert.equal(told.AIFY_HERDR_PANE_REPORTER, "herdr:aify", "a pane this daemon tells its word still has the launcher's hooks writing it");
+  assert.ok(told.AIFY_HERDR_PANE_FILE, "CONTROL: the pane file travels with it");
+
+  const unset = (spec, opener) => !Object.hasOwn(opener.prepare(spec).env, "AIFY_HERDR_PANE_REPORTER");
+  assert.ok(unset(agent, silent), "an opener with no word to read silenced the launcher: that pane hears from nobody");
+  assert.ok(unset({ ...agent, agentId: undefined }, speaking), "a worker with no agent, whose word cannot be read, silenced the launcher");
+  assert.ok(unset({ ...agent, agentId: "" }, speaking), "an empty agent id silenced the launcher");
+  const inherited = { ...agent, agentId: undefined, env: { AIFY_HERDR_PANE_REPORTER: "herdr:aify" } };
+  assert.ok(unset(inherited, speaking), "a value inherited from the daemon's own start silenced a pane no word will reach");
+  const nested = openerWith(screenObservation({ now: [] }), { AIFY_HERDR_PANE_REPORTER: "herdr:aify" });
+  assert.ok(unset({ ...inherited, env: undefined }, nested), "the daemon's own env silenced a pane no word will reach");
+  assert.equal(nested.prepare({ ...agent, env: undefined }).env.AIFY_HERDR_PANE_REPORTER, "herdr:aify", "CONTROL: from the daemon's env, an agent's pane is still told");
+});
