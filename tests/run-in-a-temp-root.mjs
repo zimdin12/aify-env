@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { BINDING_CARRIERS, LIFETIME_CARRIERS } from '../lib/managed-lifetimes.mjs';
+import { suiteArgs } from './_suite-args.mjs';
 
 const PREFIX = 'aify-env-testrun-';
 const PRUNE_AFTER_MS = 60 * 60 * 1000;
@@ -83,7 +84,7 @@ const env = { ...inherited, HOME: home, USERPROFILE: home, TMPDIR: root, TEMP: r
 const named = process.argv.slice(2);
 const files = named.length > 0 ? named : fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map((f) => path.join('tests', f));
 
-// THE TIMEOUT IS LOAD-BEARING and is kept here verbatim. Without it a hang in this suite once left
+// THE TIMEOUT IS LOAD-BEARING and is kept verbatim (tests/_suite-args.mjs, with the bound on files run at once). Without it a hang in this suite once left
 // a test process and two daemons alive for two and a half hours; a runner that dropped the flag
 // would reintroduce that while looking like a pure refactor.
 //
@@ -100,7 +101,15 @@ const files = named.length > 0 ? named : fs.readdirSync('tests').filter((f) => f
 // and was cancelled at 180 s in the other two; the-dashboard-plugin-reports-commits.test.js reached 164.9 s and was
 // cancelled once. That is a bound at its own normal cost, not above a hang. 600 s is 3.4 times the slowest passing
 // file measured and still ends a hang in minutes, not hours.
-const child = spawn(process.execPath, ['--test', '--test-timeout=600000', ...files], { env, stdio: 'inherit' });
+let args;
+try {
+  args = suiteArgs(files);
+} catch (error) {
+  fs.rmSync(root, { recursive: true, force: true });
+  console.error(error.message);
+  process.exit(2);
+}
+const child = spawn(process.execPath, args, { env, stdio: 'inherit' });
 
 child.on('exit', (code, signal) => {
   try {
