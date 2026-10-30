@@ -17,10 +17,14 @@ function terminal(c) {
   assert.deepEqual(r.records, []); return r;
 }
 
-test('17 sequential ended incarnations free both real producer capacity and bounded checkpoint slots', options, async t => {
-  const f = await reclamationFixture(t, { policy: { maxSessions: 1 } });
+// ONE MORE INCARNATION THAN THE CHECKPOINT HAS SLOTS, which passes only if slots are freed. It ran 17 against the
+// production cap of 16; the consumer now takes a smaller cap, so three against two prove the same and the default
+// cap is guarded where it is set.
+test('sequential ended incarnations, one more than the checkpoint holds, free both real producer capacity and bounded checkpoint slots', options, async t => {
+  const slots = 2;
+  const f = await reclamationFixture(t, { policy: { maxSessions: 1 }, slots });
   const generations = [];
-  for (let i = 0; i < 17; i++) {
+  for (let i = 0; i < slots + 1; i++) {
     const { c, file } = await drained(f); const r = terminal(c); generations.push(r.generation);
     assert.equal(fs.existsSync(file), true, 'terminal publication is not an ACK');
     commit(c, r); f.open().read();
@@ -108,4 +112,23 @@ test('typed unknown process evidence cannot retire a previously bound dead sourc
   const c = f.open({ probe: () => new Map() });
   assert.equal(c.read().token, null); assert.equal(fs.existsSync(file), true, 'unanswered is not process death');
   const real = terminal(f.open()); commit(f.open(), real); f.open().read(); assert.equal(fs.existsSync(file), false, 'same-run real evidence positive control');
+});
+
+test('a source past the checkpoint cap is refused while every slot is held, and a checkpoint past its cap is refused on load', options, async t => {
+  // THE CAP'S OWN LINE. Freeing slots is proven above; this proves the cap refuses at all, with sources that hold their
+  // slots because none of them has ended.
+  const slots = 2;
+  const f = await reclamationFixture(t, { policy: { maxSessions: slots + 1 }, slots });
+  for (let i = 0; i <= slots; i++) f.append(f.record(randomUUID()));
+  const reads = [];
+  for (let i = 0; i <= slots; i++) {
+    const c = f.open(); const r = c.read(); reads.push(r.ok);
+    if (r.ok && r.token) commit(c, r);
+  }
+  assert.deepEqual(reads.slice(0, slots), Array(slots).fill(true), 'CONTROL: the sources within the cap are read');
+  assert.equal(reads[slots], false, 'a source past the cap took a slot nobody freed');
+  assert.equal(Object.keys(JSON.parse(fs.readFileSync(f.checkpoint)).sources).length, slots, 'the checkpoint holds more than its cap');
+  // The same cap on the way back in: a full checkpoint loads under its own cap and is refused under a smaller one.
+  assert.equal(Object.keys(f.open().storage.load().sources).length, slots, 'CONTROL: a checkpoint at its cap loads');
+  assert.throws(() => f.open({ slots: slots - 1 }).storage.load(), /state-invalid/, 'a checkpoint past the cap was loaded');
 });

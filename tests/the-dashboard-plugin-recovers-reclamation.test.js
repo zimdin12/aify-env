@@ -17,7 +17,9 @@ async function prepare(f) {
 }
 
 test('native crashes retain exact terminal obligation and distinguish committed unlink outcomes from ambiguous missing paths', options, async t => {
-  for (const boundary of ['before-ack-save', 'before-marker', 'after-marker', 'marker-saved', 'after-raw', 'raw-saved']) {
+  // No before-marker boundary: a crash there leaves the disk byte-for-byte as the plain post-ACK state, which every
+  // boundary after before-ack-save already starts from.
+  for (const boundary of ['before-ack-save', 'after-marker', 'marker-saved', 'after-raw', 'raw-saved']) {
     const f = await reclamationFixture(t), { file, loss, terminal } = await prepare(f);
     if (boundary !== 'before-ack-save') commit(f.open(), terminal);
     const input = path.join(f.root, 'crash-input.json');

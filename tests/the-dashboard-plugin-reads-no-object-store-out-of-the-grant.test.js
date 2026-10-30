@@ -64,8 +64,9 @@ test("a store borrowed from inside the grant, holding an object with a second na
   assert.match(seen.problems, /its object store borrows objects from .*middle.\.git.objects, which holds .*middle.\.git.objects.*, a file with a second name somewhere else/);
 });
 
-test("what agents make is still read: a clone from a URL, a clone with --no-hardlinks, a linked worktree, a repository after gc", { skip: onlyWindows }, async () => {
-  // The refusal of second-named objects must not catch the ways a repository is normally made here.
+test("what agents make is still read: a clone from a URL, a clone with --no-hardlinks, a linked worktree", { skip: onlyWindows }, async () => {
+  // The refusal of second-named objects must not catch the ways a repository is normally made here. A clone from a
+  // URL arrives packed, so it also stands for a repository after gc: counting a pack file as second-named fails it.
   const made = {
     "a clone from a URL": (l) => git(l.grant, "clone", "-q", `file://${slashed(l.outside)}`, l.folder),
     "a clone with --no-hardlinks": (l) => git(l.grant, "clone", "-q", "--no-hardlinks", l.outside, l.folder),
@@ -73,11 +74,6 @@ test("what agents make is still read: a clone from a URL, a clone with --no-hard
       const main = join(l.grant, "main");
       repo(main, "a main checkout inside the grant");
       git(main, "worktree", "add", "-q", "-b", "side", l.folder);
-    },
-    "a repository after gc": (l) => {
-      repo(l.folder, "to be packed");
-      git(l.folder, "commit", "-q", "--allow-empty", "-m", "a second commit");
-      git(l.folder, "gc", "-q");
     },
   };
   for (const [what, make] of Object.entries(made)) {

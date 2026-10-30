@@ -16,7 +16,8 @@ import { LIMITS, ageReason, continuousClock, fileIdentity, validClock, validPoli
 import { ActivityRetirement } from "../lib/plugins/aify-dashboard/activity-retirement.mjs";
 import { ActivityShipper } from "../lib/plugins/aify-dashboard/activity-shipper.mjs";
 import { activityDirectories, activityLaunchEnv, wrapperActivity } from "../lib/plugins/aify-dashboard/activity-source.mjs";
-import { readSegment, regularFile } from "../lib/plugins/aify-dashboard/activity-state.mjs";
+import { ActivityState, readSegment, regularFile } from "../lib/plugins/aify-dashboard/activity-state.mjs";
+import { ActivityConsumer } from "../lib/plugins/aify-dashboard/activity-consumer.mjs";
 import { FILE_ACTIVITY_PATH } from "../lib/plugins/aify-dashboard/dashboard-api.mjs";
 
 const LIFETIME = "0123abcd-0123-4567-89ab-0123456789ab";
@@ -165,4 +166,26 @@ test("ActivityShipper: no activity section is inactive and asks nothing; an unde
   await on.pass();
   assert.deepEqual(on.state(), { passes: 2, coverage: "unknown", problems: ["file activity: service capability was not declared; coverage unknown"] });
   assert.equal(asked, 1, "the service's declaration is asked once, not every pass");
+});
+
+test("THE CHECKPOINT HOLDS SIXTEEN SOURCES by default, and a smaller cap is the only other one a consumer takes", () => {
+  // The slot-freeing test runs three incarnations against a cap of two, so the production cap is pinned here, where it is
+  // set: the frozen LIMITS, and both the consumer and the checkpoint it opens defaulting to it.
+  assert.equal(LIMITS.maxSessions, 16, "the frozen production cap moved");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "aify-activity-slots-"));
+  try {
+    const consumer = new ActivityConsumer({ directory, agentId: "a", endpoint: "http://127.0.0.1:1", validRecord: () => true });
+    assert.equal(consumer.slots, LIMITS.maxSessions, "a consumer given no cap does not hold the production one");
+    assert.equal(consumer.storage.slots, LIMITS.maxSessions, "the checkpoint it opens holds another cap than the consumer's");
+    assert.equal(new ActivityState({ directory, endpoint: "http://127.0.0.1:1" }).slots, LIMITS.maxSessions,
+      "a checkpoint opened with no cap does not hold the production one");
+    for (const slots of [0, 2.5, LIMITS.maxSessions + 1, "2"]) {
+      assert.throws(() => new ActivityConsumer({ directory, agentId: "a", endpoint: "http://127.0.0.1:1", validRecord: () => true, slots }),
+        /consumer-configuration/, `a cap of ${JSON.stringify(slots)} was taken`);
+    }
+    assert.equal(new ActivityConsumer({ directory, agentId: "a", endpoint: "http://127.0.0.1:1", validRecord: () => true, slots: 2 }).slots, 2,
+      "CONTROL: a smaller cap is taken");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

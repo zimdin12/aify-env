@@ -10,7 +10,6 @@ console.log(JSON.stringify({ pid: process.pid, version: process.version, executa
 const unlink = fs.unlinkSync, save = c.storage.save.bind(c.storage);
 fs.unlinkSync = function(file, ...args) {
   const marker = file.endsWith('.loss'), raw = file.endsWith('.jsonl');
-  if (input.boundary === 'before-marker' && marker) process.exit(23);
   const result = unlink.call(this, file, ...args);
   if (input.boundary === 'after-marker' && marker || input.boundary === 'after-raw' && raw) process.exit(23);
   return result;

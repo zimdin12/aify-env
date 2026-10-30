@@ -26,7 +26,9 @@ export async function reclamationFixture(t, options = {}) {
     input: { session_id: sessionId, cwd: 'C:/fixture/project', tool_name: 'Read', tool_input: { file_path: 'owned.txt' } },
     identity: { machineId: 'win32:fixture', instanceId: instance, agentId: 'agent-1', incarnation: lifetime },
     outcome: 'success', observedAt: Date.now() });
-  const open = (extra = {}) => f.open({ agents, ...extra });
+  // A smaller checkpoint slot cap when the test asks for one (ActivityConsumer's `slots`), so freeing slots is proven
+  // with a few incarnations rather than seventeen.
+  const open = (extra = {}) => f.open({ agents, ...(options.slots ? { slots: options.slots } : {}), ...extra });
   async function owner() {
     const release = path.join(f.root, randomUUID() + '.release'), lifetime = randomUUID();
     const env = { ...process.env };
