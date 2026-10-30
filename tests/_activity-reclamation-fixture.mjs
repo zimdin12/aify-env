@@ -47,7 +47,8 @@ export async function reclamationFixture(t, options = {}) {
       fs.appendFileSync(ledger, JSON.stringify({ ...event, pid: child.pid, createdAtUs: live.get(child.pid).createdAtUs,
         executable: process.execPath, version: process.version, release }) + '\n'); } };
     evidence({ action: 'spawned', selfProbeAlive: live.get(process.pid).alive });
-    host.startManaged({ agentId: 'agent-1', lifetime, instance, pid: child.pid, handle: lifetime });
+    // Stamped after the child exists, as ManagedLifetimes.register stamps a managed record.
+    host.startManaged({ agentId: 'agent-1', lifetime, instance, pid: child.pid, handle: lifetime, writtenAtUs: Date.now() * 1000 });
     let finished = false;
     const end = async () => {
       if (finished) return;

@@ -98,13 +98,15 @@ test("ActivityOperationLock: a second holder is refused as busy, never waits, an
 });
 
 test("ActivityRetirement: a witness only from a single, alive, matching identity; ended only when the process is gone", () => {
-  const current = { agentId: "lead", instance: "inst", lifetime: LIFETIME, pid: 42, harness: "claude" };
+  const current = { agentId: "lead", instance: "inst", lifetime: LIFETIME, pid: 42, harness: "claude", writtenAtUs: 5000 };
   const agents = (over = {}) => ({ rawIdentity: () => ({ unknown: false, conflict: false, current: { ...current, ...over } }) });
   const probe = (answer) => () => new Map([[42, answer]]);
   const alive = probe({ alive: true, createdAtUs: 1000 });
   assert.deepEqual(new ActivityRetirement({ agents: agents(), probe: alive }).observe(SOURCE), WITNESS);
   assert.equal(new ActivityRetirement({ agents: agents({ lifetime: "ffffffff-0123-4567-89ab-0123456789ab" }), probe: alive }).observe(SOURCE), null);
   assert.equal(new ActivityRetirement({ agents: agents({ harness: "codex" }), probe: alive }).observe(SOURCE), null);
+  assert.equal(new ActivityRetirement({ agents: agents({ writtenAtUs: undefined }), probe: alive }).observe(SOURCE), null,
+    "a record that does not say when it was written cannot tell its own process's answer from a predecessor's");
   assert.equal(new ActivityRetirement({ agents: { rawIdentity: () => ({ unknown: false, conflict: true, current }) }, probe: alive }).observe(SOURCE), null);
   assert.equal(new ActivityRetirement({ agents: agents(), probe: probe({ alive: false }) }).observe(SOURCE), null);
 

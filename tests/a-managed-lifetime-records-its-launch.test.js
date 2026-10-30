@@ -18,6 +18,14 @@ test("the record carries the launch's folder and definition", () => {
   assert.deepEqual([o.started[0].cwd, o.started[0].definition], ["C:/work", { storeId: "s", incarnation: 2, revision: 5 }]);
 });
 
+test("the record carries when it was written, after its child exists, in epoch microseconds", () => {
+  const o = owner();
+  const { register } = new ManagedLifetimes({ managedHost: o.managedHost }).spawn({ agentId: "a", env: {} }, () => ({}));
+  const before = Date.now() * 1000; register("h", 42); const after = Date.now() * 1000;
+  const { writtenAtUs } = o.started[0];
+  assert.ok(Number.isSafeInteger(writtenAtUs) && writtenAtUs >= before && writtenAtUs <= after, String(writtenAtUs));
+});
+
 test("no folder and no binding are recorded as null", () => {
   const o = owner();
   new ManagedLifetimes({ managedHost: o.managedHost }).spawn({ agentId: "a", env: {} }, () => ({})).register("h", 42);

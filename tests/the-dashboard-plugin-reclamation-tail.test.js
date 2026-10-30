@@ -40,7 +40,7 @@ test('production plugin declares and ACKs reclaimed tail before removing a sourc
   assert.equal(ready.version, process.version); assert.equal(ready.executable, process.execPath);
   const live = probeProcesses([owner.pid, ready.pid, process.pid]);
   assert.equal(live.get(process.pid)?.alive, true); assert.equal(live.get(owner.pid)?.alive, true); assert.equal(live.get(ready.pid)?.alive, true);
-  f.stateHost.startManaged({ agentId: 'agent-1', lifetime, instance, pid: owner.pid, handle: 'owned-bash' });
+  f.stateHost.startManaged({ agentId: 'agent-1', lifetime, instance, pid: owner.pid, handle: 'owned-bash', writtenAtUs: Date.now() * 1000 });
   await f.pass(); assert.equal(f.bodies.length, 1); assert.equal(f.bodies[0].events.length, 1, 'real first CLI observer frame committed');
   assert.equal(f.stateHost.retirementProof([lifetime]).holds, false);
   fs.writeFileSync(path.join(f.root, 'exit-owner'), '1'); assert.equal(await exit, 0);

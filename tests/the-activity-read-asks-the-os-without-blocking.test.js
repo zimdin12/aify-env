@@ -26,6 +26,9 @@ function syncPowerShells(t) {
 }
 
 const checkpointed = (f, file) => JSON.parse(fs.readFileSync(f.checkpoint)).sources[path.basename(file)] ?? null;
+/** A consumer whose agents port answers from `cache`, as the daemon's does. */
+const throughCache = (f, cache) => () => f.open({ agents: { rawIdentity: id => f.agents.rawIdentity(id),
+  processes: (pids, options) => cache.answers(pids, options) } });
 
 test('the production pass asks through the daemon\'s cache: no read blocks, the witness arrives within one probe, and the ended source is reclaimed',
   { skip: prerequisite || (process.platform !== 'win32' && 'the OS probe answers only on Windows') }, async t => {
@@ -67,15 +70,16 @@ test('the daemon hands its lifecycle ports the cache\'s answer, without which no
 test('a pid reused after its agent ended keeps its old answer until the next probe lands, and only then is the source reclaimed',
   { skip: prerequisite }, async t => {
     // The OS, scripted: the pid stays alive by signal 0 throughout, and its birth changes when it is reused.
-    let born = null, nowMs = 1_000_000;
+    let born = null, nowMs = 0;
     const probes = [];
     const cache = new ProcessProbeCache({ state: () => 'alive', nowMs: () => nowMs,
       probe: async pids => { probes.push(pids); return new Map(pids.map(pid => [pid, { alive: true, createdAtUs: born, commandLine: null }])); } });
     cache.serve();
     const f = await reclamationFixture(t);
     const owner = await f.owner(), file = f.append(f.record(owner.lifetime));
-    born = owner.createdAtUs;
-    const open = () => f.open({ agents: { rawIdentity: id => f.agents.rawIdentity(id), processes: (pids, options) => cache.answers(pids, options) } });
+    // The clock starts after the record was written, as a real one would: an answer older than the record is never taken.
+    born = owner.createdAtUs; nowMs = Math.floor(f.agents.rawIdentity('agent-1').current.writtenAtUs / 1000) + 1;
+    const open = throughCache(f, cache);
 
     const c = open(); commit(c, c.read());
     assert.equal(checkpointed(f, file).witness, null, 'nothing was answered yet');
@@ -97,4 +101,27 @@ test('a pid reused after its agent ended keeps its old answer until the next pro
     assert.equal(terminal.gaps[0]?.reason, 'reclaimed', 'the landed probe shows a different birth: the agent has ended');
     commit(last, terminal); open().read();
     assert.equal(fs.existsSync(file), false, 'and the source is reclaimed');
+  });
+
+test('a pid whose previous holder the cache still remembers is witnessed by its own birth, never by that holder\'s',
+  { skip: prerequisite }, async t => {
+    // The OS, scripted, on a clock the test moves: the pid's previous holder was answered just before this lifetime's
+    // record was written, and is still inside the cache's window when the source is first read.
+    let born = null, nowMs = 0;
+    const cache = new ProcessProbeCache({ state: () => 'alive', nowMs: () => nowMs,
+      probe: async pids => new Map(pids.map(pid => [pid, { alive: true, createdAtUs: born, commandLine: null }])) });
+    cache.serve();
+    const f = await reclamationFixture(t);
+    const owner = await f.owner(), file = f.append(f.record(owner.lifetime));
+    const writtenAtMs = Math.floor(f.agents.rawIdentity('agent-1').current.writtenAtUs / 1000);
+    nowMs = writtenAtMs - 5_000; born = owner.createdAtUs - 1;
+    cache.answers([owner.child.pid]); await cache.refresh([]);
+    nowMs = writtenAtMs + 5_000; born = owner.createdAtUs;
+    const open = throughCache(f, cache);
+
+    const c = open(); commit(c, c.read());
+    assert.equal(checkpointed(f, file).witness, null, 'the previous holder\'s answer is not taken for this lifetime');
+    await cache.refresh([]);
+    open().read();
+    assert.equal(checkpointed(f, file).witness?.createdAtUs, owner.createdAtUs, 'the witness is the birth a probe after the record found');
   });
