@@ -637,6 +637,7 @@ server.listen(port, HOST, async () => {
       machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(),
         env: process.env, exists: existsSync, isWsl: hostIsWsl() }).machineId,
       stateHost: agentState.host, residents: agentState.residents, runner, definitions: definitionStore, onStopChange: evaluateAgentState,
+      processes: agentState.processes,
       installed: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) });
   }
   catch (error) { process.stderr.write(`[aify-env] agent state boot failed: ${error.message}\n`); process.exit(2); }

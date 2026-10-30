@@ -3,9 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ActivityConsumer } from '../../lib/plugins/aify-dashboard/activity-consumer.mjs';
+import { probeProcesses } from '../../lib/process-probe.mjs';
 const inputBytes = fs.readFileSync(process.argv[2]), input = JSON.parse(inputBytes);
 const { validActivityRecord } = await import(pathToFileURL(path.join(input.wrapper, 'lib/file-activity.mjs')));
-const c = new ActivityConsumer({ directory: input.directory, agentId: 'agent-1', endpoint: input.endpoint, validRecord: validActivityRecord });
+// The witness was taken by the test's own consumer; this one only asks whether its pid has ended.
+const c = new ActivityConsumer({ directory: input.directory, agentId: 'agent-1', endpoint: input.endpoint, validRecord: validActivityRecord,
+  probe: probeProcesses });
 console.log(JSON.stringify({ pid: process.pid, version: process.version, executable: process.execPath }));
 const unlink = fs.unlinkSync, save = c.storage.save.bind(c.storage);
 fs.unlinkSync = function(file, ...args) {

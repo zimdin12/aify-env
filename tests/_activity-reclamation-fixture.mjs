@@ -17,10 +17,13 @@ export async function reclamationFixture(t, options = {}) {
   t.after(async () => { for (const end of cleanup) await end(); });
   const f = await fixture(t, { records: 0, ...options });
   const instance = 'reclamation-instance';
+  // One OS answer for the host and the plugin's agents port, as the daemon gives both its ProcessProbeCache. A test of
+  // what the activity read asks the OS passes one (options.processes); the rest answer at once, synchronously.
+  const processes = options.processes ?? probeProcesses;
   const host = new AgentStateHost({ aifyHome: path.join(f.root, 'state-host'), instance, population: 'managed',
-    probe: probeProcesses, nowUs: () => Date.now() * 1000 });
+    probe: processes, nowUs: () => Date.now() * 1000 });
   const agents = createAgentLifecyclePorts({ aifyHome: path.join(f.root, 'lifecycle'), machineId: 'fixture',
-    stateHost: host, runner: {}, definitions: {}, installed: [] });
+    stateHost: host, runner: {}, definitions: {}, installed: [], processes });
   const { activityEvent } = await import(pathToFileURL(path.join(process.env.AIFY_WRAPPER_REPO, 'lib/file-activity.mjs')));
   const record = (lifetime, sessionId = randomUUID()) => activityEvent({
     input: { session_id: sessionId, cwd: 'C:/fixture/project', tool_name: 'Read', tool_input: { file_path: 'owned.txt' } },
