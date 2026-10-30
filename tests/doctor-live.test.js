@@ -96,97 +96,37 @@ function reportOf(result) {
   }
 }
 
-test("BOTH DIRECTIONS: the environment check passes against a live one and fails without it", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doc-live-"));
-  const registry = path.join(dir, "services.json");
-  const { child, base } = await startDaemon();
-
-  let live;
-  try {
-    // POSITIVE. This is the half every other doctor test is missing.
-    live = reportOf(runDoctor(base, registry));
-    const check = live.checks.find((c) => c.id === "environment");
-    assert.equal(check.state, "passed", `a live environment was not seen: ${check.detail}`);
-    assert.match(check.detail, /127\.0\.0\.1/);
-  } finally {
-    await stopDaemon(child);
-  }
-
-  // NEGATIVE, same endpoint, same run. If the probe answered "passed" for a port nothing is on, the
-  // positive above would have proved nothing at all.
-  const dead = reportOf(runDoctor(base, registry));
-  const deadCheck = dead.checks.find((c) => c.id === "environment");
-  assert.equal(deadCheck.state, "failed", "the probe reported a stopped environment as running");
-  assert.ok(deadCheck.fix.length > 0);
-
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test("against a live environment, owned processes are reported as PASSED rather than unanswered", async () => {
-  // With nothing listening this reads `unanswered`, because nobody asked the thing that owns them.
-  // With something listening it must become a real answer, or the distinction is decorative.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doc-live-"));
-  const registry = path.join(dir, "services.json");
-  const { child, base } = await startDaemon();
-  try {
-    const report = reportOf(runDoctor(base, registry));
-    const check = report.checks.find((c) => c.id === "processes");
-    assert.equal(check.state, "passed", `processes read ${check.state}: ${check.detail}`);
-    assert.match(check.detail, /0 process/);
-  } finally {
-    await stopDaemon(child);
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("a live environment plus an unreachable SERVICE gives passed AND unanswered in one report", async () => {
-  // The shape the three-state design exists for, in a single real run: something verified, something
-  // known broken, something that could not be reached. A report that can only ever show one of those
-  // is not carrying the distinction it claims to.
+// ONE LIVE DAEMON, ONE DOCTOR RUN, then one more once it has stopped. Four tests used to boot a daemon each to run the
+// doctor once against it; a single live report answers all four, and the stopped run is BOTH DIRECTIONS' other half.
+test("against ONE live environment the doctor reports it, its processes, a silent service and current code; stopped, it fails", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doc-live-"));
   const registry = path.join(dir, "services.json");
   fs.writeFileSync(registry, JSON.stringify({
     version: 1,
-    // Set, and reachable by nothing. Never the operator's real service.
     services: { "aify-comms": { endpoint: "http://127.0.0.2:1", mcp: [] } },
   }));
-
-  const { child, base } = await startDaemon();
-  try {
-    const result = runDoctor(base, registry);
-    const report = reportOf(result);
-    const states = Object.fromEntries(report.checks.map((c) => [c.id, c.state]));
-    assert.equal(states.environment, "passed");
-    assert.equal(states["aify-comms"], "unanswered", "a silent service must not read as passed or failed");
-    assert.ok(report.counts.passed > 0 && report.counts.unanswered > 0, JSON.stringify(report.counts));
-  } finally {
-    await stopDaemon(child);
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("PROVEN ON A REAL DAEMON: code-current passes, and the two identities it compares AGREE", async () => {
-  // The `code-current` row has only ever been observed in unit tests, against hand-written pairs.
-  // This file's own header says why that is half a probe -- and here the risk is specific rather than
-  // philosophical. The row's whole guarantee is that the boot build and the disk build are computed
-  // the SAME WAY, and a divergence between the two recipes would not fail any unit test: it would
-  // simply make every real host read `stale` forever, and the remedy that badge names is a restart
-  // that reaps the managed workers. Nothing but a real daemon hashing its own real package can catch
-  // that, so this asserts on one that has just booted from an unmodified checkout.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doc-live-"));
-  const registry = path.join(dir, "services.json");
   const { child, base } = await startDaemon();
   try {
     const report = reportOf(runDoctor(base, registry));
-    const check = report.checks.find((c) => c.id === "code-current");
-    assert.ok(check, "the report carried no code-current row");
-    assert.equal(check.state, "passed",
-      `a daemon that just booted from this checkout did not read as current: ${check.detail}. `
-      + "If this says `stale`, the two recipes have diverged and every host will read stale forever.");
+    const row = (id) => report.checks.find((c) => c.id === id);
 
-    // AND THE RAW PAIR, from /health, because the row above could pass on two values that are equal
-    // and both wrong -- two empty strings would not, since the row treats a missing half as
-    // unanswered, but two copies of a constant would. This asserts they are real build identities.
+    // BOTH DIRECTIONS, the live half: the environment check passes against a live one.
+    assert.equal(row("environment").state, "passed", `a live environment was not seen: ${row("environment").detail}`);
+    assert.match(row("environment").detail, /127\.0\.0\.1/);
+
+    // Owned processes are reported as PASSED rather than unanswered.
+    assert.equal(row("processes").state, "passed", `processes read ${row("processes").state}: ${row("processes").detail}`);
+    assert.match(row("processes").detail, /0 process/);
+
+    // A live environment plus an unreachable SERVICE gives passed AND unanswered in one report.
+    assert.equal(row("aify-comms").state, "unanswered", "a silent service must not read as passed or failed");
+    assert.ok(report.counts.passed > 0 && report.counts.unanswered > 0, JSON.stringify(report.counts));
+
+    // PROVEN ON A REAL DAEMON: code-current passes, and the two identities it compares AGREE.
+    assert.ok(row("code-current"), "the report carried no code-current row");
+    assert.equal(row("code-current").state, "passed",
+      `a daemon that just booted from this checkout did not read as current: ${row("code-current").detail}. `
+      + "If this says `stale`, the two recipes have diverged and every host will read stale forever.");
     const health = await fetch(`${base}/health`).then((r) => r.json());
     assert.equal(health.build, health.codeOnDisk,
       "a live daemon's boot build and disk build disagree on an unmodified checkout");
@@ -194,8 +134,14 @@ test("PROVEN ON A REAL DAEMON: code-current passes, and the two identities it co
       `the build identity is not a hash: ${JSON.stringify(health.build)}`);
   } finally {
     await stopDaemon(child);
-    fs.rmSync(dir, { recursive: true, force: true });
   }
+
+  // BOTH DIRECTIONS, the other half: the same probe against the stopped environment fails, with a fix.
+  const dead = reportOf(runDoctor(base, registry));
+  const deadCheck = dead.checks.find((c) => c.id === "environment");
+  assert.equal(deadCheck.state, "failed", "the probe reported a stopped environment as running");
+  assert.ok(deadCheck.fix.length > 0);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("NEGATIVE CONTROL, ON THE SAME REAL DAEMON: change the disk and the row goes FAILED", async () => {

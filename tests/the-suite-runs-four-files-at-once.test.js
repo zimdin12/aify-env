@@ -1,7 +1,7 @@
-// npm test runs at most four test files at once unless AIFY_TEST_CONCURRENCY says otherwise (2026-10-30).
+// npm test runs at most four test files at once unless AIFY_TEST_CONCURRENCY says otherwise.
 //
-// Without a bound Node 22 ran availableParallelism - 1 files at once, 31 on this 32-thread host, on a host three teams
-// share. A bad value is refused before anything runs, so a typo cannot put the suite back on every core.
+// Unbounded, Node runs availableParallelism - 1 files at once, which takes nearly every core of a shared host. A bad
+// value is refused before anything runs, so a typo cannot put the suite back on every core.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

@@ -155,6 +155,8 @@ test("a second start REFUSES while the first is running agents, and touches noth
     assert.match(said, /sc-architect/, "the refusal does not say WHICH agent is in the way");
     assert.match(said, /--force/, "the refusal does not say how to proceed anyway");
     assert.match(said, /aify-env tui/, "the refusal does not offer the way to look without disturbing");
+    // `start()` pipes, so this IS the piped refusal: a reader with no view keeps the pointer and is told of no view.
+    assert.doesNotMatch(said, /Showing it instead/, "a pipe was told a view it will never see");
 
     // NOTHING WAS TOUCHED. Both halves: the incumbent still serves, and its work is still running.
     assert.ok(alive(daemon.pid), "the incumbent was killed by a start that claimed to refuse");
@@ -188,6 +190,8 @@ test("THE VIEW OPENS ONLY IN A TERMINAL, and only when the dashboard is wanted",
   // pipe. Left as an `if` in the entry script, the only arm under test would be the one that changes
   // nothing -- so the decision is a predicate and this is where it is judged.
   assert.equal(showViewInsteadOfRefusing({ isTty: true }), true);
+  // AIFY_NO_DASHBOARD=1 KEEPS THE REFUSAL'S OLD SHAPE EVEN IN A TERMINAL, proven here and only here: a spawned test gets a
+  // pipe, where no view could open whatever the variable said.
   assert.equal(showViewInsteadOfRefusing({ isTty: true, noDashboard: "1" }), false,
     "an operator who turned the dashboard off got one anyway");
   assert.equal(showViewInsteadOfRefusing({ isTty: false }), false,
@@ -211,94 +215,4 @@ test("only the exact opt-out opts out", () => {
   assert.equal(showViewInsteadOfRefusing({ isTty: true, noDashboard: "" }), true);
   assert.equal(showViewInsteadOfRefusing({ isTty: true, noDashboard: " 1 " }), false,
     "a padded value is what an env file produces and must still opt out");
-});
-
-test("A PIPE KEEPS THE REFUSAL EXACTLY AS IT WAS — explanation, pointer, exit 69", async () => {
-  // Escapes in a log are noise, a service manager parses this output, and anything reading the exit
-  // status must keep reading the same one. `start()` pipes stdio, so every assertion in the refusal
-  // test above is this case; what is added here is that the POINTER survives, because a reader with
-  // no view is the only one who needs to be told the command that looks without disturbing.
-  const PORT = await freePort();
-  const box = sealed("piped");
-  const { daemon, workerPid, workerId } = await environmentWithWork(box, PORT);
-  let second = null;
-  try {
-    second = start(box.env, PORT);
-    const said = await waitFor(second, /Taking over would END/);
-    const code = await new Promise((resolve) => second.on("exit", resolve));
-    assert.equal(code, 69, "a piped refusal stopped exiting 69");
-    assert.match(said, /aify-env tui/, "the reader who gets no view lost the pointer to one");
-    assert.doesNotMatch(said, /Showing it instead/, "a pipe was told a view it will never see");
-    assert.ok(alive(daemon.pid) && alive(workerPid), "the refusal touched something");
-  } finally {
-    await stopWork(PORT, workerId);
-    if (second) second.kill();
-    daemon.kill();
-  }
-});
-
-test("AIFY_NO_DASHBOARD=1 keeps the old shape even in a terminal", async () => {
-  // The opt-out already exists for the daemon's own view; it has to mean the same thing here, or an
-  // operator who turned the dashboard off gets one anyway at the least welcome moment.
-  const PORT = await freePort();
-  const box = sealed("nodash");
-  const { daemon, workerPid, workerId } = await environmentWithWork(box, PORT);
-  let second = null;
-  try {
-    second = start({ ...box.env, AIFY_NO_DASHBOARD: "1" }, PORT);
-    const said = await waitFor(second, /Taking over would END/);
-    const code = await new Promise((resolve) => second.on("exit", resolve));
-    assert.equal(code, 69);
-    assert.doesNotMatch(said, /Showing it instead/);
-    assert.ok(alive(daemon.pid) && alive(workerPid));
-  } finally {
-    await stopWork(PORT, workerId);
-    if (second) second.kill();
-    daemon.kill();
-  }
-});
-
-test("--force takes over anyway, which is what makes refusing safe", async () => {
-  // The escape hatch, proven rather than assumed. A guard with no way past it turns one bad afternoon
-  // into a permanently unusable command.
-  const PORT = await freePort();
-  const box = sealed("forced");
-  const { daemon, workerPid, workerId } = await environmentWithWork(box, PORT);
-  let second = null;
-  try {
-    second = start(box.env, PORT, ["--force"]);
-    await waitFor(second, /superseding/);
-    await waitFor(second, /listening/);
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    assert.ok(!alive(daemon.pid), "--force did not take over");
-    const health = await (await fetch(`http://127.0.0.1:${PORT}/health`, {
-      signal: AbortSignal.timeout(8000),
-    })).json();
-    assert.equal(health.pid, second.pid, "/health does not report the process that is actually serving");
-  } finally {
-    await stopWork(PORT, workerId);
-    if (second) second.kill();
-    daemon.kill();
-  }
-});
-
-test("an idle environment is still superseded without ceremony", async () => {
-  // THE CASE THAT MUST NOT REGRESS. Refusing whenever an environment exists would break every restart
-  // of an idle one, which is the ordinary way this command is used.
-  const PORT = await freePort();
-  const box = sealed("idle");
-  const first = start(box.env, PORT);
-  let second = null;
-  try {
-    await waitFor(first, /listening/);
-    second = start(box.env, PORT);
-    await waitFor(second, /superseding/);
-    await waitFor(second, /listening/);
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    assert.ok(!alive(first.pid), "an idle environment was not superseded");
-  } finally {
-    if (second) second.kill();
-    first.kill();
-  }
 });

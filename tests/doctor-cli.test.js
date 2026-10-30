@@ -22,7 +22,7 @@ import { sealedDoctorEnv } from "./_sealed-doctor-env.mjs";
 const DOCTOR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env-doctor.mjs");
 const NOWHERE = "http://127.0.0.2:1";
 
-function runDoctor({ registry, args = [] }) {
+function spawnDoctor({ registry, args = [] }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-doc-"));
   const registryPath = path.join(dir, "services.json");
   if (registry !== undefined) fs.writeFileSync(registryPath, registry);
@@ -41,6 +41,18 @@ function runDoctor({ registry, args = [] }) {
   fs.rmSync(dir, { recursive: true, force: true });
   return res;
 }
+
+// ONE SPAWN PER DISTINCT INVOCATION. Most tests here only read a report, and four of them spawned the identical
+// `--json` run with no registry; identical runs now share one doctor process, read by each test for its own property.
+const runs = new Map();
+function runDoctor(invocation) {
+  const key = JSON.stringify(invocation);
+  if (!runs.has(key)) runs.set(key, spawnDoctor(invocation));
+  return runs.get(key);
+}
+
+/** The registered-but-silent service the probing tests share. */
+const ONE_SILENT_SERVICE = JSON.stringify({ version: 1, services: { "aify-comms": { endpoint: NOWHERE, mcp: [] } } });
 
 test("--json emits the three-state shape with an exit code inside it", () => {
   const res = runDoctor({ registry: undefined, args: ["--json"] });
@@ -68,11 +80,7 @@ test("--strict exits non-zero when a check FAILED", () => {
 test("--strict does NOT exit 0 when a registered service is merely SILENT", () => {
   // The property the third state exists for. If unanswered exited 0 here, a fleet of silent services
   // would look exactly like a healthy one.
-  const registry = JSON.stringify({
-    version: 1,
-    services: { "aify-comms": { endpoint: NOWHERE, mcp: [] } },
-  });
-  const res = runDoctor({ registry, args: ["--strict", "--json"] });
+  const res = runDoctor({ registry: ONE_SILENT_SERVICE, args: ["--strict", "--json"] });
   const report = JSON.parse(res.stdout);
   const service = report.checks.find((check) => check.id === "aify-comms");
   assert.equal(service.state, "unanswered", "a silent service must not read as failed or passed");
@@ -81,12 +89,8 @@ test("--strict does NOT exit 0 when a registered service is merely SILENT", () =
 
 test("a registered service is actually probed, not assumed", () => {
   // Without this, the check could be reporting on nothing at all and still look right.
-  const registry = JSON.stringify({
-    version: 1,
-    services: { "aify-graph": { endpoint: NOWHERE, mcp: [] } },
-  });
-  const report = JSON.parse(runDoctor({ registry, args: ["--json"] }).stdout);
-  assert.ok(report.checks.some((check) => check.id === "aify-graph"), "the service was never probed");
+  const report = JSON.parse(runDoctor({ registry: ONE_SILENT_SERVICE, args: ["--strict", "--json"] }).stdout);
+  assert.ok(report.checks.some((check) => check.id === "aify-comms"), "the service was never probed");
 });
 
 test("a host with NO registry still produces a report", () => {
@@ -144,12 +148,7 @@ test("an unreadable-version registry yields no per-service rows to contradict it
 test("a SUPPORTED-version registry still produces its per-service rows", () => {
   // The negative control. Skipping the probes whenever anything looked odd would make the test above
   // pass while quietly disabling the service checks altogether.
-  const registry = JSON.stringify({
-    version: 1,
-    services: { "aify-comms": { endpoint: NOWHERE } },
-  });
-  const report = JSON.parse(runDoctor({ registry, args: ["--json"] }).stdout);
-
+  const report = JSON.parse(runDoctor({ registry: ONE_SILENT_SERVICE, args: ["--strict", "--json"] }).stdout);
   assert.ok(
     report.checks.map((check) => check.id).includes("aify-comms"),
     "a valid registry produced no service row, so the probes are off for everyone",

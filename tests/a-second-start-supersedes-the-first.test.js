@@ -131,6 +131,11 @@ test("the predecessor's processes are reaped by the replacement, not stranded", 
     for (let i = 0; i < 40 && alive(pid); i += 1) await new Promise((r) => setTimeout(r, 200));
 
     assert.ok(!alive(pid), "the predecessor's process was left running with nobody owning it");
+    // AND --force REALLY TOOK OVER, the escape hatch that makes refusing safe: a guard with no way past it turns one bad
+    // afternoon into a command nobody can use.
+    assert.ok(!alive(first.pid), "--force did not take over");
+    const health = await (await fetch(`http://127.0.0.1:${PORT}/health`, { signal: AbortSignal.timeout(8000) })).json();
+    assert.equal(health.pid, second.pid, "/health does not report the process that is actually serving");
   } finally {
     if (second) second.kill();
     first.kill();

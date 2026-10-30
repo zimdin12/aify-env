@@ -92,8 +92,13 @@ async function advertisementFromARealDaemon() {
   }
 }
 
+// ONE REAL ADVERTISEMENT FOR THE TESTS THAT ONLY READ IT. Five tests booted a daemon each to read the same first beat;
+// they read one now, from one boot, and each still asserts its own property of it.
+let advertised = null;
+const realAdvertisement = () => (advertised ??= advertisementFromARealDaemon());
+
 test("a booted daemon posts an advertisement to every registered service", async () => {
-  const { sent, output } = await advertisementFromARealDaemon();
+  const { sent, output } = await realAdvertisement();
   assert.equal(sent.url, "/api/v1/environments/heartbeat",
     `the advertisement went to the wrong route. Daemon said:\n${output}`);
 
@@ -110,7 +115,7 @@ test("a booted daemon posts an advertisement to every registered service", async
 });
 
 test("it sends NO id and NO cwdRoots, which are the two the service owns", async () => {
-  const { sent } = await advertisementFromARealDaemon();
+  const { sent } = await realAdvertisement();
   assert.ok(!("id" in sent.body), "the daemon built an environment id");
   assert.ok(!("cwdRoots" in sent.body),
     "the daemon claimed a roots policy it does not own, which erases the configured roots");
@@ -119,7 +124,7 @@ test("it sends NO id and NO cwdRoots, which are the two the service owns", async
 });
 
 test("the runtimes it advertises are the wrappers actually installed on this host", async () => {
-  const { sent } = await advertisementFromARealDaemon();
+  const { sent } = await realAdvertisement();
   assert.ok(Array.isArray(sent.body.runtimes), "runtimes is not a list");
   for (const row of sent.body.runtimes) {
     assert.equal(typeof row.runtime, "string");
@@ -226,11 +231,8 @@ test("a 401 from the only service means NOT advertising, so its bridge keeps the
     "the per-service entry must also say no");
 });
 
-test("a 500 is treated the same as a 401 -- any non-2xx is not an acceptance", async () => {
-  const { health, attempts } = await healthAfterBeatingAt(() => refusingService(500));
-  assert.ok(attempts > 0);
-  assert.equal(health.advertising, false);
-});
+// A 500 takes the same path at this call site as the 401 above, and advertise.test.js ("a 401 or 500 does NOT") proves
+// the predicate treats them alike, so it boots no daemon of its own.
 
 test("an ACCEPTED advertisement does report as advertising, per service", async () => {
   // The other side of the same switch. Without this the two tests above would be satisfied by a
@@ -295,7 +297,7 @@ test("a REAL daemon sends the credential the registry names, from its own enviro
 test("with no key in its environment the daemon sends NO header, not an empty one", async () => {
   // An unkeyed service is supported. An empty `X-API-Key` would 401 with a more confusing cause
   // than sending none at all.
-  const { sent } = await advertisementFromARealDaemon();
+  const { sent } = await realAdvertisement();
   assert.equal("x-api-key" in sent.headers, false, "an empty credential was sent as a header");
   // POSITIVE CONTROL: the recorder DOES capture headers, so the absence above is a real absence.
   assert.equal(typeof sent.headers["content-type"], "string");
@@ -311,7 +313,7 @@ test("a REAL advertisement carries NO bridge* key, at any depth", async () => {
   //
   // This daemon is not a bridge and must emit none. Asserted against a REAL posted body rather
   // than the payload builder, because the builder is not the only thing that can add a key.
-  const { sent, output } = await advertisementFromARealDaemon();
+  const { sent, output } = await realAdvertisement();
 
   const offenders = [];
   const walk = (value, path) => {

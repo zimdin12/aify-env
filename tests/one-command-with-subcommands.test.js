@@ -29,31 +29,24 @@ test("exactly one command is published", () => {
   ));
 });
 
-test("`aify-env doctor` runs the doctor", () => {
+test("`aify-env doctor --strict --json` runs the doctor, with both flags reaching it", () => {
+  // ONE SPAWN FOR THE ROUTE AND ITS ARGUMENTS: JSON is the doctor's answer, and both flags changed it. Three spawns used
+  // to ask the same route one question each; what each flag means on its own is tests/doctor-cli.test.js's.
   // Pointed at nothing, so it exercises the unreachable path rather than the operator's daemon.
-  const r = run(["doctor"], { AIFY_ENV_ENDPOINT: "http://127.0.0.2:1" });
-  assert.equal(r.status, 0, `doctor should exit 0 without --strict: ${r.stderr}`);
-  assert.match(r.stdout + r.stderr, /environment/, "it must render the environment check");
-  assert.match(r.stdout + r.stderr, /unanswered|failed/, "and say what it could not determine");
+  const r = run(["doctor", "--strict", "--json"], { AIFY_ENV_ENDPOINT: "http://127.0.0.2:1" });
+  const parsed = JSON.parse(r.stdout);
+  assert.ok(Array.isArray(parsed.checks) && parsed.checks.length, "checks must survive the move");
+  const environment = parsed.checks.find((check) => check.id === "environment");
+  assert.ok(environment, "it must render the environment check");
+  assert.match(environment.state, /unanswered|failed/, "and say what it could not determine");
+  assert.notEqual(r.status, 0, "--strict must exit non-zero when something failed or went unanswered");
 });
-
 test("`aify-env install` is the guided-install chain, not a second command", () => {
   // No --connect: the chain refuses before it installs or connects anything, so this reaches no host state.
   const r = run(["install"]);
   assert.equal(r.status, 78, `${r.stdout}${r.stderr}`);
   assert.match(r.stderr, /aify-env install: name at least one --connect/);
   assert.doesNotMatch(r.stderr, /unknown subcommand/);
-});
-
-test("`aify-env doctor --strict` still acts on the answer", () => {
-  const r = run(["doctor", "--strict"], { AIFY_ENV_ENDPOINT: "http://127.0.0.2:1" });
-  assert.notEqual(r.status, 0, "--strict must exit non-zero when something failed or went unanswered");
-});
-
-test("`aify-env doctor --json` is still machine-readable", () => {
-  const r = run(["doctor", "--json"], { AIFY_ENV_ENDPOINT: "http://127.0.0.2:1" });
-  const parsed = JSON.parse(r.stdout);
-  assert.ok(Array.isArray(parsed.checks) && parsed.checks.length, "checks must survive the move");
 });
 
 test("an unknown subcommand says so instead of silently starting a daemon", () => {

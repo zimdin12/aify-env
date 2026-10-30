@@ -102,6 +102,8 @@ test("a --port 0 start leaves a running instance's processes AND its record alon
 
     // The incident: same record file, ephemeral port.
     ephemeral = start(box.env(box.record), 0);
+    // Listened for from the start, so the line is caught whether it comes before or after the port.
+    const said = waitFor(ephemeral, /left pid \d+ .* is still running/);
     await waitFor(ephemeral, /listening/);
     // Give the reap the same room the superseding test gives it, so a slow kill is not read as no kill.
     for (let i = 0; i < 40 && alive(pid); i += 1) await new Promise((r) => setTimeout(r, 200));
@@ -111,35 +113,11 @@ test("a --port 0 start leaves a running instance's processes AND its record alon
     assert.equal(after.length, 1, "the incumbent's record was emptied, so its process is now unreapable");
     assert.equal(after[0].pid, pid, "the record was rewritten with something other than the live entry");
     assert.equal(after[0].owner, incumbent.pid, "the kept entry lost the owner that protects it");
+    // AND IT SAYS SO, naming the owner, so an operator reading its output knows the process is not orphaned.
+    assert.match(await said, new RegExp(`owner \\(pid ${incumbent.pid}\\) is still running`));
   } finally {
     if (ephemeral) ephemeral.kill();
     incumbent.kill();
   }
 });
 
-test("the ephemeral instance says it left the process alone, and names the owner", async () => {
-  // Silence would be indistinguishable from having found nothing. An operator debugging a leak needs
-  // to know the reaper SAW the entry and declined it.
-  const PORT = await freePort();
-  const box = sealed("portzero-says");
-  const launcher = longLauncher(box.dir);
-  const incumbent = start(box.env(box.record), PORT);
-  let ephemeral = null;
-  try {
-    await waitFor(incumbent, /listening/);
-    const created = await fetch(`http://127.0.0.1:${PORT}/processes`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ service: "test", launcher, args: [], cwd: box.dir }),
-      signal: AbortSignal.timeout(20000),
-    });
-    assert.equal(created.status, 201, `could not start a process: ${created.status}`);
-
-    ephemeral = start(box.env(box.record), 0);
-    const output = await waitFor(ephemeral, /left pid \d+ .* is still running/);
-    assert.match(output, new RegExp(`owner \\(pid ${incumbent.pid}\\) is still running`));
-  } finally {
-    if (ephemeral) ephemeral.kill();
-    incumbent.kill();
-  }
-});

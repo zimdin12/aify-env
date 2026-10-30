@@ -108,25 +108,15 @@ test("set prints the REFERENCE and never the key, and status does not either", a
     assert.equal(set.code, EXIT_OK, set.stderr);
     assert.equal(set.stdout.trim(), PROBE_REF);
     assert.ok(!`${set.stdout}${set.stderr}`.includes(CANARY), "the key reached the command's output");
+    // THE STORED FILE HOLDS EXACTLY THE KEY THAT WAS PIPED IN, read from this same set rather than a second one.
+    // THE JOIN: what the writer put in is what a reader will get out, byte for byte plus the one canonical newline. If
+    // these ever disagree the two tiers hold different keys and every call 401s with both halves looking configured.
+    assert.equal(fs.readFileSync(path.join(home, ".aify", "credentials", PROBE_REF), "utf8"), `${CANARY}\n`);
 
     const status = await runCode(["status", "--service", "probe"], { home });
     assert.equal(status.code, EXIT_OK, status.stderr);
     assert.ok(status.stdout.includes(`${PROBE_REF}: ok`), status.stdout);
     assert.ok(!`${status.stdout}${status.stderr}`.includes(CANARY), "status printed the key");
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 3 });
-  }
-});
-
-test("the stored file holds exactly the key that was piped in", async () => {
-  const home = scratchHome();
-  try {
-    await runCode(["set", "--service", "probe", "--stdin"], { input: `${CANARY}\n`, home });
-    const stored = fs.readFileSync(path.join(home, ".aify", "credentials", PROBE_REF), "utf8");
-    // THE JOIN: what the writer put in is what a reader will get out, byte for byte plus the one
-    // canonical newline. If these ever disagree the two tiers hold different keys and every call
-    // 401s with both halves looking correctly configured.
-    assert.equal(stored, `${CANARY}\n`);
   } finally {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 3 });
   }

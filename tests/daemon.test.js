@@ -50,79 +50,68 @@ const stop = (child) => new Promise((resolve) => {
   child.kill();
 });
 
-test("it binds LOOPBACK, and announces the address it actually got", async () => {
-  const { child, base } = await startDaemon();
+// ONE BOOT FOR THE READ-ONLY PROBES. Each used to boot a daemon of its own to ask it one question, which is a whole
+// daemon start per question. They share one now, as subtests, so each must leave the environment as it found it: nothing
+// started (health's owned list and its started total unchanged), still answering. The order does not matter, which was
+// checked by running them in reverse once.
+test("ONE BOOT, READ-ONLY PROBES: each answers, and leaves the environment as it found it", async (t) => {
+  const { child, base, output } = await startDaemon();
+  const health = async () => (await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })).json();
+  const probes = [
+    ["it binds LOOPBACK, and announces the address it actually got", async () => {
+      assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/, "bound somewhere other than loopback");
+    }],
+    ["GET /health answers with this environment's own report", async () => {
+      const response = await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.status, "healthy");
+      assert.ok(Array.isArray(body.processes));
+      assert.equal(body.processes.length, 0, "a fresh environment owns nothing");
+    }],
+    ["a launcher without the marker is REFUSED over the wire, with a reason", async () => {
+      // The guard, reached the way a service would reach it rather than by calling the predicate.
+      const response = await fetch(`${base}/processes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ service: "aify-comms", launcher: DAEMON }),
+        signal: AbortSignal.timeout(5000),
+      });
+      assert.equal(response.status, 403);
+      assert.match((await response.json()).error, /marker/i);
+    }],
+    ["an unknown route is 404 rather than anything happening", async () => {
+      assert.equal((await fetch(`${base}/whatever`, { signal: AbortSignal.timeout(5000) })).status, 404);
+    }],
+    ["malformed JSON is a 400, not a crash", async () => {
+      const response = await fetch(`${base}/processes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{not json",
+        signal: AbortSignal.timeout(5000),
+      });
+      assert.equal(response.status, 400);
+    }],
+    ["it SAYS whether terminals are available, at startup", async () => {
+      // Rather than leaving it to be discovered when a console renders nothing.
+      assert.match(output(), /terminals: (available|UNAVAILABLE)/);
+    }],
+    ["STREAM: watching a process that does not exist is a 404", async () => {
+      // Distinct from an open-but-quiet stream. One means look elsewhere; the other means wait.
+      const res = await fetch(`${base}/processes/never-existed/output`, { signal: AbortSignal.timeout(5000) });
+      assert.equal(res.status, 404);
+    }],
+  ];
   try {
-    assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/, "bound somewhere other than loopback");
-  } finally {
-    await stop(child);
-  }
-});
-
-test("GET /health answers with this environment's own report", async () => {
-  const { child, base } = await startDaemon();
-  try {
-    const response = await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) });
-    assert.equal(response.status, 200);
-    const body = await response.json();
-    assert.equal(body.status, "healthy");
-    assert.ok(Array.isArray(body.processes));
-    assert.equal(body.processes.length, 0, "a fresh environment owns nothing");
-  } finally {
-    await stop(child);
-  }
-});
-
-test("a launcher without the marker is REFUSED over the wire, with a reason", async () => {
-  // The guard, reached the way a service would reach it rather than by calling the predicate.
-  const { child, base } = await startDaemon();
-  try {
-    const response = await fetch(`${base}/processes`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ service: "aify-comms", launcher: DAEMON }),
-      signal: AbortSignal.timeout(5000),
-    });
-    assert.equal(response.status, 403);
-    const body = await response.json();
-    assert.match(body.error, /marker/i);
-  } finally {
-    await stop(child);
-  }
-});
-
-test("an unknown route is 404 rather than anything happening", async () => {
-  const { child, base } = await startDaemon();
-  try {
-    const response = await fetch(`${base}/whatever`, { signal: AbortSignal.timeout(5000) });
-    assert.equal(response.status, 404);
-  } finally {
-    await stop(child);
-  }
-});
-
-test("malformed JSON is a 400, not a crash", async () => {
-  const { child, base } = await startDaemon();
-  try {
-    const response = await fetch(`${base}/processes`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{not json",
-      signal: AbortSignal.timeout(5000),
-    });
-    assert.equal(response.status, 400);
-    // And it must still be serving afterwards.
-    assert.equal((await fetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })).status, 200);
-  } finally {
-    await stop(child);
-  }
-});
-
-test("it SAYS whether terminals are available, at startup", async () => {
-  // Rather than leaving it to be discovered when a console renders nothing.
-  const { child, output } = await startDaemon();
-  try {
-    assert.match(output(), /terminals: (available|UNAVAILABLE)/);
+    for (const [name, probe] of probes) {
+      await t.test(name, async () => {
+        await probe();
+        const after = await health();
+        assert.equal(after.status, "healthy", `still serving after: ${name}`);
+        assert.equal(after.processes.length, 0, `a process was left behind by: ${name}`);
+        assert.equal(after.history.startedTotal, 0, `something was started by: ${name}`);
+      });
+    }
   } finally {
     await stop(child);
   }
@@ -230,17 +219,6 @@ test("STREAM: a service can watch a process's output over the wire", async () =>
     assert.match(seen, /SECOND-LINE/, "live output did not arrive");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
-    await stop(child);
-  }
-});
-
-test("STREAM: watching a process that does not exist is a 404", async () => {
-  // Distinct from an open-but-quiet stream. One means look elsewhere; the other means wait.
-  const { child, base } = await startDaemon();
-  try {
-    const res = await fetch(`${base}/processes/never-existed/output`, { signal: AbortSignal.timeout(5000) });
-    assert.equal(res.status, 404);
-  } finally {
     await stop(child);
   }
 });

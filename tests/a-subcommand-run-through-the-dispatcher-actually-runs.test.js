@@ -57,43 +57,43 @@ function storedFiles(root) {
   }
 }
 
-test("through the DISPATCHER it stores the key and prints the reference", () => {
+/** One set through `script` into a home of its own: the reference printed, and the files the store then held. */
+function setOnce(script) {
   const root = mkdtempSync(join(tmpdir(), "aify-env-dispatch-"));
   try {
-    const ref = setCredential(DISPATCHER, root);
-    assert.match(ref, /^aify-comms-[0-9a-f]+\.key$/,
-      `the dispatcher printed ${JSON.stringify(ref)} instead of a credential reference; the installer `
-      + "records this in its registry, and an empty one leaves aify-env unable to find its own key");
-    assert.deepEqual(storedFiles(root), [ref],
-      "the command reported success and wrote no credential file");
+    const ref = setCredential(script, root);
+    return { ref, stored: storedFiles(root) };
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+// ONE SET PER PATH. The agreement test ran both paths a second time just to compare what the first two tests had
+// already seen; all three read these two runs now.
+const runs = new Map();
+const through = (script) => {
+  if (!runs.has(script)) runs.set(script, setOnce(script));
+  return runs.get(script);
+};
+
+test("through the DISPATCHER it stores the key and prints the reference", () => {
+  const { ref, stored } = through(DISPATCHER);
+  assert.match(ref, /^aify-comms-[0-9a-f]+\.key$/,
+    `the dispatcher printed ${JSON.stringify(ref)} instead of a credential reference; the installer `
+    + "records this in its registry, and an empty one leaves aify-env unable to find its own key");
+  assert.deepEqual(stored, [ref], "the command reported success and wrote no credential file");
 });
 
 test("CONTROL: the direct entry point behaves identically", () => {
   // Without this the test above could pass on a build where BOTH paths are broken in the same way,
   // and it is the direct path that was working while the dispatcher was not -- the difference is the
   // whole finding.
-  const root = mkdtempSync(join(tmpdir(), "aify-env-direct-"));
-  try {
-    const ref = setCredential(DIRECT, root);
-    assert.match(ref, /^aify-comms-[0-9a-f]+\.key$/);
-    assert.deepEqual(storedFiles(root), [ref]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const { ref, stored } = through(DIRECT);
+  assert.match(ref, /^aify-comms-[0-9a-f]+\.key$/);
+  assert.deepEqual(stored, [ref]);
 });
 
 test("the two paths agree on the reference they produce", () => {
   // One key, one name. If they diverged, an installer that used one and a daemon that resolved the
   // other would both be correct and still never meet.
-  const a = mkdtempSync(join(tmpdir(), "aify-env-agree-a-"));
-  const b = mkdtempSync(join(tmpdir(), "aify-env-agree-b-"));
-  try {
-    assert.equal(setCredential(DISPATCHER, a), setCredential(DIRECT, b));
-  } finally {
-    rmSync(a, { recursive: true, force: true });
-    rmSync(b, { recursive: true, force: true });
-  }
+  assert.equal(through(DISPATCHER).ref, through(DIRECT).ref);
 });
