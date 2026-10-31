@@ -33,6 +33,17 @@ test("several shells, and the item at the end of the footer, count too", () => {
   assert.equal(judge(screenWith("  ▸▸ bypass permissions on · 1 shell")).state, "shell");
 });
 
+test("a monitor, a background agent or a mix of task kinds reads shell like a shell does", () => {
+  // golf-manager, 2026-10-31: `1 shell, 1 monitor still running` above an idle prompt read online,
+  // because Claude Code 2.1.316 joins its footer's bash kinds with a comma.
+  for (const item of ["1 shell, 1 monitor", "2 monitors", "1 local agent", "3 background tasks"]) {
+    const verdict = judge(screenWith(`  ▸▸ bypass permissions on · ${item} · ↓ to manage`, `✻ Done · ${item} still running`));
+    assert.equal(verdict.state, "shell", item);
+  }
+  const historyOnly = screenWith("  ▸▸ bypass permissions on · ↓ to manage", "✻ Done · 1 shell, 1 monitor still running");
+  assert.equal(judge(historyOnly).state, "idle", "the transcript's comma line alone is history");
+});
+
 test("CONTROL: the same idle prompt without the footer item stays idle", () => {
   // The transcript line above still says "1 shell still running"; it is history, not the footer.
   assert.equal(judge(screenWith("  ▸▸ bypass permissions on · ↓ to manage")).state, "idle");
