@@ -327,8 +327,8 @@ The view's own file, read when the view starts. `v`, `o` and the pane menu write
  "collapsed": ["health"],
  "extended": false,
  "sort": "name",
- "columns": {"agents": {"normal": ["cursor", "status", "agent", "out", "title"],
-                        "extended": ["#", "status-word", "agent", "out", "id", "pid", "service", "io", "up", "title"]}}}
+ "columns": {"agents": {"normal": ["cursor", "status", "agent", "out", "model", "title"],
+                        "extended": ["#", "status-word", "agent", "out", "model", "id", "pid", "service", "io", "up", "title"]}}}
 ```
 
 - `panes` is the order. A pane it leaves out is drawn after the ones it names, so a pane added later still appears.
@@ -347,9 +347,10 @@ The view's own file, read when the view starts. `v`, `o` and the pane menu write
   - `role` (from its definition), `cwd` (where it was started), `age` (how long it has been in its state, whatever
     the state) and `cause` (the environment's reason for the state);
   - `harness`, `model` and `effort`, from the agent's definition on this host. The view reads the definitions store
-    without locking or changing it, so a hand edit shows once aify-env has adopted it.
+    without locking or changing it, so a hand edit shows once aify-env has adopted it. `model` reads `default` where
+    the definition leaves the model to the harness, and is blank for an agent with no definition here.
 
-  These seven are in neither default (0.9.9).
+  `model` is in both defaults, between `out` and `title`; the other six are in neither.
 - `status` is the agent's dot and, after it, how long it has been in that state (`● 12m`), or why, when the state
   needs looking at (`● folder-trust` for a blocked agent). `status-word` adds the word: `● working 12m`.
 - `sort` is the agents table's row order: `name`, or `attention` (blocked and unknown first, then working).

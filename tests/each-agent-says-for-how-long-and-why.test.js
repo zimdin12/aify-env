@@ -18,10 +18,10 @@ const minutesAgoUs = (minutes) => (NOW_MS - minutes * 60_000) * 1000;
 const EXTENDED = layoutFrom(JSON.stringify({ extended: true }));
 const KEYS = { enabled: true, canQuit: true };
 
-function rowFor(record, { columns = 140, layout = null, title = "busy", label = "worker" } = {}) {
+function rowFor(record, { columns = 140, layout = null, title = "busy", label = "worker", definitions = {} } = {}) {
   const proc = { id: "x-p1", pid: 1, label, service: "aify-comms", terminal: true, uptimeMs: 3_600_000, title };
   const snapshot = { version: "0.9.7-dev", endpoint: "e", nowMs: NOW_MS, terminals: { available: true }, services: [], checks: [],
-    processes: [proc], agentRecords: record ? { [label]: { agentId: label, ...record } } : {} };
+    processes: [proc], agentRecords: record ? { [label]: { agentId: label, ...record } } : {}, definitions };
   const view = { rows: [proc], selected: 0, mode: "dashboard", query: "", paneHidden: true };
   return renderDashboard(snapshot, { columns, color: false, keys: KEYS, view, layout }).find((line) => line.includes(label)) ?? "";
 }
@@ -68,21 +68,24 @@ test("the extended set keeps the word, then the same suffix: \"● working 12m\"
   assert.match(up, /\s1h0m\s/, "`up` went missing from the extended set");
 });
 
-test("THE TITLE GETS THE ROOM: a 73-character title shows at least 59 of them at 100 columns", () => {
+test("THE TITLE GETS THE ROOM: a 73-character title shows at least 47 of them at 100 columns, beside a model", () => {
   // MEASURED BEFORE 0.9.7: 53 at 100 columns, 33 at 80. The dot's column was padded to the six of "status" and `up`
   // sat before the title. Whole at 140, which is the control. A 20-CHARACTER NAME, the longest on the live host on
   // 2026-10-28: with a short one the title had room whatever sat before it, and this test could not fail.
+  // 2026-11-01, the operator put `model` before the title: 59 became the measured 47 beside `gpt-6.1-sol`, the
+  // longest model a definition set that day. The trade was asked for; this pins it so it cannot grow unseen.
   const title = "reviewing the wrapper's HTTP entry and the sessions folder design, part 2";
   assert.equal(title.length, 73);
   const record = { state: "working", turn: { open: true, startedAtUs: minutesAgoUs(12) } };
   const shown = (columns) => {
-    const row = rowFor(record, { columns, title, label: "comms-tech-lead-long" });
+    const row = rowFor(record, { columns, title, label: "comms-tech-lead-long",
+      definitions: { "comms-tech-lead-long": { harness: "claude", model: "gpt-6.1-sol" } } });
     assert.ok(width(row) <= columns, `the row is wider than ${columns}`);
     let n = 0;
     while (n < title.length && row.includes(title.slice(0, n + 1))) n += 1;
     return n;
   };
-  assert.ok(shown(100) >= 59, `only ${shown(100)} of 73 at 100 columns`);
+  assert.ok(shown(100) >= 47, `only ${shown(100)} of 73 at 100 columns`);
   assert.equal(shown(140), 73, "the control: a wide terminal shows the whole title");
 });
 

@@ -27,6 +27,7 @@ const SNAPSHOT = {
   processes: [{ id: "1f15df98-7d5e-4f24-92fe-51ddd4a3a24e-p1", pid: 4242, label: "worker", service: "aify-comms",
     terminal: true, uptimeMs: 600_000, title: "Claude Code", lastOutputAtMs: 999_000 }],
   agentRecords: { worker: { agentId: "worker", state: "working" } },
+  definitions: { worker: { harness: "claude", model: "opus-test" } },
 };
 const KEYS = { enabled: true, canQuit: true };
 const VIEW = { rows: SNAPSHOT.processes, selected: 0, mode: "dashboard", query: "", paneHidden: true };
@@ -35,12 +36,12 @@ const headerOf = (lines) => lines.find((line) => /\bAGENT\b/.test(line)) ?? "";
 const rowOf = (lines) => lines.find((line) => line.includes("worker")) ?? "";
 const hintOf = (lines) => lines.find((line) => line.includes("quit")) ?? "";
 
-test("the default view: the dot, the agent, out right after it, and title; `up` is in the extended set (0.9.7)", () => {
+test("the default view: the dot, the agent, out right after it, the model, and title; `up` is in the extended set", () => {
   const lines = renderDashboard(SNAPSHOT, { columns: 160, keys: KEYS, view: VIEW });
   // NO HEADER over the dot (0.9.7): it padded a one-character column to the six of "status".
-  assert.match(headerOf(lines), /^\s+AGENT\s+OUT\s+TITLE$/);
+  assert.match(headerOf(lines), /^\s+AGENT\s+OUT\s+MODEL\s+TITLE$/);
   const row = rowOf(lines);
-  assert.match(row, /^\s*❯\s+●\s+worker\s+●\s+Claude Code$/, "the cursor, the status dot alone, then agent, out and title");
+  assert.match(row, /^\s*❯\s+●\s+worker\s+●\s+opus-test\s+Claude Code$/, "the cursor, the status dot alone, then agent, out, model and title");
   for (const hidden of ["a24e-p1", "4242", "aify-comms", "pty", "working", "10m"]) assert.ok(!row.includes(hidden), `the default row shows ${hidden}`);
   assert.doesNotMatch(hintOf(lines), /1-9 jump/, "a jump hint over rows that carry no numbers");
   assert.match(hintOf(lines), /v more columns/);
@@ -48,10 +49,20 @@ test("the default view: the dot, the agent, out right after it, and title; `up` 
 
 test("the extended view: numbered rows, the status word, id, pid, service and io, and the jump hint", () => {
   const lines = renderDashboard(SNAPSHOT, { columns: 200, keys: KEYS, view: VIEW, layout: EXTENDED });
-  assert.match(headerOf(lines), /^\s+#\s+STATUS\s+AGENT\s+OUT\s+ID\s+PID\s+SERVICE\s+IO\s+UP\s+TITLE$/);
-  assert.match(rowOf(lines), /^\s*❯1\s+● working\s+worker\s+●\s+a24e-p1\s+4242\s+aify-comms\s+pty\s+10m\s+Claude Code$/);
+  assert.match(headerOf(lines), /^\s+#\s+STATUS\s+AGENT\s+OUT\s+MODEL\s+ID\s+PID\s+SERVICE\s+IO\s+UP\s+TITLE$/);
+  assert.match(rowOf(lines), /^\s*❯1\s+● working\s+worker\s+●\s+opus-test\s+a24e-p1\s+4242\s+aify-comms\s+pty\s+10m\s+Claude Code$/);
   assert.match(hintOf(lines), /1-9 jump/);
   assert.match(hintOf(lines), /v fewer columns/);
+});
+
+test("the model column: the definition's model, `default` when it sets none, blank with no definition here", () => {
+  const modelOf = (definitions) => {
+    const lines = renderDashboard({ ...SNAPSHOT, definitions }, { columns: 160, keys: KEYS, view: VIEW });
+    return rowOf(lines).replace(/^.*worker\s+●\s+/, "").replace(/\s*Claude Code$/, "");
+  };
+  assert.equal(modelOf({ worker: { harness: "claude", model: "OpenAI Subscription/gpt-6.1-sol" } }), "OpenAI Subscription/gpt-6.1-sol");
+  assert.equal(modelOf({ worker: { harness: "claude", model: "" } }), "default");
+  assert.equal(modelOf({}), "", "no definition on this host is not the harness default");
 });
 
 test("no keyboard, no cursor and no numbers: a piped view has nothing to point or jump with", () => {
