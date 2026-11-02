@@ -88,6 +88,15 @@ test("THE REAL LAUNCH GUARD refuses D:/ work, admits it once the root is added, 
   assert.match(admitted.detail, /carries no argv/, "CONTROL: the next check after the root check is the one that answered");
 });
 
+test("THE REAL LAUNCH GUARD refuses a service's cwd that climbs out of a root with .., and admits the plain subfolder", () => {
+  const guard = (cwd) => prepareTerminalLaunch({ launch: { cwd, argv: [] }, terminalId: "t1", cwdRoots: ["D:/Games"], windows: true,
+    withinRoots: workspaceWithinRoots, buildSpec: () => null, resolveCandidates: () => [] });
+  assert.equal(guard("D:/Games/../Elsewhere").rootRefusal, true, "a .. cwd reached the spawn as if inside D:/Games");
+  const control = guard("D:/Games/terraria-manager");
+  assert.equal(control.rootRefusal, undefined, "CONTROL: a plain subfolder was refused");
+  assert.match(control.detail, /carries no argv/, "CONTROL: the next check after the root check answered");
+});
+
 test("THE DAEMON HANDS EVERY READER the live roots, not a list taken at start", () => {
   const source = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs"), "utf8");
   assert.doesNotMatch(source, /CWD_ROOTS/, "a fixed list is still in use");

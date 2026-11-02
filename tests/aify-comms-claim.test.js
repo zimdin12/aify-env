@@ -100,6 +100,24 @@ test("an empty workspace is refused, not treated as the root", () => {
   assert.equal(workspaceWithinRoots("C:/Docker", [""], { windows: true }), false);
 });
 
+test("a workspace with a . or .. segment is refused, never resolved: textually inside, it would start elsewhere", async (t) => {
+  const B = String.fromCharCode(92);
+  for (const [workspace, roots, windows] of [
+    ["D:/Games/../Elsewhere", ["D:/Games"], true],
+    [`D:${B}Games${B}..${B}Elsewhere`, ["D:/Games"], true],
+    ["D:/Games/./terraria", ["D:/Games"], true],
+    ["D:/Games/..", ["D:/Games"], true],
+    ["/home/bob/../alice", ["/home/bob"], false],
+  ]) {
+    await t.test(workspace, () => assert.equal(workspaceWithinRoots(workspace, roots, { windows }), false, `${workspace} passed as inside ${roots}`));
+  }
+  await t.test("CONTROL: plain subfolders, and names that only start with dots, are inside", () => {
+    assert.equal(workspaceWithinRoots("D:/Games/terraria-manager", ["D:/Games"], { windows: true }), true);
+    assert.equal(workspaceWithinRoots("D:/Games/..hidden/x", ["D:/Games"], { windows: true }), true);
+    assert.equal(workspaceWithinRoots("/home/bob/.config", ["/home/bob"], { windows: false }), true);
+  });
+});
+
 // -- the pass -------------------------------------------------------------------------------
 
 test("nothing to claim is idle, not an error", async () => {
