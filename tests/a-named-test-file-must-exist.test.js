@@ -26,6 +26,17 @@ test('npm test executes a real named file, including its known assertion', () =>
 test('npm test refuses a missing named file even beside a real one and names it', () => {
   const answer = run([REAL, MISSPELLED]);
   assert.equal(answer.status, 2, 'missing named file must refuse, not run a smaller passing population');
-  assert.ok(answer.stderr.includes('named test file does not exist: ' + MISSPELLED), 'the refusal must name the exact missing path, not just npm echoing its argv');
+  assert.ok(answer.stderr.includes('named test selector is not a regular file: ' + MISSPELLED), 'the refusal must name the exact missing path, not just npm echoing its argv');
   assert.doesNotMatch(answer.stdout, /known acquisition timeout before effects/, 'no partial suite starts after refusal');
+});
+
+test('npm test refuses a fixture-owned directory beside a real named file', t => {
+  // Empty, uniquely owned directory beside the real peer; a relative selector avoids shell quoting differences.
+  const directory = fs.mkdtempSync(path.join(ROOT, 'tests', '.named-test-directory-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const selector = path.relative(ROOT, directory).split(path.sep).join('/');
+  const answer = run([REAL, selector]);
+  assert.doesNotMatch(answer.stdout, /known acquisition timeout before effects/, 'directory selection must be refused before the real peer executes');
+  assert.equal(answer.status, 2, 'runner must refuse the directory before spawning Node: ' + answer.stdout + answer.stderr);
+  assert.ok(answer.stderr.includes(selector), 'the refusal must name the directory');
 });

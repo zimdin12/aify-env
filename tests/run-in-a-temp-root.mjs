@@ -83,9 +83,9 @@ const env = { ...inherited, HOME: home, USERPROFILE: home, TMPDIR: root, TEMP: r
 // fixture directories from such runs, 218 of them from one file in one day, while every full run left nothing.
 const named = process.argv.slice(2);
 for (const file of named) {
-  if (fs.existsSync(file)) continue;
+  if (fs.statSync(file, { throwIfNoEntry: false })?.isFile()) continue;
   fs.rmSync(root, { recursive: true, force: true });
-  console.error("run-in-a-temp-root: named test file does not exist: " + file);
+  console.error("run-in-a-temp-root: named test selector is not a regular file: " + file);
   process.exit(2);
 }
 const files = named.length > 0 ? named : fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map((f) => path.join('tests', f));
