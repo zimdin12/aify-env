@@ -107,7 +107,15 @@ test("proof_covers_every_numbered_body: a body aborted in flight still names its
   assert.match(f.reports.at(-1), /agent state retirement: not-proven \(1 lifetimes\)/);
 });
 
-test("proof_rejects_registry_deletion_and_killTree_return: a stop that saw no exit ends nothing", async (t) => {
+test("proof_accepts_a_runner_stop_verified_after_its_kill: the post-kill check read the pid gone", async (t) => {
+  // The runner's own post-kill check (lib/runner-stop.mjs), on the evidence the lifecycle's verified stop already counts.
+  const killed = runnerFixture(t, { alive: true });
+  const k = await killed.started();
+  assert.equal((await killed.runner.stop(k.handle.id)).stopped, true, "CONTROL: the post-kill check saw the pid gone");
+  assert.equal(killed.host.retirementProof([k.lifetime]).holds, true, "a stop that verified the pid gone was not an end");
+});
+
+test("proof_rejects_registry_deletion_and_killTree_return: a stop that did not verify the pid gone ends nothing", async (t) => {
   // killTree returns, yet the pid still answers alive: the stop is unverified, so custody and the lifetime stay.
   const f = runnerFixture(t, { alive: true, killEnds: false });
   const { handle, lifetime } = await f.started();
@@ -126,7 +134,7 @@ test("proof_rejects_registry_deletion_and_killTree_return: a stop that saw no ex
   assert.equal(g.calls.filter((call) => call.body.kind === "retired").length, 0);
 });
 
-test("proof_accepts_each_confirmed_end_path: observed exit, dead at stop, dead after the stop's kill, release, a verified lifecycle stop, a persistence-failed end", async (t) => {
+test("proof_accepts_each_confirmed_end_path: observed exit, dead at stop, release, a verified lifecycle stop, a persistence-failed end", async (t) => {
   // Observed exit (runner.mjs onExit -> ManagedLifetimes.end).
   const exit = runnerFixture(t);
   const a = await exit.started();
@@ -139,12 +147,6 @@ test("proof_accepts_each_confirmed_end_path: observed exit, dead at stop, dead a
   const b = await dead.started();
   await dead.runner.stop(b.handle.id);
   assert.equal(dead.host.retirementProof([b.lifetime]).holds, true, "a stop that found the pid dead was not an end");
-
-  // Dead after the stop's kill: the runner's own post-kill check read the pid gone (lib/runner-stop.mjs).
-  const killed = runnerFixture(t, { alive: true });
-  const k = await killed.started();
-  assert.equal((await killed.runner.stop(k.handle.id)).stopped, true, "CONTROL: the post-kill check saw the pid gone");
-  assert.equal(killed.host.retirementProof([k.lifetime]).holds, true, "a stop that verified the pid gone was not an end");
 
   // The reaper's release of a proven-dead pid.
   const released = runnerFixture(t);

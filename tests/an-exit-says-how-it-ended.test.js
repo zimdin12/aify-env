@@ -178,7 +178,52 @@ test("a STOP is recorded as `stopped`, and a reap as `reaped`", async () => {
   process.kill(reaped.pid, "SIGKILL");
 });
 
-test("a stop that waits for the exit records `stopped`, not the kill's code and signal as the program's", async () => {
+test("a stop the reaper's sweep overtakes is still recorded `stopped`; a reap with no stop is `reaped`, a natural exit `exited`", async () => {
+  // The overlap: the stop is held in its tree kill, the child is already dead, the real reaper's sweep releases it,
+  // and only then does the kill return and the close arrive.
+  const { EventEmitter } = await import("node:events");
+  const { createReaper } = await import("../lib/reaper.mjs");
+  const alive = new Map();
+  let nextPid = 5000;
+  const children = new Map();
+  const spawnProcess = () => {
+    const child = Object.assign(new EventEmitter(), { pid: nextPid++, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} }, kill() {} });
+    alive.set(child.pid, true); children.set(child.pid, child);
+    return child;
+  };
+  let releaseKill;
+  const held = new Promise((resolve) => { releaseKill = resolve; });
+  const runner = new Runner({ openTerminal: null, spawnProcess, isAlive: (pid) => alive.get(pid), stopExitWaitMs: 1000,
+    killTree: async (pid) => { alive.set(pid, false); await held; } });
+  const reaper = createReaper(runner, { isAlive: (pid) => alive.get(pid) });
+
+  const stopped = await runner.start(spec("unused"));
+  const stopping = runner.stop(stopped.id);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(alive.get(stopped.pid), false, "CONTROL: the stop is inside its kill and the child reads dead");
+  reaper.sweep();
+  assert.equal(runner.list().some((entry) => entry.id === stopped.id), false, "CONTROL: the sweep released it first");
+  releaseKill();
+  children.get(stopped.pid).emit("close", 1, "SIGTERM");
+  assert.equal((await stopping).stopped, true, "CONTROL: the stop completed");
+  const exit = runner.history().recentExits.find((record) => record.id === stopped.id);
+  assert.equal(exit.reason, "stopped", "the sweep's release recorded a requested stop as a reap");
+  assert.equal(exit.exitCode, null);
+  assert.equal(exit.exitSignal ?? "", "");
+
+  // CONTROLS on the same wiring: a reap with no stop asked for, and an exit nobody asked for.
+  const reaped = await runner.start(spec("unused"));
+  alive.set(reaped.pid, false);
+  reaper.sweep();
+  assert.equal(runner.history().recentExits.find((record) => record.id === reaped.id)?.reason, "reaped");
+  const exited = await runner.start(spec("unused"));
+  children.get(exited.pid).emit("close", 0, null);
+  const natural = runner.history().recentExits.find((record) => record.id === exited.id);
+  assert.equal(natural?.reason, "exited");
+  assert.equal(natural?.exitCode, 0);
+});
+
+test("a stop that waits for the exit records `stopped` without the code or signal the child reported", async () => {
   // A fake child whose exit is the kill's: code 1 and a signal, which a real killed child reports only on some hosts.
   const { EventEmitter } = await import("node:events");
   let child, alive = true;
