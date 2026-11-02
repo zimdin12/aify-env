@@ -114,7 +114,7 @@ function fakeProcesses({ startThrows = null, size = { cols: 120, rows: 30 } } = 
     },
     write(id, data, viewer) { calls.writes.push({ id, data, viewer }); },
     resize(id, cols, rows, viewer) { calls.resizes.push({ id, cols, rows, viewer }); },
-    async stop(id) { calls.stops.push(id); running = false; },
+    async stop(id) { calls.stops.push(id); running = false; return { stopped: true, problem: "" }; },
     list() { return running ? [{ id: "proc-1", pid: 4242 }] : []; },
   };
 }

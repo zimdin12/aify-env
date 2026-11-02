@@ -29,7 +29,7 @@ test('composed managed disappearance is not death, reservation and raw handle su
  await f.runner.start({agentId:'a',service:'fixture',fileText:'#!/bin/bash\nHARNESS_WRAPPER_VERSION="1.0"',command:'fixture',env:{}});
  const r=await request(f,'stop');const before=f.host.rawIdentity('a');
  assert.equal((await f.ports.lifecycle.execute(r)).outcome,'execution-unknown');
- assert.equal(f.runner.list().length,0);assert.equal(f.host.rawIdentity('a').current.handle,before.current.handle);
+ assert.equal(f.runner.list().length,1);assert.equal(f.host.rawIdentity('a').current.handle,before.current.handle);
  assert.equal(f.ports.stopFacts().size,0);assert.equal((await f.ports.lifecycle.execute({...r,id:'second'})).outcome,'agent-reserved');
 });
 test('positively verified managed death feeds actual state read and blocks locked cold producer',async t=>{

@@ -173,9 +173,8 @@ test("a stop that throws SYNCHRONOUSLY does not strand the processes after it", 
   await shutdown("SIGINT");
   assert.ok(events.includes("stopped:b"), "a synchronous throw on the first stop stranded the second");
   assert.ok(events.includes("exit:0"), "a synchronous throw prevented the exit");
-  // It FINISHED, badly. That is not a wedge, so the record is safe to clear -- same rule as a
-  // rejecting stop.
-  assert.ok(events.includes("record-cleared"), "a stop that threw was mistaken for one that wedged");
+  // It finished, badly, not wedged. Neither fact proves the child died: ownership must survive.
+  assert.equal(events.includes("record-cleared"), false, "a throwing stop cannot authorize ownership erasure");
 });
 
 test("it says how many processes it is taking with it", async () => {
@@ -311,8 +310,7 @@ test("when every stop returns, the record is cleared and nothing is reported stu
 });
 
 test("a stop that REJECTS is not a wedge", async () => {
-  // A refusal is an answer. Treating it as unfinished would keep the owned record for a process that
-  // was accounted for, and orphan-reap the next instance into work it does not need to do.
+  // A refusal is an answer, not a wedge, but it is not proof the process ended. Keep ownership and say why.
   const written = [];
   let cleared = 0;
   const shutdown = createShutdown({
@@ -325,7 +323,8 @@ test("a stop that REJECTS is not a wedge", async () => {
 
   await shutdown("SIGINT");
 
-  assert.strictEqual(cleared, 1, "a rejected stop was treated as still outstanding");
+  assert.strictEqual(cleared, 0, "a rejected stop cannot authorize ownership erasure");
+  assert.match(written.join(""), /stop-unverified/);
   assert.doesNotMatch(written.join(""), /did not confirm/);
 });
 

@@ -55,12 +55,12 @@ for (const [name, value] of [...unanswered, ['throws', unreadable]]) {
   });
 }
 
-test('Runner.stop true-live attempts fake effects but registry release does not prove death', async t => {
+test('Runner.stop true-live attempts fake effects and retains custody without death', async t => {
   const f = await managed(t, () => true), raw = f.host.rawIdentity('a'), phases = [];
   await f.runner.stop(f.handle.id, { phase: p => phases.push(p) });
-  assert.deepEqual(f.probes, [f.child.pid]); assert.deepEqual(f.effects, ['child', 'tree']);
+  assert.deepEqual(f.probes, [f.child.pid, f.child.pid]); assert.deepEqual(f.effects, ['child', 'tree']);
   assert.deepEqual(phases, ['console-kill', 'tree-kill', 'exit-wait', 'done']);
-  assert.deepEqual(f.runner.list(), []); assert.equal(f.runner.canStream(f.handle.id), false);
+  assert.equal(f.runner.list()[0]?.id, f.handle.id); assert.equal(f.runner.canStream(f.handle.id), true);
   assert.deepEqual(f.host.rawIdentity('a'), raw);
 });
 
@@ -98,5 +98,5 @@ test('captured managed witness remains after true-live stop and unanswered verif
   const result = await stopAndVerify({ list: () => [{ id: raw.current.handle, pid: raw.current.pid }],
     stop: id => f.runner.stop(id) }, raw.current.handle, { isAlive: () => undefined, settleMs: 0 });
   assert.equal(result.stopped, false); assert.deepEqual(f.effects, ['child', 'tree']);
-  assert.deepEqual(f.runner.list(), []); assert.deepEqual(f.host.rawIdentity('a'), raw);
+  assert.equal(f.runner.list()[0]?.id, f.handle.id); assert.deepEqual(f.host.rawIdentity('a'), raw);
 });

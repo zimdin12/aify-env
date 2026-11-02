@@ -159,17 +159,17 @@ test("overlapping children conflict; exact release and delayed old exit preserve
   assert.equal(f.host.current("lead", GIVEN).process.verified, "no", "already-dead stop ends exact token");
 });
 
-test("stop request is not death; captured finish still ends after stream and registry release", async (t) => {
+test("stop request is not death; custody stays until captured finish", async (t) => {
   const f = fixture(t, { alive: true });
   const a = await f.runner.start(f.spec()), token = f.children[0].env.AIFY_LIFETIME;
   assert.equal((await f.send(token)).body.applied, true);
   await f.runner.stop(a.id);
-  assert.deepEqual(f.runner.list(), []);
-  assert.equal(f.runner.canStream(a.id), false);
+  assert.equal(f.runner.list()[0]?.id, a.id);
+  assert.equal(f.runner.canStream(a.id), true);
   assert.equal(f.host.current("lead", GIVEN).process.verified, "yes", "stop request is not observed death");
   f.end(f.children[0]);
   assert.equal(await a.exited, null);
-  assert.equal(f.host.current("lead", GIVEN).process.verified, "no", "captured finish survives released stream");
+  assert.equal(f.host.current("lead", GIVEN).process.verified, "no", "captured finish ends retained lifetime");
 });
 
 test("pipe creation without a PID never publishes yes", async (t) => {

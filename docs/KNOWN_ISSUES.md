@@ -51,3 +51,7 @@ threw away the exit status, signal and stderr that would have said why. The run 
 recorded. Every parse there now goes through `reportOf`, which says the status, signal, spawn error and stderr when
 there is no report; watched with a doctor replaced by one that writes to stderr and exits 3. If it recurs, the next
 failure names its cause.
+
+## Recovered orphan identity
+
+- ASSUMED (source-supported, not live-tested): `orphan-reap.mjs` accepts launcher plus a 30-second start-time tolerance rather than an exact OS birth pin; PID-only recovered records need a separate exact-identity review. Runner's held-child Stop verification does not cover that recovery path.
