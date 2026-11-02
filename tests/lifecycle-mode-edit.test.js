@@ -74,7 +74,7 @@ for (const mode of ['resident', 'managed']) for (const action of ['stop', 'kill'
   });
 }
 
-for (const action of ['start', 'restart']) test(`${action} refuses an edited resident lifetime before effects`, async t => {
+for (const action of ['start', 'spawn', 'restart']) test(`${action} refuses an edited resident lifetime before effects`, async t => {
   const f = await fixture(t, 'resident');
   const answer = await f.ports.lifecycle.execute(f.request(action));
   assert.deepEqual([answer.status, answer.outcome], ['refused', 'running-lifetime-mode-mismatch']);
