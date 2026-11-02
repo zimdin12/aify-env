@@ -67,6 +67,18 @@ test("THE SUGGESTED COMMAND keeps a folder with spaces one argument, and is neve
       assert.match(fix, /move its workspace under a launch root/);
     });
   }
+  await t.test("no backslash ever meets the closing quote: Windows folders are named with forward slashes", () => {
+    for (const [workspace, named] of [[`D:${B}`, '"D:/"'], [`d:${B}Games${B}x${B}`, '"D:/Games/x"'], [`D:${B}My Games`, '"D:/My Games"']]) {
+      const fix = fixFor([workspace]);
+      assert.ok(fix.includes(`\`aify-env roots add ${named}\``), `${workspace}: ${fix}`);
+      assert.ok(!fix.includes(`${B}"`), `${workspace}: a backslash meets the quote: ${fix}`);
+    }
+  });
+  await t.test("on POSIX a backslash in the folder gets no command", () => {
+    const fix = agentsOutsideRootsCheck({ answered: true, roots: ["/srv"], windows: false,
+      listed: { definitions: [managed("p", `/home/bob/odd${B}name`)] } }).fix;
+    assert.doesNotMatch(fix, /aify-env roots add "/, fix);
+  });
   await t.test("the first folder the command accepts is the one named", () => {
     assert.ok(fixFor(["//server/share", "E:/two"]).includes('starting with `aify-env roots add "E:/two"`'), fixFor(["//server/share", "E:/two"]));
   });
