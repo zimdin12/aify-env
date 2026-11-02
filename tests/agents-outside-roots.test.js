@@ -60,11 +60,23 @@ test("THE SUGGESTED COMMAND keeps a folder with spaces one argument, and is neve
   const fixFor = (workspaces) => agentsOutsideRootsCheck({ answered: true, roots: ROOTS, windows: true,
     listed: { definitions: workspaces.map((workspace, i) => managed(`a${i}`, workspace)) } }).fix;
   await t.test("spaces are quoted", () => assert.ok(fixFor(["D:/My Games/x"]).includes('`aify-env roots add "D:/My Games/x"`'), fixFor(["D:/My Games/x"])));
-  for (const workspace of [`${B}${B}server${B}share${B}x`, "D:/Games/../x", 'D:/a"b', "D:/$HOME", "D:/%PATH%"]) {
-    await t.test(`no command for ${workspace}`, () => {
+  // The parser refuses these on Windows (the CLI would too), so moving is the honest advice, with the parser's reason.
+  for (const [workspace, reason] of [[`${B}${B}server${B}share${B}x`, /UNC and device paths are not supported yet/],
+    ["D:/Games/../x", /names \. or \.\./], ["D:/two\nlines", /drive letter/], ["D:/car\rriage", /drive letter/]]) {
+    await t.test(`a folder that cannot be a root is told to move, and why: ${JSON.stringify(workspace)}`, () => {
       const fix = fixFor([workspace]);
       assert.doesNotMatch(fix, /aify-env roots add "/, `suggested a command for ${workspace}: ${fix}`);
-      assert.match(fix, /move its workspace under a launch root/);
+      assert.match(fix, /move its workspace under a launch root: `aify-env roots add` refuses it/);
+      assert.match(fix, reason);
+    });
+  }
+  // Valid roots with no portable spelling: no hint, and never told the folder is refused or must move.
+  for (const workspace of ['D:/a"b', "D:/$HOME", "D:/%PATH%", "D:/Wow!", "D:/tab\there", "D:/bell\u0007"]) {
+    await t.test(`no hint, but still a valid root: ${JSON.stringify(workspace)}`, () => {
+      const fix = fixFor([workspace]);
+      assert.doesNotMatch(fix, /aify-env roots add "/, `suggested a command for ${JSON.stringify(workspace)}: ${fix}`);
+      assert.match(fix, /quoted for your shell/);
+      assert.doesNotMatch(fix, /move|cannot be/, `a valid root was called refused: ${fix}`);
     });
   }
   await t.test("no backslash ever meets the closing quote: Windows folders are named with forward slashes", () => {
@@ -78,6 +90,13 @@ test("THE SUGGESTED COMMAND keeps a folder with spaces one argument, and is neve
     const fix = agentsOutsideRootsCheck({ answered: true, roots: ["/srv"], windows: false,
       listed: { definitions: [managed("p", `/home/bob/odd${B}name`)] } }).fix;
     assert.doesNotMatch(fix, /aify-env roots add "/, fix);
+    assert.match(fix, /quoted for your shell/, "a valid POSIX root with a backslash was called refused");
+  });
+  await t.test("on POSIX a line break is a valid name but gets no command", () => {
+    const fix = agentsOutsideRootsCheck({ answered: true, roots: ["/srv"], windows: false,
+      listed: { definitions: [managed("p", "/home/bob/two\nlines")] } }).fix;
+    assert.doesNotMatch(fix, /aify-env roots add "/, fix);
+    assert.match(fix, /quoted for your shell/);
   });
   await t.test("the first folder the command accepts is the one named", () => {
     assert.ok(fixFor(["//server/share", "E:/two"]).includes('starting with `aify-env roots add "E:/two"`'), fixFor(["//server/share", "E:/two"]));
