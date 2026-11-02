@@ -64,7 +64,7 @@ function senderFixture(t, { population = "managed", answer = () => new Response(
 }
 
 /** The real Runner over a managed host, as tests/the-managed-child-reaches-agent-state.test.js builds it. */
-function runnerFixture(t, { alive = false } = {}) {
+function runnerFixture(t, { alive = false, killEnds = true } = {}) {
   const dir = home(t, "b5-runner-");
   let isAlive = alive;
   const host = new AgentStateHost({ aifyHome: dir, instance: "default", population: "managed", nowUs: () => AT + 1000,
@@ -80,7 +80,7 @@ function runnerFixture(t, { alive = false } = {}) {
     return child;
   };
   const runner = new Runner({ openTerminal: spawn, spawnProcess: spawn, managedHost: () => ({ host, instance: "default", url: "http://127.0.0.1:18802" }),
-    reportManaged: () => {}, isAlive: () => isAlive, killTree: async () => { isAlive = false; } });
+    reportManaged: () => {}, isAlive: () => isAlive, killTree: async () => { if (killEnds) isAlive = false; }, stopExitWaitMs: 0 });
   const spec = () => buildStartSpec({ service: "fixture", launcher: "/fixture/claude-aify", agentId: "lead", env: { PATH: "toolchain" } },
     { readFile: () => TEXT, platform: "linux" }).spec;
   const started = async () => { const handle = await runner.start(spec()); return { handle, lifetime: children.at(-1).env.AIFY_LIFETIME }; };
@@ -108,10 +108,12 @@ test("proof_covers_every_numbered_body: a body aborted in flight still names its
 });
 
 test("proof_rejects_registry_deletion_and_killTree_return: a stop that saw no exit ends nothing", async (t) => {
-  const f = runnerFixture(t, { alive: true });
+  // killTree returns, yet the pid still answers alive: the stop is unverified, so custody and the lifetime stay.
+  const f = runnerFixture(t, { alive: true, killEnds: false });
   const { handle, lifetime } = await f.started();
-  await f.runner.stop(handle.id);
-  assert.deepEqual(f.runner.list(), [], "CONTROL: the registry entry is gone and killTree returned");
+  const answer = await f.runner.stop(handle.id);
+  assert.equal(answer.stopped, false, "CONTROL: killTree returned but the pid is still alive");
+  assert.equal(f.runner.list().length, 1, "an unverified stop let go of the child");
   assert.deepEqual(f.host.retirementProof([lifetime]), { holds: false, unproven: [lifetime], reason: "not every published lifetime ended" });
   // A lifetime this host never started is absent from its managed set too; absence is not an end.
   assert.equal(f.host.retirementProof(["never-started-here"]).holds, false, "absence from the managed set was read as an end");
@@ -124,7 +126,7 @@ test("proof_rejects_registry_deletion_and_killTree_return: a stop that saw no ex
   assert.equal(g.calls.filter((call) => call.body.kind === "retired").length, 0);
 });
 
-test("proof_accepts_each_confirmed_end_path: observed exit, dead at stop, release, a verified lifecycle stop, a persistence-failed end", async (t) => {
+test("proof_accepts_each_confirmed_end_path: observed exit, dead at stop, dead after the stop's kill, release, a verified lifecycle stop, a persistence-failed end", async (t) => {
   // Observed exit (runner.mjs onExit -> ManagedLifetimes.end).
   const exit = runnerFixture(t);
   const a = await exit.started();
@@ -137,6 +139,12 @@ test("proof_accepts_each_confirmed_end_path: observed exit, dead at stop, releas
   const b = await dead.started();
   await dead.runner.stop(b.handle.id);
   assert.equal(dead.host.retirementProof([b.lifetime]).holds, true, "a stop that found the pid dead was not an end");
+
+  // Dead after the stop's kill: the runner's own post-kill check read the pid gone (lib/runner-stop.mjs).
+  const killed = runnerFixture(t, { alive: true });
+  const k = await killed.started();
+  assert.equal((await killed.runner.stop(k.handle.id)).stopped, true, "CONTROL: the post-kill check saw the pid gone");
+  assert.equal(killed.host.retirementProof([k.lifetime]).holds, true, "a stop that verified the pid gone was not an end");
 
   // The reaper's release of a proven-dead pid.
   const released = runnerFixture(t);

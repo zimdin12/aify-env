@@ -178,6 +178,24 @@ test("a STOP is recorded as `stopped`, and a reap as `reaped`", async () => {
   process.kill(reaped.pid, "SIGKILL");
 });
 
+test("a stop that waits for the exit records `stopped`, not the kill's code and signal as the program's", async () => {
+  // A fake child whose exit is the kill's: code 1 and a signal, which a real killed child reports only on some hosts.
+  const { EventEmitter } = await import("node:events");
+  let child, alive = true;
+  const spawnProcess = () => {
+    child = Object.assign(new EventEmitter(), { pid: 4242, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} }, kill() {} });
+    return child;
+  };
+  const runner = new Runner({ openTerminal: null, spawnProcess, isAlive: () => alive, stopExitWaitMs: 1000,
+    killTree: async () => { alive = false; child.emit("close", 1, "SIGTERM"); } });
+  const handle = await runner.start(spec("unused"));
+  assert.equal((await runner.stop(handle.id)).stopped, true, "CONTROL: the stop saw the exit");
+  const exit = lastExit(runner);
+  assert.equal(exit.reason, "stopped", "an exit the stop waited for was recorded as the program's own");
+  assert.equal(exit.exitCode, null, "the kill's exit code was recorded as the program's");
+  assert.equal(exit.exitSignal, "", "the kill's signal was recorded as the program's");
+});
+
 test("the panel says WHO removed it, not just that nothing was reported", async () => {
   const { renderDashboard } = await import("../lib/tui.mjs");
   const render = (reason) => renderDashboard({
