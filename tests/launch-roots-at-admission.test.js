@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { runClaimPass } from "../lib/plugins/aify-comms/claim.mjs";
 import { createHandleBook, runOneControl } from "../lib/plugins/aify-comms/terminal-controls.mjs";
 import { workspaceWithinRoots } from "../lib/workspace-roots.mjs";
+import { automaticStartAdmission } from "../lib/plugins/aify-comms/automatic-start-admission.mjs";
 
 const WORK = "D:/Games/terraria-manager";
 const defer = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
@@ -79,4 +80,72 @@ test("START CONTROL: a root added while the launch is fetched admits the start",
 test("START CONTROL: unchanged roots start, as before", async () => {
   const { starts } = await startWhile({ before: ["C:/", "D:/"], after: ["C:/", "D:/"] });
   assert.equal(starts.length, 1);
+});
+
+test("START CONTROL WITHOUT ADMISSION: roots that change between prepare and the start refuse it, and nothing is remembered", async () => {
+  // The first ask (prepare) admits D:/, the second (the producer, last) does not.
+  let asks = 0;
+  const cwdRoots = async () => { asks += 1; return asks === 1 ? ["C:/", "D:/"] : ["C:/"]; };
+  const starts = [], reported = [];
+  const handles = createHandleBook();
+  const result = await runOneControl({
+    control: { id: "ctl-1", terminalId: "term-1", action: "start", cols: 80, rows: 24 },
+    api: { launch: async () => ({ launch: { argv: ["worker"], cwd: WORK, runtime: "claude-code" } }),
+      reportControl: async (id, patch) => { reported.push(patch); }, terminalOutput: async () => ({ ok: true }) },
+    processes: { list: () => [], start: async (spec) => { starts.push(spec); return { id: "h1", pid: 1 }; }, subscribe: () => () => {} },
+    handles, cwdRoots, windows: true, withinRoots: workspaceWithinRoots,
+    buildSpec: () => ({ spec: { command: "C:/bin/worker", args: [], cwd: WORK } }), resolveCandidates: () => ["C:/bin/worker"],
+    baseEnv: {}, sender: { send() {}, async drained() { return true; }, forget() {} },
+  });
+  assert.equal(asks, 2, "CONTROL: prepare and the producer each asked");
+  assert.equal(starts.length, 0, "a process started under a root removed after prepare");
+  assert.equal(result.outcome, "refused", JSON.stringify(result));
+  assert.deepEqual(handles.terminalIds(), [], "a refused start remembered a terminal");
+  assert.deepEqual(reported.map((patch) => patch.status), ["failed"]);
+});
+
+// THROUGH PRODUCTION'S ADMISSION (automaticStartAdmission, which the plugin hands every start control): its definition
+// read waits AFTER the launch is prepared, so a root removed during that wait must still refuse (review of eb17750).
+async function admittedStartWhile(change) {
+  const roots = liveRoots(change.before);
+  const listHeld = defer();
+  let listAsked = false;
+  const definitions = { list: async () => { listAsked = true; await listHeld.promise;
+    return { storeId: "s", definitions: [], unreadable: [], conflict: null, enumerationFailed: null }; } };
+  const starts = [], reported = [];
+  const handles = createHandleBook();
+  const api = { launch: async () => ({ launch: { argv: ["worker"], cwd: WORK, runtime: "claude-code" } }),
+    reportControl: async (id, patch) => { reported.push(patch); }, claimControls: async () => ({ controls: [] }),
+    terminalOutput: async () => ({ ok: true, terminal: { status: "attached" } }) };
+  const processes = { list: () => [], start: async (spec) => { starts.push(spec); return { id: "h1", pid: 1 }; },
+    subscribe: () => () => {} };
+  const run = runOneControl({
+    control: { id: "ctl-1", terminalId: "term-1", action: "start", cols: 80, rows: 24 },
+    api, processes, handles, cwdRoots: roots.supplier, windows: true, withinRoots: workspaceWithinRoots,
+    buildSpec: () => ({ spec: { command: "C:/bin/worker", args: [], cwd: WORK } }), resolveCandidates: () => ["C:/bin/worker"],
+    baseEnv: {}, sender: { send() {}, async drained() { return true; }, forget() {} },
+    admitStart: automaticStartAdmission({ definitions, agents: null }),
+  });
+  for (let i = 0; i < 100 && !listAsked; i += 1) await tick();
+  assert.equal(listAsked, true, "CONTROL: admission is waiting on its definition read");
+  roots.set(change.after);
+  listHeld.resolve();
+  return { result: await run, starts, reported, handles };
+}
+
+test("ADMITTED START: a root removed while admission reads the definitions refuses, starts nothing, and attaches nothing", async () => {
+  const { result, starts, reported, handles } = await admittedStartWhile({ before: ["C:/", "D:/"], after: ["C:/"] });
+  assert.equal(starts.length, 0, "a process started under a root removed during admission");
+  assert.equal(result.outcome, "refused", JSON.stringify(result));
+  assert.match(result.detail, /outside this environment's advertised roots/);
+  // terminalIds, not handleFor: handleFor answers "" for an unknown terminal and for one remembered with an empty handle.
+  assert.deepEqual(handles.terminalIds(), [], "a refused start remembered a terminal");
+  assert.deepEqual(reported.map((patch) => patch.status), ["failed"], "a refused start reported anything but one failure");
+});
+
+test("ADMITTED START CONTROL: an unchanged root starts through the same admission and attaches", async () => {
+  const { starts, reported, handles } = await admittedStartWhile({ before: ["C:/", "D:/"], after: ["C:/", "D:/"] });
+  assert.equal(starts.length, 1);
+  assert.deepEqual(handles.terminalIds(), ["term-1"], "CONTROL: a started terminal is remembered");
+  assert.ok(reported.some((patch) => patch.status === "completed"), JSON.stringify(reported));
 });
