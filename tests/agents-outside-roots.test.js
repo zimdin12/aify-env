@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { agentsOutsideRootsCheck, definitionsOutsideRoots, outsideRootsWarning } from "../lib/definition-checks.mjs";
+import { addHintFor, agentsOutsideRootsCheck, definitionsOutsideRoots, outsideRootsWarning } from "../lib/definition-checks.mjs";
 import { collectEnvironmentChecks } from "../lib/environment-report.mjs";
 import { STATE } from "../lib/health.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
@@ -138,4 +138,11 @@ test("A PARTLY READ LISTING IS UNANSWERED, never a pass: the unread entry may be
   assert.equal(found.state, STATE.FAILED, "what was found still fails");
   assert.equal(agentsOutsideRootsCheck({ answered: true, roots: ["C:\\"], listed: { definitions: inside, unreadable: [] },
     windows: true }).state, STATE.PASSED, "CONTROL: a complete listing still passes");
+});
+
+test("addHintFor IS EXPORTED for comms' specimen parity, and answers each of its three shapes", () => {
+  // comms' twin (service/api_core/workspace.py add_hint) compares against this export specimen for specimen.
+  assert.deepEqual(addHintFor("D:/Games/x", true), { command: '`aify-env roots add "D:/Games/x"`' });
+  assert.deepEqual(addHintFor("D:/$HOME", true), { unquotable: true });
+  assert.ok(typeof addHintFor("//server/share", true).refused === "string" && addHintFor("//server/share", true).refused.length > 0);
 });
