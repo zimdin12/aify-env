@@ -28,6 +28,7 @@ function harness({ stopDelayMs = 0, stopThrowsFor = null } = {}) {
         throw new Error(`cannot stop ${id}`);
       }
       events.push(`stopped:${id}`);
+      return { stopped: true };
     },
   };
   const closeServer = () => events.push("server-closed");
@@ -67,7 +68,7 @@ test("the exit does not wait on server.close's callback", async () => {
   // daemon never exits -- which is how the losing handler was written.
   const events = [];
   const shutdown = createShutdown({
-    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    runner: { list: () => [{ id: "a" }], stop: async () => { events.push("stopped:a"); return { stopped: true }; } },
     closeServer: () => { /* returns without ever invoking a callback */ },
     clearOwned: () => events.push("record-cleared"),
     exit: (code) => events.push(`exit:${code}`),
@@ -163,6 +164,7 @@ test("a stop that throws SYNCHRONOUSLY does not strand the processes after it", 
         events.push(`entered-stop:${id}`);
         if (id === "a") throw new Error("ConPTY refused");
         events.push(`stopped:${id}`);
+        return { stopped: true };
       },
     },
     closeServer: () => {},
@@ -189,7 +191,7 @@ test("it says how many processes it is taking with it", async () => {
 test("a server that was never listening is not a reason to leak processes", async () => {
   const events = [];
   const shutdown = createShutdown({
-    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    runner: { list: () => [{ id: "a" }], stop: async () => { events.push("stopped:a"); return { stopped: true }; } },
     closeServer: () => { throw new Error("not running"); },
     clearOwned: () => {},
     exit: (code) => events.push(`exit:${code}`),
@@ -202,7 +204,7 @@ test("anything that must stop first stops before the processes do", async () => 
   // Today that is the live view: a frame landing mid-teardown paints a screen that is already untrue.
   const events = [];
   const shutdown = createShutdown({
-    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    runner: { list: () => [{ id: "a" }], stop: async () => { events.push("stopped:a"); return { stopped: true }; } },
     beforeStop: () => events.push("view-stopped"),
     clearOwned: () => {},
     exit: (code) => events.push(`exit:${code}`),
@@ -214,7 +216,7 @@ test("anything that must stop first stops before the processes do", async () => 
 test("a decoration that fails to stop does not leave agents running", async () => {
   const events = [];
   const shutdown = createShutdown({
-    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    runner: { list: () => [{ id: "a" }], stop: async () => { events.push("stopped:a"); return { stopped: true }; } },
     beforeStop: () => { throw new Error("the view is wedged"); },
     clearOwned: () => {},
     exit: (code) => events.push(`exit:${code}`),
@@ -264,7 +266,7 @@ test("a stop that never resolves still exits, and says which process wedged", as
     runner: {
       list: () => [{ id: "p1", pid: 11 }, { id: "p2", pid: 22 }],
       // p1 settles; p2 never does -- the shape the operator saw.
-      stop: (id) => (id === "p1" ? Promise.resolve() : new Promise(() => {})),
+      stop: (id) => (id === "p1" ? Promise.resolve({ stopped: true }) : new Promise(() => {})),
     },
     clearOwned: () => { cleared += 1; },
     exit: (code) => exits.push(code),
@@ -288,14 +290,14 @@ test("a stop that never resolves still exits, and says which process wedged", as
   );
 });
 
-test("when every stop returns, the record is cleared and nothing is reported stuck", async () => {
+test("when every stop confirms death, the record is cleared and nothing is reported stuck", async () => {
   // The control. A shutdown that always reported a wedge, or never cleared the record, would pass
   // the case above while breaking the ordinary path this file's other tests describe.
   const written = [];
   const exits = [];
   let cleared = 0;
   const shutdown = createShutdown({
-    runner: { list: () => [{ id: "p1", pid: 11 }], stop: () => Promise.resolve() },
+    runner: { list: () => [{ id: "p1", pid: 11 }], stop: () => Promise.resolve({ stopped: true }) },
     clearOwned: () => { cleared += 1; },
     exit: (code) => exits.push(code),
     write: (line) => written.push(line),
@@ -350,6 +352,7 @@ test("the teardown names each blocking call BEFORE making it", async () => {
         written.push("<the blocking call>");
         phase?.("tree-kill");
         phase?.("done");
+        return { stopped: true };
       },
     },
     clearOwned: () => {},
@@ -376,7 +379,7 @@ test("a teardown that works does not narrate its last phase", async () => {
   const shutdown = createShutdown({
     runner: {
       list: () => [{ id: "p1", pid: 11 }],
-      stop: async (_id, { phase } = {}) => { phase?.("console-kill"); phase?.("tree-kill"); phase?.("done"); },
+      stop: async (_id, { phase } = {}) => { phase?.("console-kill"); phase?.("tree-kill"); phase?.("done"); return { stopped: true }; },
     },
     clearOwned: () => {},
     exit: () => {},
@@ -437,7 +440,7 @@ test("a stop that ignores the phase hook is still reported, as starting", async 
 test("the exit WAITS for what must happen before the stops, when it takes a real round trip", async () => {
   const events = [];
   const shutdown = createShutdown({
-    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    runner: { list: () => [{ id: "a" }], stop: async () => { events.push("stopped:a"); return { stopped: true }; } },
     beforeStop: async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));   // a heartbeat's worth of network
       events.push("offline-beat-sent");
@@ -453,7 +456,7 @@ test("a beforeStop that NEVER settles costs its budget, then the processes still
   // The service unreachable on the way down must not keep agents running or the daemon alive.
   const events = [];
   const shutdown = createShutdown({
-    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    runner: { list: () => [{ id: "a" }], stop: async () => { events.push("stopped:a"); return { stopped: true }; } },
     beforeStop: () => new Promise(() => {}),
     beforeStopBudgetMs: 30,
     clearOwned: () => events.push("record-cleared"),
@@ -470,7 +473,7 @@ test("a second signal WHILE WAITING skips the wait and still stops the processes
   // service is the only thing it may cut short.
   const events = [];
   const shutdown = createShutdown({
-    runner: { list: () => [{ id: "a" }], stop: async () => events.push("stopped:a") },
+    runner: { list: () => [{ id: "a" }], stop: async () => { events.push("stopped:a"); return { stopped: true }; } },
     beforeStop: () => new Promise(() => {}),
     beforeStopBudgetMs: 60_000,
     clearOwned: () => {},

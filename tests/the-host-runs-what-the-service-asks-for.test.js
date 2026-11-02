@@ -1222,15 +1222,15 @@ test("AN OUTAGE IS NOT A 404 — a worker survives the service being down", asyn
   assert.equal(book.handleFor("term-1"), "proc-1", "and the terminal must still be held");
 });
 
-test("a failure to stop the orphan still forgets it, so the pass cannot loop on it", async () => {
+test("a failure to stop the orphan retains its binding and names unverified custody", async () => {
   const book = createHandleBook();
   const processes = fakeProcesses();
   await run({ handles: book, processes });
   processes.stop = async () => { throw new Error("already gone"); };
   const logs = [];
   await passWith(apiWithMissingTerminal(), { handles: book, processes, log: (m) => logs.push(String(m)), quietFor: LONG_SILENCE });
-  assert.equal(book.handleFor("term-1"), "");
-  assert.ok(logs.some((l) => /could not stop the orphaned worker/.test(l)));
+  assert.equal(book.handleFor("term-1"), "proc-1", "an exception is not death proof");
+  assert.ok(logs.some((l) => /stop-unverified/.test(l)));
 });
 
 test("preparedEnv: the service's overlay wins over this host's env, a name it unsets is gone, and a defined start asks the plugins", async () => {
