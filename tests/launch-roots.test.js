@@ -74,6 +74,21 @@ test("LIVE: a root added to the file is in force at the next read, and a broken 
   assert.match(logged.at(-1) ?? "", /launch-roots\.json is ignored because it is not JSON; work starts only under C:/);
 });
 
+test("A FILE THAT BECOMES UNREADABLE adds nothing, though its time and size never changed; and it recovers", () => {
+  // Stat answers the same throughout, as it does when only read access is lost (review of e130408, R2).
+  const text = JSON.stringify({ version: 1, roots: ["D:/"] });
+  let denied = false;
+  const io = { statSync: () => ({ mtimeMs: 1, size: text.length }),
+    readFileSync: () => { if (denied) throw Object.assign(new Error("denied"), { code: "EACCES" }); return text; } };
+  const roots = new LaunchRoots({ startFolder: `C:${B}`, file: "fixture.json", windows: true, io });
+  assert.deepEqual(roots.current(), [`C:${B}`, "D:/"], "CONTROL: the readable file adds D:/");
+  denied = true;
+  assert.deepEqual(roots.current(), [`C:${B}`], "an unreadable file kept the root it added before");
+  assert.match(roots.read().problem, /cannot be read \(EACCES\)/);
+  denied = false;
+  assert.deepEqual(roots.current(), [`C:${B}`, "D:/"], "access came back and the old error stayed");
+});
+
 test("THE REAL LAUNCH GUARD refuses D:/ work, admits it once the root is added, and never reads roots from the request", (t) => {
   const { file } = fixtureHome(t);
   const roots = new LaunchRoots({ startFolder: `C:${B}`, file, windows: true });
@@ -150,6 +165,19 @@ test("aify-env roots add reads back from the live aify-env whether the root is i
   fs.rmSync(file);
   assert.match(await answer({ cwdRoots: ["/elsewhere"], launchRootsFile: { stored: [], problem: "" } }), /does not report it yet/,
     "a daemon that does not list the root was reported as having it");
+});
+
+test("aify-env roots add of a root already stored writes nothing, and still says whether the running aify-env counts it", async (t) => {
+  const { dir, file } = fixtureHome(t);
+  const windows = process.platform === "win32";
+  await runRoots(["add", dir], { file, windows });
+  const before = fs.readFileSync(file);
+  const again = await runRoots(["add", dir], { file, windows, running: async () => ({ cwdRoots: ["/elsewhere"] }) });
+  assert.equal(again.code, EXIT_OK);
+  assert.match(again.lines[0], /^already a launch root: /);
+  assert.match(again.lines.at(-1), /older than added roots: it counts after one ordinary restart/,
+    "a duplicate add hid that the running aify-env does not read added roots");
+  assert.ok(fs.readFileSync(file).equals(before), "a duplicate add changed the file");
 });
 
 test("aify-env roots remove takes out any spelling of a stored root and refuses one that is not stored", async (t) => {

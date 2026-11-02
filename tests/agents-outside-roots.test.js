@@ -34,7 +34,7 @@ test("THE STARTUP WARNING names the agent, its workspace, the roots and the fix,
   const warning = outsideRootsWarning(DEFINITIONS, ROOTS, { windows: true });
   assert.match(warning, /dashboard-manager \(C:\/Docker\/aify-dashboard\)/);
   assert.match(warning, /C:\\Docker\\aify-comms/);
-  assert.ok(warning.includes("`aify-env roots add C:/Docker/aify-dashboard`, or a folder above it"), warning);
+  assert.ok(warning.includes('`aify-env roots add "C:/Docker/aify-dashboard"`, or a folder above it'), warning);
   assert.doesNotMatch(warning, /start it again/, "the warning still sends the operator to restart aify-env");
   assert.equal(outsideRootsWarning(DEFINITIONS.slice(1), ROOTS, { windows: true }), "");
 });
@@ -44,15 +44,32 @@ test("THE DOCTOR ROW fails naming them, passes when none, and is unanswered with
   const failing = agentsOutsideRootsCheck({ answered: true, roots: ROOTS, listed, windows: true });
   assert.equal(failing.state, STATE.FAILED);
   assert.match(failing.detail, /dashboard-manager/);
-  assert.ok(failing.fix.includes("`aify-env roots add C:/Docker/aify-dashboard`"), failing.fix);
+  assert.ok(failing.fix.includes('`aify-env roots add "C:/Docker/aify-dashboard"`'), failing.fix);
   const two = agentsOutsideRootsCheck({ answered: true, roots: ROOTS, windows: true,
     listed: { definitions: [managed("a", "D:/Games/one"), managed("b", "E:/two")] } });
-  assert.ok(two.fix.startsWith("add each folder above as a launch root on this host, starting with `aify-env roots add D:/Games/one`"), two.fix);
+  assert.ok(two.fix.startsWith('add each folder above as a launch root on this host, starting with `aify-env roots add "D:/Games/one"`'), two.fix);
   assert.equal(agentsOutsideRootsCheck({ answered: true, roots: ["C:\\"], listed, windows: true }).state, STATE.PASSED);
   for (const input of [{ answered: false }, { answered: true, roots: null, listed }, { answered: true, roots: [], listed },
     { answered: true, roots: ROOTS, listed: null }]) {
     assert.equal(agentsOutsideRootsCheck({ ...input, windows: true }).state, STATE.UNANSWERED, JSON.stringify(input));
   }
+});
+
+test("THE SUGGESTED COMMAND keeps a folder with spaces one argument, and is never one the command would refuse", async (t) => {
+  const B = String.fromCharCode(92);
+  const fixFor = (workspaces) => agentsOutsideRootsCheck({ answered: true, roots: ROOTS, windows: true,
+    listed: { definitions: workspaces.map((workspace, i) => managed(`a${i}`, workspace)) } }).fix;
+  await t.test("spaces are quoted", () => assert.ok(fixFor(["D:/My Games/x"]).includes('`aify-env roots add "D:/My Games/x"`'), fixFor(["D:/My Games/x"])));
+  for (const workspace of [`${B}${B}server${B}share${B}x`, "D:/Games/../x", 'D:/a"b', "D:/$HOME", "D:/%PATH%"]) {
+    await t.test(`no command for ${workspace}`, () => {
+      const fix = fixFor([workspace]);
+      assert.doesNotMatch(fix, /aify-env roots add "/, `suggested a command for ${workspace}: ${fix}`);
+      assert.match(fix, /move its workspace under a launch root/);
+    });
+  }
+  await t.test("the first folder the command accepts is the one named", () => {
+    assert.ok(fixFor(["//server/share", "E:/two"]).includes('starting with `aify-env roots add "E:/two"`'), fixFor(["//server/share", "E:/two"]));
+  });
 });
 
 test("THE ROW IS COLLECTED from the daemon's own /health roots when the doctor can read definitions", async () => {

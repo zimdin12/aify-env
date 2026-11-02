@@ -30,7 +30,7 @@ async function fixture(patch = {}) {
   const adapter = new LifecycleLaunch({ api, processes, definitions, machineId: 'm', handles,
     identity: async id => { events.push(['identity', id]); return patch.identity || { conflict: false, unknown: false,
       current: { agentId: 'a', handle: 'runner-new', pid: 123, lifetime: 'actual-new-lifetime' } }; },
-    cwdRoots: async () => ['C:/sealed/work'], windows: true, withinRoots: workspaceWithinRoots,
+    cwdRoots: patch.cwdRoots ?? (async () => ['C:/sealed/work']), windows: true, withinRoots: workspaceWithinRoots,
     baseEnv: { OWN: 'inherited', STRIP: 'remove', KEEP: 'yes' }, resolveCandidates: () => ['C:/sealed/rejected', launcher],
     buildSpec: spec => buildStartSpec(spec, { platform: 'linux', dirExists: () => false,
       readFile: file => file.endsWith('rejected') ? 'not enrolled' : '#!/usr/bin/env node\nHARNESS_WRAPPER_VERSION="1"\n' }),
@@ -140,3 +140,23 @@ for (const pid of [0, -1, '123', true, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
     f.handles.forget('t');
   });
 }
+
+// As production's runLocked answers a produced refusal (agent-lifecycle.mjs #startInvocation).
+const runLockedRefusing = async produce => { const produced = await produce(); return produced?.refused ? { refused: produced.refused } : { produced }; };
+
+test('a launch root removed between prepare and start refuses the start under the admission lock, and nothing starts', async () => {
+  let roots = ['C:/sealed/work'];
+  const f = await fixture({ cwdRoots: async () => roots });
+  const prepared = await f.adapter.prepare('e', request, agent);
+  roots = ['C:/elsewhere'];
+  const answer = await f.adapter.start('e', prepared, runLockedRefusing);
+  assert.match(answer?.refused ?? '', /Workspace "C:\/sealed\/work" is outside this environment's advertised roots/,
+    'a start prepared under a root since removed went ahead');
+  assert.equal(f.events.filter(e => e[0] === 'start').length, 0, 'a process started under a removed root');
+});
+
+test('CONTROL: an unchanged launch root between prepare and start starts, under the same admission lock', async () => {
+  const f = await fixture({ cwdRoots: async () => ['C:/sealed/work'] });
+  await f.adapter.start('e', await f.adapter.prepare('e', request, agent), runLockedRefusing);
+  assert.equal(f.events.filter(e => e[0] === 'start').length, 1);
+});

@@ -63,7 +63,8 @@ async function list({ file, windows, io, running }) {
 
 async function add(root, stored, { file, windows, io, running }) {
   const changed = withLaunchRootAdded(stored, root, { windows });
-  if (changed.already) return { code: EXIT_OK, lines: [`already a launch root: ${changed.already}`] };
+  // Nothing is written, but whether the running aify-env counts it is still said (review of e130408, R3).
+  if (changed.already) return { code: EXIT_OK, lines: [`already a launch root: ${changed.already}`, await inForce(changed.already, windows, running)] };
   let stat = null;
   try { stat = io.statSync(root); } catch { stat = null; }
   if (!stat?.isDirectory()) return { code: EXIT_FAILED, lines: [`aify-env roots: ${root} is not a folder on this host`] };
