@@ -7,12 +7,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { LaunchRoots, launchRootsFrom, parseLaunchRoot } from "../lib/launch-roots.mjs";
+import { LaunchRoots, launchRootsFrom, launchRootsPath, parseLaunchRoot, readLaunchRootsFile, withLaunchRootAdded,
+  withLaunchRootRemoved, writeLaunchRootsFile } from "../lib/launch-roots.mjs";
 import { launchRootsCheck } from "../lib/definition-checks.mjs";
 import { STATE } from "../lib/health.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
-import { workspaceWithinRoots } from "../lib/workspace-roots.mjs";
-import { prepareTerminalLaunch } from "../lib/plugins/aify-comms/terminal-controls.mjs";
+import { rootsNow, workspaceWithinRoots } from "../lib/workspace-roots.mjs";
+import { outsideRootsDetail, prepareTerminalLaunch } from "../lib/plugins/aify-comms/terminal-controls.mjs";
 import { EXIT_FAILED, EXIT_OK, EXIT_USAGE, runRoots } from "../bin/aify-env-roots.mjs";
 
 const B = String.fromCharCode(92);
@@ -216,4 +217,30 @@ test("/health carries what the launch-roots file added, and null when the daemon
   assert.deepEqual((await health({ launchRootsFile: { file: "f", stored: ["D:/"], problem: "", extra: 1 } })).launchRootsFile,
     { file: "f", stored: ["D:/"], problem: "" });
   assert.equal((await health({})).launchRootsFile, null);
+});
+
+test("THE STORE'S PIECES: the path, add and remove by the guard's fold, and a write that a read gives back whole", async (t) => {
+  const { dir, file } = fixtureHome(t);
+  assert.equal(launchRootsPath(dir), path.join(dir, ".aify", "launch-roots.json"));
+  assert.deepEqual(withLaunchRootAdded(["D:/"], "E:/Work", { windows: true }), { roots: ["D:/", "E:/Work"], already: "" });
+  assert.deepEqual(withLaunchRootAdded(["E:/Work"], "e:/work", { windows: true }), { roots: ["E:/Work"], already: "E:/Work" });
+  assert.deepEqual(withLaunchRootAdded(["/home/Bob"], "/home/bob", { windows: false }).roots, ["/home/Bob", "/home/bob"], "folded off Windows");
+  assert.deepEqual(withLaunchRootRemoved(["D:/", "E:/Work"], "e:/WORK", { windows: true }), { roots: ["D:/"], removed: "E:/Work" });
+  assert.deepEqual(withLaunchRootRemoved(["D:/"], "F:/", { windows: true }), { roots: ["D:/"], removed: "" });
+  assert.deepEqual(readLaunchRootsFile(file), { text: null, problem: "" }, "an absent file is no text and no fault");
+  writeLaunchRootsFile(file, ["D:/", "E:/Work"]);
+  assert.deepEqual(launchRootsFrom(readLaunchRootsFile(file).text, { windows: true }), { roots: ["D:/", "E:/Work"], problem: "" });
+  assert.deepEqual(fs.readdirSync(path.dirname(file)), ["launch-roots.json"], "the write left its temporary file behind");
+  const denied = readLaunchRootsFile(file, { readFileSync: () => { throw Object.assign(new Error("no"), { code: "EACCES" }); } });
+  assert.deepEqual(denied, { text: null, problem: "it cannot be read (EACCES)" });
+});
+
+test("THE GUARDS' SHARED PIECES: one refusal sentence, and roots asked now from a supplier or taken as given", async () => {
+  assert.equal(outsideRootsDetail("D:/x"), 'Workspace "D:/x" is outside this environment\'s advertised roots');
+  const given = ["C:/"];
+  assert.equal(await rootsNow(given), given, "an array is the answer as given");
+  let asked = 0;
+  assert.deepEqual(await rootsNow(async () => { asked += 1; return ["D:/"]; }), ["D:/"]);
+  assert.deepEqual(await rootsNow(() => ["E:/"]), ["E:/"], "a plain function supplier");
+  assert.equal(asked, 1, "the supplier was asked once per call");
 });
