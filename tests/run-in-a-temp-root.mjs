@@ -82,6 +82,12 @@ const env = { ...inherited, HOME: home, USERPROFILE: home, TMPDIR: root, TEMP: r
 // started as `node --test tests/x.test.js` gets none of the above: on 2026-10-20 this host's Temp held about 2,200
 // fixture directories from such runs, 218 of them from one file in one day, while every full run left nothing.
 const named = process.argv.slice(2);
+for (const file of named) {
+  if (fs.existsSync(file)) continue;
+  fs.rmSync(root, { recursive: true, force: true });
+  console.error("run-in-a-temp-root: named test file does not exist: " + file);
+  process.exit(2);
+}
 const files = named.length > 0 ? named : fs.readdirSync('tests').filter((f) => f.endsWith('.test.js')).map((f) => path.join('tests', f));
 
 // THE TIMEOUT IS LOAD-BEARING and is kept verbatim (tests/_suite-args.mjs, with the bound on files run at once). Without it a hang in this suite once left
