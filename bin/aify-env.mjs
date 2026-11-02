@@ -55,6 +55,7 @@ import { handleRequest } from "../lib/protocol.mjs";
 import { startInputSocket } from "../lib/input-socket-start.mjs";
 import { readHostConfig } from "../lib/host-config.mjs";
 import { readGrantedRoots } from "../lib/watch-roots.mjs";
+import { LaunchRoots, launchRootsPath } from "../lib/launch-roots.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
 import { daemonShutdownHooks } from "../lib/shutdown-hooks.mjs";
@@ -158,6 +159,8 @@ const SUBCOMMANDS = {
   registry: "./aify-env-registry.mjs",
   herdr: "./aify-env-herdr.mjs",
   agents: "./aify-env-agents.mjs",
+  // WHERE THIS HOST STARTS WORK beyond its start folder (lib/launch-roots.mjs); the only writer of that file.
+  roots: "./aify-env-roots.mjs",
   // THE GUIDED-INSTALL CHAIN (lib/install-chain.mjs). It installs and connects; it never starts the environment.
   install: "./aify-env-install.mjs",
 };
@@ -293,7 +296,8 @@ const servicePlugins = new ServicePlugins();
 const definitionStore = new DefinitionStore({ onRemoved: (id) => agentState?.sessionFolders?.notice(id) });
 
 /**
- * WHERE THIS HOST WILL RUN WORK: the directory it was started in, and below.
+ * WHERE THIS HOST WILL RUN WORK: the directory it was started in, and below, plus the roots the operator added on
+ * this host with `aify-env roots add` (lib/launch-roots.mjs), re-read whenever that file changes.
  *
  * THIS IS THE HOST'S OWN BOUND, not a service's. The advertisement deliberately sends no `cwdRoots`
  * -- which directories work MAY run in is the service's policy -- but what this process is willing
@@ -303,7 +307,7 @@ const definitionStore = new DefinitionStore({ onRemoved: (id) => agentState?.ses
  * The operator's model is exactly this: "i run aify-env at C:\ so whole pc is env where i can spawn
  * managed agents". Where you start it is what it will run.
  */
-const CWD_ROOTS = [process.cwd()];
+const LAUNCH_ROOTS = new LaunchRoots({ startFolder: process.cwd(), file: launchRootsPath(homedir()), log: (line) => logLine(line) });
 
 /** The identity a plugin needs to name this environment to its service. The SHAPE of that name is
  *  the service's business, so only the facts travel. */
@@ -322,7 +326,7 @@ function currentAdvertisementBody() {
   // The plugin is a second heartbeat writer, and with `"advertise": false` the only one: the body,
   // machine id and currency pair included, is `pluginHeartbeatBody`'s (lib/advertise.mjs).
   return pluginHeartbeatBody({ hostname: hostname(), kind, machineId, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk(),
-    launchRoots: CWD_ROOTS });
+    launchRoots: LAUNCH_ROOTS.current() });
 }
 
 /** How this daemon reads a stored key: fresh bytes every time, one icacls per change of the file
@@ -442,7 +446,8 @@ const server = createServer(createDaemonHttp({
         version: VERSION,
         build: BUILD,
         codeOnDisk: PACKAGE_BUILD.onDisk(),
-        cwdRoots: CWD_ROOTS,
+        cwdRoots: LAUNCH_ROOTS.current(),
+        launchRootsFile: LAUNCH_ROOTS.read(),
         screens: () => servicePlugins.capabilities("screens"),
         unknown,
         terminals: terminalSupport(),
@@ -651,7 +656,7 @@ server.listen(port, HOST, async () => {
     catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }
   } else await reapLeftovers();
 
-  const stateObservation = { definitions: definitionStore, lifecycle: agentState.lifecycle, cwdRoots: CWD_ROOTS, screens: () => servicePlugins.capabilities("screens"),
+  const stateObservation = { definitions: definitionStore, lifecycle: agentState.lifecycle, cwdRoots: () => LAUNCH_ROOTS.current(), screens: () => servicePlugins.capabilities("screens"),
     observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) };
   // Only after serving and successful durable boot/readiness. Sweep cadence is configurable;
   // this fixed beat evaluates boot-anchored quiet epochs even when the sweep is much slower.
@@ -708,7 +713,7 @@ server.listen(port, HOST, async () => {
         // Resolved when asked rather than captured: a registry edit or a rotated key must reach a
         // running plugin without a restart.
         advertisement: async () => currentAdvertisementBody(),
-        cwdRoots: async () => CWD_ROOTS,
+        cwdRoots: async () => LAUNCH_ROOTS.current(),
         windows: process.platform === "win32",
         definitions: definitionStore,
         agents: agentState?.lifecycle ?? null,
@@ -777,7 +782,7 @@ server.listen(port, HOST, async () => {
   dashboardOwnsScreen = view.ownsScreen;
   // THE AGENTS THIS ENVIRONMENT CANNOT START, said where it was started rather than at their first refused spawn.
   definitionStore.list()
-    .then((listed) => outsideRootsWarning(listed.definitions, CWD_ROOTS, { windows: process.platform === "win32" }))
+    .then((listed) => outsideRootsWarning(listed.definitions, LAUNCH_ROOTS.current(), { windows: process.platform === "win32" }))
     .then((warning) => { if (warning) logLine(warning); }, () => {});
 });
 
@@ -811,7 +816,7 @@ const advertiser = new HostAdvertiser({
     const support = terminalSupport();
     // WHAT IS ON DISK NOW, beside what this process loaded at boot. Cached, so a beat every 30 seconds does not re-hash.
     return { hostname: hostname(), kind, os: hostOs, machineId, terminal: support.available, terminalReason: support.reason,
-      version: VERSION, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk(), launchRoots: CWD_ROOTS };
+      version: VERSION, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk(), launchRoots: LAUNCH_ROOTS.current() };
   },
   harnesses: () => installedHarnesses(aifyLauncherFilesOnPath()),
   pathFor: advertisementPathFor,

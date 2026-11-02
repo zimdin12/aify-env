@@ -39,7 +39,7 @@ async function picker(t, facts, identity = hostIdentityFacts, context = {}) {
   const reports = [];
   const follow = await runInNewContext(bootstrap, {
     startDaemonPlugins, servicePlugins: registry, chr10: "\n",
-    runner, VERSION: "test", REGISTRY_FILE: "memory-only-registry", CWD_ROOTS: [],
+    runner, VERSION: "test", REGISTRY_FILE: "memory-only-registry", LAUNCH_ROOTS: { current: () => [], read: () => ({ roots: [], stored: [], problem: "", file: "" }) },
     // NO DEFINITION STORE: the daemon makes this operator's own outside the evaluated block, and a
     // picker test must never publish or read it.
     definitionStore: null,

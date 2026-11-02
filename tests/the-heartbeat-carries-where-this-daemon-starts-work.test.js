@@ -21,13 +21,13 @@ test("BOTH BODIES CARRY THE BOUND as metadata.launchRoots, and never as cwdRoots
   assert.equal("launchRoots" in pluginHeartbeatBody({}).metadata, false, "CONTROL: no bound given, none claimed");
 });
 
-test("THE DAEMON PASSES ITS CWD_ROOTS to both", async () => {
+test("THE DAEMON PASSES ITS LAUNCH ROOTS, read now, to both", async () => {
   const source = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs"), "utf8");
   // The plugin heartbeat's body is built in the daemon; the advertisement's by its advertiser, from the host facts the
   // daemon hands it (lib/host-advertiser.mjs), so each is read where its bound is given.
-  const after = (call, end) => { const at = source.indexOf(call, source.indexOf("const CWD_ROOTS")); return at > 0 ? source.slice(at, source.indexOf(end, at)) : ""; };
-  assert.match(after("pluginHeartbeatBody(", ");"), /launchRoots: CWD_ROOTS/, "the plugin heartbeat does not pass the bound");
-  assert.match(after("new HostAdvertiser({", "\n});"), /launchRoots: CWD_ROOTS/, "the advertiser's host facts do not carry the bound");
+  const after = (call, end) => { const at = source.indexOf(call, source.indexOf("const LAUNCH_ROOTS")); return at > 0 ? source.slice(at, source.indexOf(end, at)) : ""; };
+  assert.match(after("pluginHeartbeatBody(", ");"), /launchRoots: LAUNCH_ROOTS\.current\(\)/, "the plugin heartbeat does not pass the bound");
+  assert.match(after("new HostAdvertiser({", "\n});"), /launchRoots: LAUNCH_ROOTS\.current\(\)/, "the advertiser's host facts do not carry the bound");
   // AND THE ADVERTISER SENDS WHAT IT IS GIVEN: its body carries the host's launchRoots.
   const { HostAdvertiser } = await import("../lib/host-advertiser.mjs");
   const bodies = [];

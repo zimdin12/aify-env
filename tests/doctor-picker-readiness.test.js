@@ -13,6 +13,8 @@ const healthy = { ok: true, status: 200, body: {
   plugins: [{ name: "test", state: { claimer: { accepted: true },
     definitions: { accepted: true, published: { storeId: "s", revision: 1 }, lastPushError: "", lastRequestError: "" } } }],
   build: "abc", codeOnDisk: "abc",
+  // Where a current daemon says it starts work, so the launch-roots row is answered like the rest.
+  cwdRoots: ["C:/"], launchRootsFile: { file: "fixture", stored: [], problem: "" },
 } };
 async function report(answer, envAnswer = healthy) {
   const urls = [];

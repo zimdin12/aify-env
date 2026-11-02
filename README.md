@@ -35,10 +35,15 @@ clients whose CLI is present, and reports what is pending. Keys come from a file
 A tuple the catalogue does not approve is refused with the `--approve <digest>` that approves it. `aify-env install`
 is the same chain on its own; aify-comms' installer hands off to it.
 
-**Start it from the folder that contains your workspaces.** It starts work only in that folder and below
-(`C:\` covers the whole `C:` drive on Windows; another drive or a network share needs its own start), and
-refuses every other start. Started too narrowly, it names each managed agent it cannot start in a warning at
-startup and in `aify-env doctor` (`agents-outside-roots`); aify-comms shows those agents `misconfigured`.
+**Where it starts work: the folder it was started in, plus the launch roots you add on this host.** It refuses
+every start outside them. `C:\` covers the whole `C:` drive on Windows; for another drive or folder run
+`aify-env roots add D:\` (or the narrower `D:\Games`), kept in `~/.aify/launch-roots.json`. `aify-env roots list`
+shows what the running aify-env starts work under, and `aify-env roots remove <folder>` takes one out. A running
+aify-env that has this code reads the file at each start, so a root added later needs no restart; one started
+before this code needs one ordinary restart first. No service can add a root, and UNC or device paths are not
+supported yet. A file that is not right adds nothing (the start folder alone), and `aify-env doctor` says why
+(`launch-roots`). A managed agent outside the roots is named in a warning at startup and in `aify-env doctor`
+(`agents-outside-roots`), with the `aify-env roots add` that fixes it; aify-comms shows it `misconfigured`.
 
 `node-pty` is the dependency that matters most, and it is the one that can fail: it is a native module,
 so a host without build tools gets a working install with NO TERMINALS. That is not a broken state and

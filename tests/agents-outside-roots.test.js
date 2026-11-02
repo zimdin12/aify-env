@@ -34,7 +34,8 @@ test("THE STARTUP WARNING names the agent, its workspace, the roots and the fix,
   const warning = outsideRootsWarning(DEFINITIONS, ROOTS, { windows: true });
   assert.match(warning, /dashboard-manager \(C:\/Docker\/aify-dashboard\)/);
   assert.match(warning, /C:\\Docker\\aify-comms/);
-  assert.match(warning, /start it again from a folder that contains them/);
+  assert.ok(warning.includes("`aify-env roots add C:/Docker/aify-dashboard`, or a folder above it"), warning);
+  assert.doesNotMatch(warning, /start it again/, "the warning still sends the operator to restart aify-env");
   assert.equal(outsideRootsWarning(DEFINITIONS.slice(1), ROOTS, { windows: true }), "");
 });
 
@@ -43,7 +44,10 @@ test("THE DOCTOR ROW fails naming them, passes when none, and is unanswered with
   const failing = agentsOutsideRootsCheck({ answered: true, roots: ROOTS, listed, windows: true });
   assert.equal(failing.state, STATE.FAILED);
   assert.match(failing.detail, /dashboard-manager/);
-  assert.match(failing.fix, /start it again from a folder that contains them/);
+  assert.ok(failing.fix.includes("`aify-env roots add C:/Docker/aify-dashboard`"), failing.fix);
+  const two = agentsOutsideRootsCheck({ answered: true, roots: ROOTS, windows: true,
+    listed: { definitions: [managed("a", "D:/Games/one"), managed("b", "E:/two")] } });
+  assert.ok(two.fix.startsWith("add each folder above as a launch root on this host, starting with `aify-env roots add D:/Games/one`"), two.fix);
   assert.equal(agentsOutsideRootsCheck({ answered: true, roots: ["C:\\"], listed, windows: true }).state, STATE.PASSED);
   for (const input of [{ answered: false }, { answered: true, roots: null, listed }, { answered: true, roots: [], listed },
     { answered: true, roots: ROOTS, listed: null }]) {

@@ -97,7 +97,7 @@ test("a daemon past the doctor's eight is found, and dead invocations cost no pr
 
 test("EVERY CLIENT COMMAND asks through it, refuses on its problem, and keeps no default-port constant", () => {
   const bin = fileURLToPath(new URL("../bin/", import.meta.url));
-  for (const command of ["aify-env-agents.mjs", "aify-env-attach.mjs", "aify-env-run.mjs"]) {
+  for (const command of ["aify-env-agents.mjs", "aify-env-attach.mjs", "aify-env-run.mjs", "aify-env-roots.mjs"]) {
     const source = fs.readFileSync(path.join(bin, command), "utf8");
     assert.match(source, /await findEnvEndpoint\(\)/, `${command} asks through findEnvEndpoint`);
     assert.match(source, /\.problem\b/, `${command} acts on an unresolved answer`);

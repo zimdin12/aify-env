@@ -63,7 +63,7 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
       shared = options.makeShared(); return null;
     },
     // No plugin started: the real ServicePlugins answers [] for any capability, and the state read asks it for screens.
-    servicePlugins: { capabilities: () => [] }, resolvePluginCredential: () => {}, VERSION: "fixture", CWD_ROOTS: [],
+    servicePlugins: { capabilities: () => [] }, resolvePluginCredential: () => {}, VERSION: "fixture", LAUNCH_ROOTS: { current: () => [], read: () => ({ roots: [], stored: [], problem: "", file: "" }) },
     hostIdentityFacts: () => ({ machineId: "win32:fixture" }), hostname: () => "fixture", existsSync: () => false, hostIsWsl: () => false,
     installedHarnesses: () => [{ client: "claude" }], aifyLauncherFilesOnPath: () => [], currentAdvertisementBody: () => ({}), readGrantedRoots: () => [],
     readServices: () => [], pluginsForServices: () => {}, REGISTRY_FILE: "sealed-fixture",
