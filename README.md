@@ -109,6 +109,12 @@ success:
 `npm install -g .` still works and is what `install.sh` runs. What it does not do is notice a missing
 credential, which is the whole reason the script exists.
 
+The credential step follows the exact published registry reference and runtime resolver. Keyless readiness
+comes from the service's validated secret declaration or its credential-free declared API probe, never
+from health or an orphan default-key file. Interactive repair is a full approved service reconnect,
+followed by exact registry/runtime readback; it may verify artifacts and rerender launchers, but starts
+no daemon. See [installer credential readiness](docs/INSTALL-CREDENTIALS.md) for fault and unknown outcomes.
+
 Every command is named after the package, and a test enforces it. The doctor was called `aify-doctor`
 until aify-comms turned out to install a different tool under that exact name -- two tiers on one host
 is the whole point of the split, so whichever landed on PATH first would have silently shadowed the

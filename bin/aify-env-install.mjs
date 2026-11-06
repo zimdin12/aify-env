@@ -18,7 +18,7 @@ import { createInterface } from "node:readline/promises";
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
 import { wrapperInstallSource } from "../lib/wrapper-pin.mjs";
-import { approvedInstaller, connectRecorded, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, connectRecorded, envWithout, gitCheckout, globalNpmRoot, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const plan = parseChainArgs(process.argv.slice(2));
 if (plan.problem) process.stderr.write(`aify-env install: ${plan.problem}\n${USAGE}\n`);
@@ -35,11 +35,7 @@ async function runChain(plan) {
   const say = (line) => process.stdout.write(`[aify-env] ${line}\n`);
   const stdinKey = plan.secretStdin ? fs.readFileSync(0, "utf8") : undefined;
 
-  function npmRoot() {
-    const run = spawnSync("npm", ["root", "-g"], { encoding: "utf8", shell: windows, timeout: 60_000 });
-    return run.status === 0 ? run.stdout.trim() : "";
-  }
-  const root = npmRoot();
+  const root = globalNpmRoot({ env });
   const wrapperRoot = path.join(root, "aify-wrapper");
   // Where aify-wrapper comes from when it is missing: the commit this aify-env was tested against (lib/wrapper-pin.mjs),
   // or a package spec a test names.

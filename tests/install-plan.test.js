@@ -48,7 +48,7 @@ test("with no terminal it says what will break, rather than hanging or passing q
   const plan = planInstall({ services: COMMS, hasCredential: none, hasPlugin: all, interactive: false });
   assert.equal(plan.steps[0].action, CANNOT_ASK);
   assert.match(plan.steps[0].reason, /401/, "the reason must name the symptom, not just say 'configure it'");
-  assert.match(plan.steps[0].reason, /credential set/, "and must name the command that fixes it");
+  assert.match(plan.steps[0].reason, /aify-wrapper-connect/, "and must name the owner that publishes a usable credential");
   assert.deepEqual(plan.willAsk, [], "nothing may be asked when there is nobody to ask");
 });
 
@@ -101,6 +101,24 @@ test("a nameless registry entry is ignored rather than asked about", () => {
     hasCredential: none, hasPlugin: all, interactive: true,
   });
   assert.deepEqual(plan.steps, []);
+});
+
+for (const [name, observed] of [['fault', { ready: false, kind: 'fault', reason: 'CREDENTIAL_UNREADABLE' }],
+  ['unknown', { ready: false, kind: 'unknown', reason: 'authentication requirement is unknown' }], ['missing answer', undefined]]) {
+  test(`readiness ${name} never falls back to a held default or asks for a replacement key`, () => {
+    const plan = planInstall({ services: COMMS, hasCredential: all, hasPlugin: all, interactive: true, readinessFor: () => observed });
+    assert.deepEqual({ action: plan.steps[0].action, asks: plan.willAsk, incomplete: planIsIncomplete(plan) },
+      { action: CANNOT_ASK, asks: [], incomplete: true });
+    assert.match(describePlan(plan)[0], /NOT READY/);
+  });
+}
+
+test('explicit keyless readiness needs no stored credential and is not prompted for', () => {
+  const plan = planInstall({ services: COMMS, hasCredential: none, hasPlugin: all, interactive: true,
+    readinessFor: () => ({ ready: true, kind: 'keyless', reason: 'declared API accepts no credential' }) });
+  assert.deepEqual({ action: plan.steps[0].action, asks: plan.willAsk, incomplete: planIsIncomplete(plan) },
+    { action: NEEDS_NOTHING, asks: [], incomplete: false });
+  assert.match(describePlan(plan)[0], /declared API/);
 });
 
 test("the description says what will happen, in the operator's terms", () => {
