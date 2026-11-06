@@ -1,3 +1,4 @@
+// hostConfigFrom exercises trustedAuthoritiesFrom and the AUTHORITY_SETTING diagnostic through the real config owner.
 // #16: only a well-formed explicit host grant may extend loopback; transport preference recovery stays intact.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';

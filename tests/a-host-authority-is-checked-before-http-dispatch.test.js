@@ -1,3 +1,4 @@
+// httpAuthorityProblem is exercised through createDaemonHttp, including its fixed setting diagnostic and pre-dispatch refusal.
 // #16: the real HTTP boundary must reject rebinding before a body, dependency or console subscription is used.
 // Existing browser tests own Origin/Sec-Fetch classification; this file owns authority and its transport wiring.
 import assert from 'node:assert/strict';
