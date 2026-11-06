@@ -484,6 +484,9 @@ npm test -- tests/one.test.js    # one file, under the same throwaway TEMP and H
 Run a single file through `npm test --`, not `node --test`. The runner points TEMP and HOME at a directory it deletes,
 and a file started directly leaves its fixtures in the real Temp.
 
+Changes to `bin/aify-env.mjs` also run the complete [bootstrap source-reader gate](docs/BOOT-SOURCE-TESTS.md),
+not just tests named after the changed feature.
+
 **`npm install` first, and the reason is the design rather than an oversight.** `pty-real.test.js`
 FAILS rather than skips on a host with no terminal support, because "the terminal path works" must not
 report green when nobody could check it. So a clone that skips the install gets one red test — which

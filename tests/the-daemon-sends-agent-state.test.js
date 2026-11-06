@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
+import { ModelSelections } from "../lib/model-selections.mjs";
 import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
 import { SessionFolders, sessionsRoot } from "../lib/session-folders.mjs";
 let AgentStateSender, REPORT_EVERY_MS;
@@ -54,7 +55,7 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
       lifecycle = createAgentLifecyclePorts(options);
       return lifecycle;
     },
-    AgentTurnEvents, server: { address: () => ({ port: 0 }) }, terminalSupport: () => ({ available: true }),
+    AgentTurnEvents, ModelSelections, server: { address: () => ({ port: 0 }) }, terminalSupport: () => ({ available: true }),
     join: path.join, homedir: () => home, HOST: "127.0.0.1", instanceContext: context, SessionFolders, sessionsRoot,
     logLine: () => {}, definitionStore: definitions,
     reapLeftovers: async () => events.push("reap"), process: fakeProcess,

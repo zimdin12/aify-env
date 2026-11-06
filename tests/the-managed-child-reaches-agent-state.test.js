@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { Runner } from "../lib/runner.mjs";
 import { AgentStateHost } from "../lib/agent-state-host.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
+import { ModelSelections } from "../lib/model-selections.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
 import { buildStartSpec } from "../lib/start-spec.mjs";
 import { PluginProcesses } from "../lib/service-plugins.mjs";
@@ -239,20 +240,20 @@ test("actual daemon source statements lazily join boot host and bound URL for de
   const bootBlock = source.match(/  try \{ agentState = bootDaemonAgentState\([\s\S]*?\n  catch \(error\) \{[^\n]+\}/)?.[0];
   const depsBlock = source.match(/  protocolDeps: async \(\) => \([\s\S]*?\n  \),/)?.[0];
   assert.ok(runnerBlock && bootBlock && depsBlock, "unique actual bootstrap source boundaries");
-  const stateLines = depsBlock.split("\n").filter((line) => /stateHost:|observedHarnesses:|lifecycle:/.test(line)).join("\n");
+  const stateLines = depsBlock.split("\n").filter((line) => /stateHost:|observedHarnesses:|lifecycle:|modelSelections:/.test(line)).join("\n");
   assert.match(stateLines, /stateHost:/, "actual HTTP dependencies omit booted host");
   assert.match(stateLines, /observedHarnesses:/, "actual HTTP dependencies omit launcher observations");
   assert.match(stateLines, /lifecycle:/, "actual HTTP dependencies omit the lifecycle stop facts");
   for (const context of [null, { scope: "invocation-9" }]) {
     const f = fixture(t);
-    const run = new Function("Runner", "bootDaemonAgentState", "AgentTurnEvents", "OWNED_FILE", "join", "homedir", "instanceContext", "HOST", "bound", "logLine", "process", "server",
+    const run = new Function("Runner", "bootDaemonAgentState", "AgentTurnEvents", "ModelSelections", "OWNED_FILE", "join", "homedir", "instanceContext", "HOST", "bound", "logLine", "process", "server",
       "createAgentLifecyclePorts", "hostIdentityFacts", "hostname", "existsSync", "hostIsWsl", "definitionStore",
       "installedHarnesses", "aifyLauncherFilesOnPath", "evaluateAgentState",
       `let agentState = null;\n${runnerBlock}\nconst readDeps = () => ({ ${stateLines} });\nif (readDeps().stateHost !== null) throw new Error("HTTP host captured before boot");\nif (typeof runner.deps.managedHost !== "function") throw new Error("actual bootstrap lacks lazy managedHost");\nconst before = () => runner.deps.managedHost();\nconst unready = before();\n${bootBlock}\nreturn { unready, owner: before(), http: readDeps() };`);
     class CaptureRunner { constructor(deps) { this.deps = deps; } }
     const observed = run(CaptureRunner,
       (args) => bootDaemonAgentState({ ...args, probe: () => new Map(), nowUs: () => AT, nowMs: AT / 1000 }),
-      AgentTurnEvents, null, path.join, () => f.home, context, "127.0.0.1", { port: 18802 }, () => {},
+      AgentTurnEvents, ModelSelections, null, path.join, () => f.home, context, "127.0.0.1", { port: 18802 }, () => {},
       { stderr: { write() {} }, exit() { throw new Error("bootstrap failed"); }, platform: process.platform, env: {} },
       { address: () => ({ port: 18802 }) },
       createAgentLifecyclePorts, () => ({ machineId: "win32:test-host" }), () => "test-host", fs.existsSync, () => false,
@@ -261,6 +262,7 @@ test("actual daemon source statements lazily join boot host and bound URL for de
     assert.equal(observed.owner.instance, context?.scope ?? "default");
     assert.equal(observed.owner.url, URL);
     assert.ok(observed.owner.host instanceof AgentStateHost);
+    assert.ok(observed.http.modelSelections instanceof ModelSelections, "HTTP receives the booted model-selection owner");
     assert.equal(observed.http.stateHost, observed.owner.host, "HTTP resolves the actual booted host per request");
     const read = await handleRequest({ method: "GET", path: "/agents/state" }, observed.http);
     assert.equal(read.status, 200);
