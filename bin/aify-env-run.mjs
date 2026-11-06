@@ -51,13 +51,6 @@ export function parseRunArgs(argv = []) {
 }
 
 /**
- * The body for `POST /processes`, or why it cannot be built.
- *
- * FAILS CLOSED ON BOTH REQUIRED FIELDS, separately. They are substituted into a launcher at render
- * time, so an empty one means the launcher was rendered wrong -- and without this the failure
- * arrives as a 400 from the host, which reads like the host is the broken thing.
- */
-/**
  * Variables that address or configure THIS DAEMON, and are therefore never forwarded to it.
  *
  * The test for membership is one question, not a judgement per name: does this variable describe the
@@ -88,6 +81,13 @@ export function forwardableEnv(source = process.env) {
   return out;
 }
 
+/**
+ * The body for `POST /processes`, or why it cannot be built.
+ *
+ * FAILS CLOSED ON BOTH REQUIRED FIELDS, separately. They are substituted into a launcher at render
+ * time, so an empty one means the launcher was rendered wrong -- and without this the failure
+ * arrives as a 400 from the host, which reads like the host is the broken thing.
+ */
 export function startRequestFrom({ service, launcher, label = "", cwd = "", args = [], env = null } = {}) {
   const owner = String(service ?? "").trim();
   const path = String(launcher ?? "").trim();

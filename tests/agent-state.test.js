@@ -1,5 +1,5 @@
-// The one derivation of an agent's state (lib/agent-state.mjs; 0.9 P0 C3). The turn law runs the shared table in
-// tests/fixtures/agent-state-law.json, which aify-comms also runs through the Python it replaces.
+// The one derivation of an agent's state (lib/agent-state.mjs; 0.9 P0 C3). This and turn-events.test.js run
+// tests/fixtures/agent-state-law.json. Its Python answers are historical port evidence, not a live parity check.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -11,8 +11,8 @@ const LAW = JSON.parse(fs.readFileSync(new URL("./fixtures/agent-state-law.json"
 const at = (ago) => (ago === null ? 0 : (LAW.now - ago) * 1000);
 
 test("THE TURN LAW agrees with the shared table, case by case", () => {
-  assert.equal(STRICT_TURN_MS, LAW.strictSeconds * 1000, "the window is aify-comms' 30 minutes");
-  assert.ok(LAW.turnLaw.length >= 15, "the table is the one aify-comms runs too");
+  assert.equal(STRICT_TURN_MS, LAW.strictSeconds * 1000, "the port's strict window remains 30 minutes");
+  assert.ok(LAW.turnLaw.length >= 15, "the historical port table retains its regression cases");
   for (const row of LAW.turnLaw) {
     const live = turnIsStillLive({ startedAt: at(row.startedAgo), touchedAt: at(row.touchedAgo), renewable: row.renewable,
       now: LAW.now * 1000 });

@@ -224,13 +224,17 @@ aify-env writes every process it starts to a record — `~/.aify/env-processes.j
 that holds it is alive, and the question that matters is the one asked by the instance REPLACING one
 that died.
 
-**Two halves, because one is not enough.** Shutdown handlers stop the managed processes on a graceful
-exit. A hard kill runs no handler at all, so the next instance reads the record and reaps whatever is
-still alive before it starts listening. Cleanup that must hold on every path keys on state, not events.
+**Shutdown and recovery are separate.** Shutdown handlers attempt to stop managed processes on a
+graceful exit; a hard kill runs no handler. On ordinary startup the next instance first binds its
+listening port, then reads the record and attempts to reap verified leftovers before starting service
+plugins. A dedicated `--instance-context` daemon skips that shared-record reap. Processes whose
+ownership cannot be confirmed are left running and reported.
 
-**Kills reach the CHILDREN.** A launcher is a script and the agent is a child of it, so ending only the
-recorded pid stops the wrapper and leaves the agent. Windows uses `taskkill /T`, POSIX signals the
-process group and then the process.
+**Descendant cleanup has a POSIX piped gap.** A launcher is a script and the agent is its child, so
+ending only the recorded pid can leave the agent running. Windows uses `taskkill /T`; POSIX signals
+the process group and then the launcher pid. PTY children have their own group, but the POSIX piped
+fallback does not create one. A successful launcher stop therefore does not establish whole-tree
+cleanup on that path, including at graceful shutdown ([#13](https://github.com/zimdin12/aify-env/issues/13)).
 
 **The killing decision fails closed.** A recorded pid is only ended if the OS still reports it running
 the launcher we recorded. Pid reuse is real, and ending a stranger's process is a far worse failure

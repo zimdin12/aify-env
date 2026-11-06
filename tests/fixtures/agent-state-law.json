@@ -1,5 +1,5 @@
 {
-  "about": "One table, run twice: by tests/agent-state.test.js and tests/turn-events.test.js, and by aify-comms service/tests/test_the_ported_turn_law_agrees.py through the Python they port. Times are seconds before a fixed now (null = no timestamp); event times are microseconds. 'owner' is a lifetime here and a registered machine id in aify-comms. In hookOrder, 'accept' is today's Python answer and 'aifyEnv' is aify-env's (admission, then ordering within one lifetime); a row where they differ names why in 'divergence'.",
+  "about": "Historical port table, now run here by tests/agent-state.test.js and tests/turn-events.test.js. The Python columns retain answers recorded at the port, not results from an active cross-language check. Times are seconds before a fixed now (null = no timestamp); event times are microseconds. 'owner' is a lifetime here and was a registered machine id in the Python source. In hookOrder, 'accept' is the Python answer recorded at the port and 'aifyEnv' is aify-env's (admission, then ordering within one lifetime); a row where they differ names why in 'divergence'.",
   "now": 1790950000.0,
   "strictSeconds": 1800,
   "turnLaw": [

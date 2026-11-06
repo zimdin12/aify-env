@@ -3,16 +3,18 @@
 The environment tier: **one process on a host that owns the processes and terminals**, so more than
 one service can start agents on that machine without two spawners fighting over the same PTYs.
 
-Nothing here knows what a message is or what a dispatch is. It knows which agents this host defines, which
-processes it started, and whether they are alive. Since 0.9 it also derives what each agent is doing
-(`lib/agent-state.mjs`) and publishes it as a SHADOW: the service's status still governs, and the two are
-compared (`agent-state-shadow` in `aify-comms doctor`) before this one may.
+The host core knows which agents this host defines, which processes it started, and whether they are
+alive. It also derives what each agent is doing (`lib/agent-state.mjs`) and publishes that status to
+services. Since the 0.9.8 switch, aify-comms consumes the host's status as its operational source rather
+than deriving a competing status.
 
-**One of three repos.** [aify-comms](https://github.com/zimdin12/aify-comms) owns messaging, dispatch
-and sessions; [aify-wrapper](https://github.com/zimdin12/aify-wrapper) owns the launchers this will
-run. Nothing here depends on either: aify-env serves whichever services register on the host, and
-runs whatever launcher carries the harness marker. That independence is the point — a second service
-should not have to build its own spawner.
+**Host core and service integrations.** [aify-comms](https://github.com/zimdin12/aify-comms) owns
+messaging, dispatch and sessions; [aify-wrapper](https://github.com/zimdin12/aify-wrapper) owns the
+launchers. The core is service-agnostic, but this package currently ships the aify-comms and
+aify-dashboard plugins in `lib/plugins/`, selected by name in `lib/plugins/index.mjs`, and its installer
+uses aify-wrapper. Moving service plugins to their owning services, loaded from each service's registry
+declaration, is a decided target, not an implemented migration ([#27](https://github.com/zimdin12/aify-env/issues/27)).
+A second service should not have to build its own spawner.
 
 ## Install
 
@@ -121,7 +123,8 @@ is the whole point of the split, so whichever landed on PATH first would have si
 other.
 
 A running daemon keeps the code it loaded at boot, so an update reaches it only when it restarts.
-Stopping it takes its processes with it, and the next instance reaps anything a hard kill left behind.
+Stopping it attempts to end its workers; the cleanup limits below still apply. The next ordinary
+instance attempts to reap verified leftovers after binding its port.
 
 ### Herdr: two ways in
 
@@ -173,9 +176,15 @@ declaration that is not a path sends nothing and is named in `/health` under `ad
 ### What it leaves behind, and what it does not
 
 Every process it starts is recorded in `~/.aify/env-processes.json` (`AIFY_ENV_PROCESS_RECORD` to move
-it). A graceful stop takes its processes with it; a hard kill runs no handler, so the NEXT instance
-reads that record and reaps whatever is still alive before it starts listening. Kills reach the whole
-tree, because a launcher is a script and the agent is its child.
+it). A hard kill runs no handler. On ordinary startup the next instance binds its listening port first,
+then reads the record and attempts to reap verified leftovers before starting service plugins; a
+dedicated `--instance-context` daemon skips that shared-record reap. Unconfirmed processes are left
+running and reported.
+
+Stopping a launcher must also reach the agent it started. Windows uses `taskkill /T`; POSIX tries the
+process group, then the launcher pid. The POSIX piped fallback does not create its own group, so a
+reported launcher stop can leave descendants running. Whole-tree cleanup is not guaranteed there
+([#13](https://github.com/zimdin12/aify-env/issues/13)); this also limits graceful-shutdown cleanup.
 
 One case it cannot fix and does not hide: if a launcher dies before the agent it started, the agent is
 orphaned with no parent, and no pid-tree walk can find it from the record.
@@ -185,7 +194,8 @@ orphaned with no parent, and no pid-tree walk can find it from the record.
 Which agents exist on this host, and how each one launches, is a **definition**: one JSON file per
 agent in `~/.aify/agent-definitions/` (`AIFY_AGENT_DEFINITIONS_DIR` to move it). A definition is the
 desired state you set: name, role, harness, mode, workspace, model, effort, instructions, herdr space
-and extra environment. It holds nothing live; sessions, messages and status stay in the services.
+and extra environment. It holds no live state: services own messages and sessions, while aify-env owns
+live process observations, turn state and the derived agent status.
 
 ```bash
 aify-env agents list
@@ -217,7 +227,8 @@ definition's model through the existing store. They never switch a running agent
 - **Nothing moves until you say so.** An agent with no definition works as before. `agents import`
   without `--write` only prints its plan.
 
-Status is still not here: alive is not working, and turn status belongs to the service.
+Status is live host state, not definition data: alive is not working. aify-env derives the word from
+process, turn and screen observations; services consume it.
 
 ### Dialogs it answers for a managed agent
 
