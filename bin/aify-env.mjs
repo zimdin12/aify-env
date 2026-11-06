@@ -430,7 +430,7 @@ let inputSocketServer = null;
 const HOST_CONFIG = readHostConfig({ env: process.env });
 
 const server = createServer(createDaemonHttp({
-  runner, traffic,
+  runner, traffic, hostConfig: HOST_CONFIG,
   protocolDeps: async () => (
       {
         runner,

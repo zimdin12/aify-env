@@ -132,7 +132,8 @@ and every worker in it**; that lifetime is the launcher's, and it is described w
 mode in [aify-wrapper's HERDR.md](https://github.com/zimdin12/aify-wrapper/blob/main/HERDR.md).
 That daemon serves a port the OS picked, and `aify-env agents import`, `aify-env attach` and
 `aify-env run` find it from its ready receipt when nothing answers on 8802 (`AIFY_ENV_ENDPOINT`
-still wins when set).
+still wins when set). Non-loopback forwarded authorities need an explicit
+[`http.trustedAuthorities` grant](docs/HTTP-AUTHORITY.md), including custom comms `--env-endpoint` URLs.
 
 **`aify-env herdr [agent]`, one worker into a Herdr you already run.** It opens an existing worker
 in a new Herdr workspace; with no argument it offers a numbered picker. This is a Windows PowerShell

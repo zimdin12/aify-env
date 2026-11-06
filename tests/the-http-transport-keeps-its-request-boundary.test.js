@@ -14,7 +14,8 @@ async function transport(options) {
   return createDaemonHttp(options);
 }
 function request(method, url, text = "", headers = {}, read = () => {}) {
-  return Object.assign(new EventEmitter(), { method, url, headers,
+  const actualHeaders = { host: "127.0.0.1:8802", ...headers };
+  return Object.assign(new EventEmitter(), { method, url, headers: actualHeaders, rawHeaders: Object.entries(actualHeaders).flat(),
     async *[Symbol.asyncIterator]() { read(); yield Buffer.from(text); } });
 }
 function response(t) {
@@ -41,6 +42,18 @@ test("browser refusal consumes neither request nor per-request dependencies", as
   assert.equal(r.status, 403);
   assert.match(json(r).error, /Origin/);
   assert.deepEqual(io, { requests: 1, bytesOut: 0 });
+});
+
+test("an absent on-wire Host refuses before the body, route or dependencies even without HTTP parser help", async (t) => {
+  const callback = await transport({ runner: {}, traffic: traffic(),
+    protocolDeps: () => assert.fail("missing Host resolved dependencies") });
+  const q = request("POST", "/agents/a/turn-event", "{}", {}, () => assert.fail("missing Host read the body"));
+  q.rawHeaders = [];
+  Object.defineProperty(q, "url", { get: () => assert.fail("missing Host read the route") });
+  const r = response(t);
+  await callback(q, r);
+  assert.equal(r.status, 403);
+  assert.match(json(r).error, /exactly one Host.*http\.trustedAuthorities/);
 });
 
 test("fresh dependencies deliver unavailable then successful real turn receiver after body consumption", async (t) => {

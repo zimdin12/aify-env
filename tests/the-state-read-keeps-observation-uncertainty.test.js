@@ -153,7 +153,9 @@ test("HTTP resolves boot host lazily and inherits wrong verb and browser refusal
   const f = await fixture(t); let owner = null;
   const callback = createDaemonHttp({ runner: {}, traffic: { requests: 0, bytesOut: 0 }, protocolDeps: async () => ({ ...f.deps, stateHost: owner }) });
   const send = async (method = "GET", headers = {}) => {
-    const request = Object.assign(new EventEmitter(), { method, url: "/agents/state", headers, async *[Symbol.asyncIterator]() {} });
+    const actualHeaders = { host: "127.0.0.1:8802", ...headers };
+    const request = Object.assign(new EventEmitter(), { method, url: "/agents/state", headers: actualHeaders,
+      rawHeaders: Object.entries(actualHeaders).flat(), async *[Symbol.asyncIterator]() {} });
     const response = { writeHead(status) { this.status = status; }, end(text) { this.body = JSON.parse(text); } };
     await callback(request, response); return response;
   };

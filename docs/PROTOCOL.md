@@ -9,6 +9,10 @@ deliberately no `--host` flag — a guard that can be turned off is decoration.
 
 Default port `8802`. `--port 0` takes an ephemeral one, which is how the tests avoid collisions.
 
+HTTP also requires one strictly parsed loopback `Host`, or an authority explicitly granted in
+`http.trustedAuthorities` in `~/.aify/config.json`, before body consumption or dispatch. Existing browser
+checks remain. See [forwarded endpoint configuration](HTTP-AUTHORITY.md); this does not change the bind.
+
 ## `GET /health`
 
 ```json
