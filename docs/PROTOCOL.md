@@ -240,6 +240,13 @@ than bookkeeping.
 the target dies immediately and no handler runs. So every external stop is the ungraceful one, and the
 record is not a backstop — it is the whole mechanism.
 
+## `POST /agents/:id/model-selection`
+
+An admitted Claude producer reports an explicit launch argument or a completed native choice. The
+receiver changes only the existing definition's model through DefinitionStore CAS; it never changes
+the running model. The strict body, instance/lifetime admission, native position fence, response
+semantics and restart/delivery limits are specified in [MODEL-SELECTION-v1.md](MODEL-SELECTION-v1.md).
+
 ## Explicit starts and resident startup acknowledgment
 
 An explicit managed Start or Spawn also clears a matching already-running agent's host stop.

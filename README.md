@@ -192,6 +192,10 @@ aify-env agents import            # what it would define from the agents your se
 
 A changed model reaches each agent at its next start, including a Claude session that resumes (0.9.1).
 
+Explicit Claude launch arguments and completed native `/model` choices can also write back only the
+definition's model through the existing store. They never switch a running agent. See the
+[model-selection contract](docs/MODEL-SELECTION-v1.md) for ordering, unresolved choices and delivery limits.
+
 - **One writer.** Only the store behind `aify-env agents` writes those files, under a lock, with every
   write recoverable after a crash. `agents unlock` clears a lock whose writer is gone; `agents recover`
   settles an interrupted write the store could not prove either way.

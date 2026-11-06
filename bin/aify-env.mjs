@@ -86,6 +86,7 @@ import { SessionFolders, sessionsRoot } from "../lib/session-folders.mjs";
 import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
 import { AgentStateSender, REPORT_EVERY_MS } from "../lib/agent-state-sender.mjs";
 import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
+import { ModelSelections } from "../lib/model-selections.mjs";
 import { advertisementPathFor, pluginsForServices } from "../lib/plugins/index.mjs";
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
 import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
@@ -436,6 +437,7 @@ const server = createServer(createDaemonHttp({
         runner,
         turnEvents: agentState?.turnEvents,
         gateways: agentState?.gateways,
+        modelSelections: agentState?.modelSelections,
         stateHost: agentState?.host ?? null,
         lifecycle: agentState?.lifecycle ?? null,
         sessionFolders: agentState?.sessionFolders ?? null,
@@ -638,6 +640,9 @@ server.listen(port, HOST, async () => {
   try { agentState = bootDaemonAgentState({ aifyHome: join(homedir(), ".aify"), context: instanceContext,
     url: `http://${HOST}:${bound.port}`, report: logLine, onAgentEnded: (id) => agentState?.sessionFolders?.notice(id) });
     agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine, onApplied: evaluateAgentState });
+    agentState.modelSelections = new ModelSelections({ host: agentState.host, instance: agentState.instance,
+      residents: agentState.residents, definitions: definitionStore,
+      installed: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map(row => row.client)), report: logLine });
     agentState.lifecycle = createAgentLifecyclePorts({ aifyHome: join(homedir(), ".aify"), owner: agentState.lifecycleOwner,
       machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(),
         env: process.env, exists: existsSync, isWsl: hostIsWsl() }).machineId,
