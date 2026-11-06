@@ -25,6 +25,7 @@ import { test } from "node:test";
 // file failed -- a reminder that the two are different objects with the same word on them.
 import { ProcessRegistry } from "../lib/process-registry.mjs";
 import { Runner } from "../lib/runner.mjs";
+import { spawnedPipe } from './fixtures/spawned-pipe.mjs';
 
 const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
 const spec = (script, label = "") => ({
@@ -189,7 +190,7 @@ test("a stop the reaper's sweep overtakes is still recorded `stopped`; a reap wi
   const spawnProcess = () => {
     const child = Object.assign(new EventEmitter(), { pid: nextPid++, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} }, kill() {} });
     alive.set(child.pid, true); children.set(child.pid, child);
-    return child;
+    return spawnedPipe(child);
   };
   let releaseKill;
   const held = new Promise((resolve) => { releaseKill = resolve; });
@@ -229,7 +230,7 @@ test("a stop that waits for the exit records `stopped` without the code or signa
   let child, alive = true;
   const spawnProcess = () => {
     child = Object.assign(new EventEmitter(), { pid: 4242, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} }, kill() {} });
-    return child;
+    return spawnedPipe(child);
   };
   const runner = new Runner({ openTerminal: null, spawnProcess, isAlive: () => alive, stopExitWaitMs: 1000,
     killTree: async () => { alive = false; child.emit("close", 1, "SIGTERM"); } });

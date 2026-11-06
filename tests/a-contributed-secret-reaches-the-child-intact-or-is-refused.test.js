@@ -24,6 +24,7 @@ import { automaticStartAdmission } from "../lib/plugins/aify-comms/automatic-sta
 import { workspaceWithinRoots } from "../lib/plugins/aify-comms/claim.mjs";
 import { createHandleBook, runOneControl } from "../lib/plugins/aify-comms/terminal-controls.mjs";
 import { Runner } from "../lib/runner.mjs";
+import { spawnedPipe } from './fixtures/spawned-pipe.mjs';
 import { PluginProcesses } from "../lib/service-plugins.mjs";
 import { toolchainDirsFor } from "../lib/shell-toolchain.mjs";
 import { buildStartSpec } from "../lib/start-spec.mjs";
@@ -67,7 +68,7 @@ async function start({ name, value = VALUE, branch = "terminal", buildSpec = dir
     children.push({ command, args, env: options.env });
     const child = new EventEmitter();
     Object.assign(child, { pid: 4242, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} }, kill() {} });
-    return child;
+    return spawnedPipe(child);
   };
   const runner = new Runner({ ownedFile: path.join(root, "env-processes.json"), openTerminal: branch === "terminal" ? openTerminal : null,
     spawnProcess, loadCheckpoint: async () => null,

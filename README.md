@@ -484,6 +484,7 @@ npm test -- tests/one.test.js    # one file, under the same throwaway TEMP and H
 Run a single file through `npm test --`, not `node --test`. The runner points TEMP and HOME at a directory it deletes,
 and a file started directly leaves its fixtures in the real Temp.
 
+Every review runs the [whole-tree gates](docs/WHOLE-TREE-TESTS.md) alongside its changed-behavior tests.
 Changes to `bin/aify-env.mjs` also run the complete [bootstrap source-reader gate](docs/BOOT-SOURCE-TESTS.md),
 not just tests named after the changed feature.
 

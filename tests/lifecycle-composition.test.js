@@ -1,3 +1,4 @@
+import { spawnedPipe } from './fixtures/spawned-pipe.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,7 +17,7 @@ function fixture(t, mode = 'managed') {
  const probe = pids => new Map(pids.map(pid=>[pid,{alive,createdAtUs:birth,commandLine:'bash C:/fixture/hermes-aify'}]));
  const host = new AgentStateHost({aifyHome:home,instance:'owner',probe,nowUs:()=>1700000000001000}); host.boot();
  const child = new EventEmitter(); child.pid=424242; child.stdout=new EventEmitter(); child.stderr=new EventEmitter(); child.stdin={write(){}}; child.kill=()=>kills.push('child');
- const spawned=[]; const runner = new Runner({openTerminal:null,spawnProcess:(command,args,options)=>{spawned.push(options?.env);return child;},managedHost:()=>({host,instance:'owner',url:'http://127.0.0.1:12345'}),isAlive:()=>alive,killTree:async()=>kills.push('tree')});
+ const spawned=[]; const runner = new Runner({openTerminal:null,spawnProcess:(command,args,options)=>{spawned.push(options?.env);return spawnedPipe(child);},managedHost:()=>({host,instance:'owner',url:'http://127.0.0.1:12345'}),isAlive:()=>alive,killTree:async()=>kills.push('tree')});
  const definitions = new DefinitionStore({dir:path.join(home,'definitions')});
  const ports = createAgentLifecyclePorts({aifyHome:home,machineId:'machine',stateHost:host,runner,definitions,probe,isAlive:()=>alive,killTree:async()=>{kills.push('resident');alive=false;},settleMs:0,installed:async()=>new Set(['hermes']),buildSpec:async()=>({service:'fixture',fileText:'#!/bin/bash\nHARNESS_WRAPPER_VERSION="1.0"',command:'fixture',args:[],env:{}})});
  const agent={id:'a',name:'Fixture',role:'worker',harness:'hermes',mode,workspace:home,model:'',effort:'',instructions:'',env:{},herdrSpace:false};

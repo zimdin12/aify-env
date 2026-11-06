@@ -1,3 +1,4 @@
+import { spawnedPipe } from './fixtures/spawned-pipe.mjs';
 // R1: replay the original service control after its first child has exited and the terminal was reused.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -17,7 +18,7 @@ test('replayed Stop stays bound to H1 after the same terminal starts H2', async 
   });
   let next = 0;
   const runner = new Runner({ openTerminal: null, loadCheckpoint: null, ownedFile: null,
-    spawnProcess: () => children[next++], isAlive: () => true, stopExitWaitMs: 1,
+    spawnProcess: () => spawnedPipe(children[next++]), isAlive: () => true, stopExitWaitMs: 1,
     killTree: async pid => { effects.push(['tree', pid]); } });
   const spec = { service: 'fixture', command: 'fixture', env: {}, fileText: '#!/bin/bash\nHARNESS_WRAPPER_VERSION="1.0"' };
   const handles = createHandleBook(), processes = new PluginProcesses(runner);

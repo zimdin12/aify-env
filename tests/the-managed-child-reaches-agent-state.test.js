@@ -43,6 +43,7 @@ function fixture(t, { pipes = false, immediate = false, throws = false, checkpoi
       onData() {}, onExit(fn) { child.finish = fn; if (immediate) fn({ exitCode: 0 }); },
       kill() {}, destroy() {}, write() {}, resize() {} });
     children.push(child);
+    if (pipes) queueMicrotask(() => child.emit("spawn"));
     return child;
   };
   const runner = new Runner({ openTerminal: pipes ? null : spawn, spawnProcess: spawn, loadCheckpoint: checkpoint,
@@ -173,13 +174,12 @@ test("stop request is not death; custody stays until captured finish", async (t)
   assert.equal(f.host.current("lead", GIVEN).process.verified, "no", "captured finish ends retained lifetime");
 });
 
-test("pipe creation without a PID never publishes yes", async (t) => {
+test("pipe creation without a PID rejects and never publishes yes", async (t) => {
   const f = fixture(t, { pipes: true, missingPid: true });
-  const handle = await f.runner.start(f.spec());
+  await assert.rejects(f.runner.start(f.spec()), error => error.name === "SpawnFailure" && error.code === "UNKNOWN");
   assert.equal(f.host.current("lead", GIVEN).process.verified, "no", "missing PID is not successful child creation");
-  f.children[0].emit("error", new Error("fake creation failure"));
-  assert.equal(await handle.exited, -1);
-  f.end(f.children[0]);
+  assert.deepEqual(f.runner.list(), []);
+  f.children[0].emit("close", -1, "");
 });
 
 test("pipe error is not death; only later close ends its captured lifetime", async (t) => {

@@ -77,6 +77,7 @@ wrong and no reason why.
 |---|---|
 | `400` | no `service` (every process has an owner), no `launcher`, or a body that is not an object |
 | `403` | the launcher is refused by the allowlist, **or could not be read at all** |
+| `422` | OS process creation failed; `{error: "spawn failed: ENOENT"}` names the sanitized errno |
 | `201` | started |
 
 **Registration is not authorisation.** A request from a registered service is allowlist-checked
@@ -84,6 +85,12 @@ exactly like any other: a host that runs whatever a known caller asks for is one
 away from running anything, and "it came from aify-comms" says nothing about the file being started.
 
 **A launcher that cannot be read is refused.** "I could not open it" must never become "go ahead".
+
+Piped starts wait for the OS `spawn` event before registry, managed-lifetime or owned-record success
+bookkeeping. A rejected creation records no PID zero, even transiently. In-process callers receive
+the same typed `SpawnFailure` with its sanitized `code`; unrelated failures are not converted to 422.
+A `201` confirms creation, not runtime readiness: a successfully spawned process may exit immediately.
+Existing lifecycle unknown-execution receipts and reservation custody remain unchanged.
 
 ## How a launcher is actually started
 

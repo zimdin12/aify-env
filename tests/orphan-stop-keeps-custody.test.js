@@ -1,3 +1,4 @@
+import { spawnedPipe } from './fixtures/spawned-pipe.mjs';
 // R2: exercise orphan cleanup through the ordinary control pass, independently for ended rows and 404.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -18,7 +19,7 @@ async function fixture(route, outcome) {
     if (outcome === 'verified' || outcome === 'replacement') child.emit('close', null, 'SIGTERM');
   };
   const runner = new Runner({ openTerminal: null, loadCheckpoint: null, ownedFile: null,
-    spawnProcess: () => child, isAlive: () => true, stopExitWaitMs: 1,
+    spawnProcess: () => spawnedPipe(child), isAlive: () => true, stopExitWaitMs: 1,
     killTree: async () => { effects.push('tree'); if (outcome === 'rejected') throw Error('uncertain tree kill'); } });
   const handle = await runner.start({ service: 'fixture', command: 'fixture', env: {},
     fileText: '#!/bin/bash\nHARNESS_WRAPPER_VERSION="1.0"' });

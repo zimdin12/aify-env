@@ -1,3 +1,4 @@
+import { spawnedPipe } from './fixtures/spawned-pipe.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -25,7 +26,7 @@ async function managed(t, isAlive) {
   const effects = [], probes = [];
   child.stdin = { write() {} }; child.kill = () => effects.push('child');
   const runner = new Runner({ openTerminal: null, loadCheckpoint: null, ownedFile: null,
-    spawnProcess: () => child, managedHost: () => ({ host, instance: 'owner', url: 'http://127.0.0.1:12345' }),
+    spawnProcess: () => spawnedPipe(child), managedHost: () => ({ host, instance: 'owner', url: 'http://127.0.0.1:12345' }),
     isAlive: pid => { probes.push(pid); return isAlive(pid); },
     killTree: async pid => { assert.equal(pid, child.pid); effects.push('tree'); } });
   const handle = await runner.start({ agentId: 'a', service: 'fixture', command: 'fixture', args: [], env: {},
