@@ -120,6 +120,38 @@ test('joint-switch inverse: a surviving observed legacy predecessor keeps manage
   assert.ok(f.logs.some(line => line.includes('operator') && line.includes('owning terminal')));
 });
 
+// Initial-capture and surviving-owner tests do not cover UNKNOWN at the final writer-fence decision.
+// Each independent case catches E3 (state !== 'present') admitting starts and writes on uncertainty.
+for (const unknown of ['throwing probe', 'live without usable birth']) {
+  test(`a ${unknown} at the incumbent writer fence refuses starts until a later positive gone observation`, async t => {
+    const f = fixture(t, { surviving: true }), before = fs.readFileSync(f.file);
+    await f.recovery.supersede(await f.legacyHolder());
+    const probe = f.identity.probe.bind(f.identity);
+    let uncertain = true, fenceProbes = 0;
+    f.identity.probe = async (pids, options) => {
+      if (uncertain && pids.length === 1 && pids[0] === OWNER) {
+        fenceProbes++;
+        if (unknown === 'throwing probe') throw Error('fixture fence observation failed');
+        return new Map([[OWNER, { alive: true, createdAtUs: null, commandLine: 'node aify-env.mjs' }]]);
+      }
+      return probe(pids, options);
+    };
+    assert.equal((await f.recovery.recover()).ready, false, 'unknown original writer cannot open the fence');
+    assert.equal(f.recovery.status().ready, false);
+    await assert.rejects(f.runner.start(f.spec), RecoveryPending);
+    assert.equal((await f.raw()).status, 503);
+    assert.equal(f.spawns.length, 0, 'uncertainty admits neither managed nor raw spawns');
+    assert.deepEqual(fs.readFileSync(f.file), before, 'uncertainty cannot permit successor record writes');
+    assert.ok(fenceProbes >= 3, 'boot, managed and raw requests actually reach the unknown fence observation');
+    uncertain = false;
+    f.states.delete(OWNER);
+    await assert.doesNotReject(f.runner.start(f.spec), 'an explicit start rechecks and admits after positive original-owner absence');
+    assert.equal(f.recovery.status().ready, true);
+    assert.equal((await f.raw()).status, 201);
+    assert.equal(f.spawns.length, 2);
+  });
+}
+
 test('an explicit later start observes legacy predecessor death, survives its final clear and preserves another live owner', async t => {
   // Catches an indefinite fence and stale keep-array replacement; no periodic timer is needed.
   const f = fixture(t, { surviving: true });

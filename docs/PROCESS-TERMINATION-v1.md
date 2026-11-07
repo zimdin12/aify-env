@@ -89,6 +89,10 @@ probe, fences writes until that original writer is gone, and verifies matching c
 retirement; see [owned-record recovery](OWNED-PROCESS-RECOVERY-v1.md). This does not authenticate a
 malicious local health responder, backfill old tokens or add gateway/Linux wall-clock authority.
 
+Linux incumbent takeover replaces the old killTree group-then-root signals with birth-verified TERM
+then KILL to the incumbent root only, leaving managed workers to its own shutdown and record recovery;
+Windows takeover still ends the reachable held tree.
+
 ## Qualification boundary
 
 Existing synthetic-PID piped fixtures explicitly select the legacy Win32 syscall profile, retaining their
