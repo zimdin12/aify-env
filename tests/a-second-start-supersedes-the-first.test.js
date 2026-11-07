@@ -58,7 +58,7 @@ function sealed(label) {
 function longLauncher(dir) {
   const file = path.join(dir, "long-aify");
   fs.writeFileSync(file, ["#!/usr/bin/env bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', "sleep 120", ""]
-    .join(String.fromCharCode(10)));
+    .join(String.fromCharCode(10)), { mode: 0o755 });
   return file;
 }
 

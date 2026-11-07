@@ -40,7 +40,9 @@ test("an explicit 1 turns it on, whitespace and all", () => {
   assert.equal(useConptyDll({ AIFY_ENV_CONPTY_DLL: " 1 " }), true);
 });
 
-test("the DLL this switch selects actually ships with the package", () => {
+test("the DLL this switch selects actually ships with the package", {
+  skip: process.platform !== "win32" && "Windows-only: ConPTY DLL artifact",
+}, () => {
   // Without this the flag would be a lever that silently does nothing, or worse, breaks every spawn on
   // the host it is flipped on. Checked here rather than trusted: the package could be reinstalled from
   // a build that omits it.
