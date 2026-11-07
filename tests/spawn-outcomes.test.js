@@ -49,7 +49,7 @@ test('HTTP missing-interpreter spawn returns 422 with errno, not false 201 or ge
 
 test('PluginProcesses propagates the same typed rejection and never opens a success pane', async t => {
   const f = fixture(t); let opened = 0;
-  const processes = new PluginProcesses(f.runner, { onStarted: () => opened++ });
+  const processes = new PluginProcesses(f.runner, { cwdRoots: [f.home], currentCwd: () => f.home, onStarted: () => opened++ });
   const outcome = await failed(processes.start(f.spec)); await tick();
   assert.deepEqual({ diagnostic: diagnostic(outcome), opened, effects: f.effects() },
     { diagnostic: refused('ENOENT'), opened: 0, effects: f.untouched });
@@ -63,9 +63,10 @@ async function lifecycle(t) {
   await definitions.set('fixture', { id: 'fixture', name: 'Fixture', role: 'worker', harness: 'claude', mode: 'managed',
     workspace: f.home, model: '', effort: '', instructions: '', env: {}, herdrSpace: false }, { installed: new Set(['claude']) });
   const listing = await definitions.list(), row = listing.definitions[0];
-  const runner = { start: async spec => { const outcome = await failed(f.runner.start(spec)); captured.push(outcome.error); if (outcome.error) throw outcome.error; return outcome.value; } };
+  const runner = { start: async (spec, options) => { const outcome = await failed(f.runner.start(spec, options)); captured.push(outcome.error); if (outcome.error) throw outcome.error; return outcome.value; } };
   const ports = createAgentLifecyclePorts({ aifyHome: f.home, machineId: 'fixture', stateHost: host, runner, definitions,
-    probe: () => new Map(), installed: async () => new Set(['claude']), buildSpec: async () => f.spec });
+    probe: () => new Map(), installed: async () => new Set(['claude']), buildSpec: async () => f.spec,
+    cwdRoots: [f.home], currentCwd: () => f.home });
   const request = { id: 'first', agentId: 'fixture', machineId: 'fixture', storeId: listing.storeId,
     expectedIncarnation: row.incarnation, expectedRevision: row.revision, expectedLifetime: null, action: 'start', requestedBy: 'fixture' };
   return { ...f, ports, request, captured, launch: { agentId: 'fixture', runtime: HARNESS_RUNTIME[row.agent.harness], definition: { storeId: listing.storeId, incarnation: row.incarnation, revision: row.revision } } };

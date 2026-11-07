@@ -151,22 +151,22 @@ test("THE CALL SITE: PluginProcesses runs the opener after the start, and surviv
   const seen = [];
   const runner = { start: async spec => ({ id: spec.id, terminal: true }) };
 
-  const withOpener = new PluginProcesses(runner, { onStarted: record => { seen.push(record); } });
+  const withOpener = new PluginProcesses(runner, { cwdRoots: [process.cwd()], onStarted: record => { seen.push(record); } });
   assert.deepEqual(await withOpener.start({ id: "a" }), { id: "a", terminal: true });
   assert.deepEqual(seen.map(r => r.id), ["a"], "the start never reached the opener");
 
   // THE NAME AN OPERATOR IS LOOKING FOR. A started record carries the process id and not always the
   // agent's name, and a space called `aify-env 68583473-ccaa-...-p1` helps nobody find `sc-tester`.
-  const named = new PluginProcesses(runner, { onStarted: record => { seen.push(record); } });
+  const named = new PluginProcesses(runner, { cwdRoots: [process.cwd()], onStarted: record => { seen.push(record); } });
   await named.start({ id: "d", label: "sc-tester" });
   assert.equal(seen.at(-1).label, "sc-tester", "the agent's name never reached the space");
 
   // A THROWING OPENER MUST NOT BREAK A RUNNING AGENT. The worker is already up by this point.
-  const hostile = new PluginProcesses(runner, { onStarted: () => { throw new Error("no herdr"); } });
+  const hostile = new PluginProcesses(runner, { cwdRoots: [process.cwd()], onStarted: () => { throw new Error("no herdr"); } });
   assert.deepEqual(await hostile.start({ id: "b" }), { id: "b", terminal: true });
 
   // NEGATIVE CONTROL: with no opener the start is exactly what it always was.
-  const plain = new PluginProcesses(runner);
+  const plain = new PluginProcesses(runner, { cwdRoots: [process.cwd()] });
   assert.deepEqual(await plain.start({ id: "c" }), { id: "c", terminal: true });
 });
 
@@ -176,6 +176,7 @@ test("space: false STARTS THE SAME PROCESS WITH NO SPACE, and the Runner never s
   const hooked = [];
   const runner = { start: async spec => { given.push(spec); return { id: spec.id, terminal: true }; } };
   const processes = new PluginProcesses(runner, {
+    cwdRoots: [process.cwd()],
     onStarted: record => { hooked.push(`opened ${record.id}`); },
     prepare: spec => { hooked.push(`prepared ${spec.id}`); return spec; },
   });
@@ -337,7 +338,7 @@ test("A WORKER'S OWN PANE SHOWS ITS STATUS, and its launcher is told which pane 
 
   let started = null;
   const runner = { start: async (spec) => { started = spec; paneFile = spec.env.AIFY_HERDR_PANE_FILE; return { id: "proc-1", terminal: true }; } };
-  const processes = new PluginProcesses(runner, { onStarted: openPane, prepare: openPane.prepare });
+  const processes = new PluginProcesses(runner, { cwdRoots: [process.cwd()], onStarted: openPane, prepare: openPane.prepare });
   await processes.start({ id: "term-1", label: "lc-lead", launcher: "/home/op/.local/bin/claude-aify", env: inherited });
 
   // THE HERDR ITSELF STAYS REACHABLE, because the state hook calls it.
@@ -398,7 +399,7 @@ test("THE DAEMON BUILDS ONE, read rather than run, because importing it STARTS a
   assert.match(source, /paneOpenerFor\(\{/, "the daemon never builds a pane opener");
   const bootstrap = readFileSync(new URL("../lib/daemon-plugin-bootstrap.mjs", import.meta.url), "utf8");
   assert.match(source, /registry: servicePlugins, runner, paneOpener,/, "the daemon never hands its opener to the plugin assembly");
-  assert.match(bootstrap, /new PluginProcesses\(runner, \{ onStarted: paneOpener, prepare: paneOpener\?\.prepare \}\)/, "the opener reaches no start, or the worker keeps the daemon's pane identity");
+  assert.match(bootstrap, /new PluginProcesses\(runner, \{ onStarted: paneOpener, prepare: paneOpener\?\.prepare, cwdRoots, windows, currentCwd \}\)/, "the opener or host authority reaches no start, or the worker keeps the daemon's pane identity");
   // AND THE EXIT IT CLOSES ON COMES FROM THE RUNNER. An opener built without `watchExit` opens every
   // pane and closes none, which is invisible to every test above -- they inject their own.
   assert.match(source, /watchExit: \(id, on\) => runner\.subscribe\(id, \(\) => \{\}, on\)/, "the opener learns no exit");

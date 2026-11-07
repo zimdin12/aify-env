@@ -156,7 +156,8 @@ for (const [kind, write] of Object.entries(CONCURRENT)) {
       loadCheckpoint: async () => { loading.resolve(); await release.promise; return null; },
     });
     const { api } = host(launch);
-    const pending = control(store, { api, processes: new PluginProcesses(runner) },
+    // The host grant is the root and platform control() judges this launch against.
+    const pending = control(store, { api, processes: new PluginProcesses(runner, { cwdRoots: ["C:/work"], windows: true }) },
       () => ({ spec: { service: "aify-comms", fileText: LAUNCHER_TEXT, command: "fake", args: [], cwd: "C:/work", env: {} } }));
     await loading.promise;
     const writing = write(new DefinitionStore({ dir, lockWaitMs: 5000 }));

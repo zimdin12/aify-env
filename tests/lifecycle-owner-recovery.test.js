@@ -39,6 +39,7 @@ async function fixture(t) {
   let current = null, effects = 0;
   const ports = (owner, buildSpec = async () => ({ command: 'injected-no-child' })) => createAgentLifecyclePorts({
     aifyHome: home, owner, machineId: 'fixture-machine', definitions,
+    cwdRoots: [home], currentCwd: () => home,
     stateHost: { rawIdentity: () => ({ current, unknown: false, conflict: false }) }, buildSpec,
     installed: async () => new Set(['hermes']),
     runner: { start: () => { effects++; current = { lifetime: 'fixture-lifetime', handle: 'fixture-handle', pid: 123 }; } },

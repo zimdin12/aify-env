@@ -29,6 +29,7 @@ function fixture() {
   };
   const io = {
     registry, runner, paneOpener,
+    cwdRoots: () => ['C:/fixture'], windows: true, currentCwd: () => 'C:/fixture',
     credential: async (asking) => { assert.equal(asking, entry); return key; },
     log: (line) => events.push(["log", line]),
     makeShared: () => { events.push("shared"); return shared; },
@@ -91,6 +92,17 @@ test("registry following still coalesces an in-flight beat and permits the next 
   follow([f.entry]);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(f.registry.names(), ["fixture"]);
+});
+
+test('assembled plugin host receives live host grants independently of shared service context', async () => {
+  const f = fixture(); let roots = ['C:/fixture'];
+  await startDaemonPlugins({ ...f.io, cwdRoots: () => roots });
+  const healthy = await f.host.processes.start({ cwd: 'C:/fixture/project' }).then(() => true, () => false);
+  assert.equal(healthy, true, 'the host grant admits useful work through the assembled port');
+  roots = [];
+  const denied = await f.host.processes.start({ cwd: 'C:/fixture/project' }).then(() => null, error => error);
+  assert.equal(denied?.code, 'LAUNCH_ROOTS_REFUSED');
+  assert.equal(f.events.filter(event => Array.isArray(event) && event[0] === 'start').length, 1, 'removed grant cannot start another process');
 });
 
 test("the host a plugin is started with offers the daemon's spawnEnv, asked when a start asks", async () => {

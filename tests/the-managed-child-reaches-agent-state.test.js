@@ -72,7 +72,8 @@ for (const pipes of [false, true]) test(`actual ${pipes ? "HTTP pipes" : "plugin
     const result = await runOneControl({ control: { id: "ctl", terminalId: "term", action: "start" },
       api: { launch: async () => ({ launch: { agentId: "lead", argv: ["claude-aify"], cwd: "/fixture", env: { AIFY_ENV_URL: "wrong" }, herdrSpace: false } }),
         reportControl: async () => {}, terminalOutput: async () => {} },
-      processes: new PluginProcesses(f.runner, { prepare: () => { throw new Error("decoration"); } }),
+      // The host grant is the same root and platform this control is judged against, not the Runner's fake platform.
+      processes: new PluginProcesses(f.runner, { prepare: () => { throw new Error("decoration"); }, cwdRoots: ["/fixture"], windows: false }),
       handles: createHandleBook(), cwdRoots: ["/fixture"], windows: false, withinRoots: () => true,
       resolveCandidates: () => ["/fixture/claude-aify"], baseEnv: { PATH: "toolchain", aify_lifetime: "alias", HERDR_PANE_ID: "daemon" },
       buildSpec: (input) => buildStartSpec(input, { readFile: () => TEXT, platform: "linux" }) });

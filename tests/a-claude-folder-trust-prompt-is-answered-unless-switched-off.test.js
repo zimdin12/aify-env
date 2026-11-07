@@ -132,7 +132,8 @@ test("THE REAL PATH: a carried claude terminal at the dialog gets DOWN, then Ent
   };
   const runner = new Runner({ isAlive: () => true, killTree: async () => {}, openTerminal: () => terminal,
     managedHost: () => ({ instance: "default", url: "http://127.0.0.1:1", host: { startManaged() {}, endManaged: () => ({ problem: "" }) } }) });
-  const processes = new PluginProcesses(runner);
+  // The host grant is the fixture's own: launch cwd and root "/w", POSIX; SPEC carries no cwd, so the fallback is "/w" too.
+  const processes = new PluginProcesses(runner, { cwdRoots: ["/w"], windows: false, currentCwd: () => "/w" });
   const log = [];
   const answers = new ScreenAnswers({ config: ON, write: (handle, keys) => processes.write(handle, keys), log: (m) => log.push(m) });
   const api = {
@@ -209,7 +210,8 @@ test("THE PLUGIN WIRES IT: the comms plugin answers on a terminal it started, fr
     setTimeoutImpl: () => 0, clearTimeoutImpl: () => {},
   });
   try {
-    await plugin.start(new PluginHost({ processes: new PluginProcesses(runner), credential: async () => "" }));
+    await plugin.start(new PluginHost({ processes: new PluginProcesses(runner, { cwdRoots: async () => [dir], windows: false }),
+      credential: async () => "" }));
     for (const until = Date.now() + 3000; Date.now() < until && !listeners.length;) await new Promise((r) => setTimeout(r, 5));
     assert.equal(listeners.length, 1, `the plugin never carried the terminal it started: ${JSON.stringify(reports)}`);
     listeners[0]("output");

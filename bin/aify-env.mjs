@@ -651,6 +651,7 @@ server.listen(port, HOST, async () => {
         env: process.env, exists: existsSync, isWsl: hostIsWsl() }).machineId,
       stateHost: agentState.host, residents: agentState.residents, runner, definitions: definitionStore, onStopChange: evaluateAgentState,
       processes: agentState.processes,
+      cwdRoots: () => LAUNCH_ROOTS.current(), windows: process.platform === 'win32',
       installed: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) });
   }
   catch (error) { process.stderr.write(`[aify-env] agent state boot failed: ${error.message}\n`); process.exit(2); }
@@ -707,6 +708,7 @@ server.listen(port, HOST, async () => {
   try {
     followServices = await startDaemonPlugins({
       registry: servicePlugins, runner, paneOpener,
+      cwdRoots: () => LAUNCH_ROOTS.current(), windows: process.platform === 'win32',
       // `field`: another of the entry's stored credentials (1e6101b; pluginCredential, plugin-bootstrap.mjs).
       credential: async (service, field) => resolvePluginCredential(service, field),
       log: (message) => logLine(message),

@@ -105,7 +105,9 @@ async function startedPlugin({ endpoint = "http://old.invalid", cwdRoots = null,
   });
   const logs = [];
   live.push(plugin);
-  await plugin.start(new PluginHost({ processes: new PluginProcesses(runner), log: (line) => logs.push(line) }));
+  // The host grant is this fixture's workspace root, never the caller's cwdRoots: those count and park their reads.
+  const processes = new PluginProcesses(runner, { cwdRoots: [root], windows: process.platform === "win32" });
+  await plugin.start(new PluginHost({ processes, log: (line) => logs.push(line) }));
   return { plugin, api, runner, logs };
 }
 

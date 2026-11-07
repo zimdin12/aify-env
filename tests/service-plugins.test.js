@@ -72,7 +72,8 @@ test("CONTROL: the fake Runner really has the methods the view withholds", () =>
 
 test("the view passes calls straight through, holding no state of its own", async () => {
   const runner = fakeRunner();
-  const view = new PluginProcesses(runner);
+  // The start names no cwd: the host grant is the default folder it falls back to, stated.
+  const view = new PluginProcesses(runner, { cwdRoots: [process.cwd()] });
   await view.start({ launcher: "x" });
   view.write("p1", "hello");
   view.resize("p1", 80, 24);

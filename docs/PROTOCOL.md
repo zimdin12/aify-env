@@ -86,6 +86,12 @@ away from running anything, and "it came from aify-comms" says nothing about the
 
 **A launcher that cannot be read is refused.** "I could not open it" must never become "go ahead".
 
+This raw local route deliberately does **not** enforce launch roots: it is the operator's `aify-env run`
+and launcher `--shared` path. Cooperative service starts through `PluginProcesses` and the configured
+core lifecycle are bounded separately, including after checkpoint/admission waits; see
+[service launch roots](SERVICE-LAUNCH-ROOTS.md). A local process can call this route or edit host grants,
+so launch roots are not a sandbox against that process. The provider's watched-folder grant is independent.
+
 Piped starts wait for the OS `spawn` event before registry, managed-lifetime or owned-record success
 bookkeeping. A rejected creation records no PID zero, even transiently. In-process callers receive
 the same typed `SpawnFailure` with its sanitized `code`; unrelated failures are not converted to 422.

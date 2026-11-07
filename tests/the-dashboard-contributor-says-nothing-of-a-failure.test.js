@@ -61,7 +61,9 @@ async function start(contributors, runner) {
   const result = await runOneControl({
     control: { id: "ctl-1", terminalId: "term-1", action: "start" }, handles: createHandleBook(), log: (line) => logs.push(line),
     api: new CommsApi({ endpoint: "http://comms.invalid", credential: async () => "k", identity: { bridgeId: "b" }, fetchImpl }),
-    processes: new PluginProcesses(runner), cwdRoots: ["C:/work"], windows: true, withinRoots: workspaceWithinRoots, baseEnv: {},
+    // The host grant is the same root and platform this control is judged against.
+    processes: new PluginProcesses(runner, { cwdRoots: ["C:/work"], windows: true }),
+    cwdRoots: ["C:/work"], windows: true, withinRoots: workspaceWithinRoots, baseEnv: {},
     buildSpec: ({ launcher, args, cwd, env, label }) => ({ spec: { launcher, args, cwd, env, label, fileText: "#!" } }),
     resolveCandidates: () => ["C:/bin/claude-aify"],
     // Main's admission contract (0.9): `complete` runs once the process is produced.

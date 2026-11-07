@@ -191,7 +191,8 @@ test("THROUGH THE OPENER: a started agent's pane is told its word, and nothing m
     callAsync: async (_bin, argv) => { sent.push(argv); return {}; },
   });
   const runner = { start: async () => ({ id: "proc-1", terminal: true }) };
-  const processes = new PluginProcesses(runner, { onStarted: openPane, prepare: openPane.prepare });
+  // The start names no cwd and no workspace root: the grant is the default folder it falls back to, stated.
+  const processes = new PluginProcesses(runner, { onStarted: openPane, prepare: openPane.prepare, cwdRoots: [process.cwd()] });
   await processes.start({ id: "term-1", label: "lead", agentId: "lead", launcher: "/bin/claude-aify", env: {} });
   await openPane.report();
   assert.equal(sync.filter((argv) => argv[1] === "report-agent").length, 1, "the pane was not claimed as it opened");

@@ -139,7 +139,9 @@ async function startDefinedWorker(t, value) {
     } }) });
   const registry = new ServicePlugins();
   const logs = [];
-  const host = new PluginHost({ processes: new PluginProcesses(runner), environmentId: "", log: (line) => logs.push(line),
+  // The host grant is the root and platform the comms plugin below advertises and launches in.
+  const processes = new PluginProcesses(runner, { cwdRoots: async () => [slashed(root)], windows: process.platform === "win32" });
+  const host = new PluginHost({ processes, environmentId: "", log: (line) => logs.push(line),
     credential: async (service, field) => (field === "secretsCredentialRef" ? "fetch-key-for-the-secrets-route-01" : "api-key-for-the-test-only-0123"),
     spawnEnv: () => registry.capabilities("spawnEnv") });
   t.after(async () => {

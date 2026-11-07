@@ -58,7 +58,8 @@ test("POSITIVE CONTROL: the headless emulator is installed, so a real checkpoint
 
 test("the checkpoint hands over its rows as text, with the title and progress the process set", async () => {
   const terminal = fakeTerminal({ cols: 40, rows: 6 });
-  const processes = new PluginProcesses(new Runner({ isAlive: () => true, killTree: async () => {}, openTerminal: () => terminal }));
+  // SPEC names no cwd and this test no root: the grant is the Runner's own default folder, stated.
+  const processes = new PluginProcesses(new Runner({ isAlive: () => true, killTree: async () => {}, openTerminal: () => terminal }), { cwdRoots: [process.cwd()] });
   const { id } = await processes.start(SPEC);
 
   terminal.emit(`${title("✳ Claude Code")}${ESC}]9;4;0;${BEL}hello   \r\n日本 x\r\n`);
@@ -98,7 +99,8 @@ async function managedTerminal(runtime) {
     managedHost: () => ({ instance: "default", url: "http://127.0.0.1:1",
       host: { startManaged() {}, endManaged: () => ({ problem: "" }) } }),
   });
-  const processes = new PluginProcesses(runner);
+  // The host grant is the fixture's own: launch cwd and root "/w", POSIX; SPEC carries no cwd, so the fallback is "/w" too.
+  const processes = new PluginProcesses(runner, { cwdRoots: ["/w"], windows: false, currentCwd: () => "/w" });
   const handles = createHandleBook();
   const frames = [];
   const api = {

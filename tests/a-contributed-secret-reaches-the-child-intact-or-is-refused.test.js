@@ -82,7 +82,9 @@ async function start({ name, value = VALUE, branch = "terminal", buildSpec = dir
   const result = await runOneControl({
     control: { id: "ctl-1", terminalId: "term-1", action: "start" }, handles: createHandleBook(),
     api: { async launch() { return { launch }; }, async reportControl(id, patch) { reports.push(patch); }, async terminalOutput() { return {}; } },
-    processes: new PluginProcesses(runner), cwdRoots: [slashed(root)], windows: WINDOWS, withinRoots: workspaceWithinRoots,
+    // The host grant is the same root and platform this control is judged against.
+    processes: new PluginProcesses(runner, { cwdRoots: [slashed(root)], windows: WINDOWS }),
+    cwdRoots: [slashed(root)], windows: WINDOWS, withinRoots: workspaceWithinRoots,
     buildSpec, resolveCandidates: () => [launch.argv[0]], baseEnv: { KEEP: "inherited" },
     admitStart: automaticStartAdmission({ definitions: store, agents }), definitionFor: (l) => store.boundReading(l),
     spawnEnv: () => [{ service: "aify-dashboard", field: "secrets", async contribute() { return { env: { [name]: value } }; } }],

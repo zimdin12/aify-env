@@ -96,7 +96,8 @@ async function heldWorkerSetup({ credential } = {}) {
   const keys = { KEY_OLD: "old-service-key", KEY_NEW: "new-service-key", KEY_OTHER: "other-service-key" };
   const runner = fakeRunner();
   const host = new PluginHost({
-    processes: new PluginProcesses(runner),
+    // The host grant is the fixture root and platform the plugin below advertises and launches in.
+    processes: new PluginProcesses(runner, { cwdRoots: async () => [root], windows: process.platform === "win32" }),
     credential: credential || ((service) => pluginCredential(service, (target) => credentialForTarget(target, { env: keys, root }))),
   });
   const shared = {

@@ -65,7 +65,9 @@ test("GIVEN THE STORE, the plugin publishes it and refuses a start built from an
   const runner = { async start(spec) { starts.push(spec); return { id: "proc-1", pid: 1 }; },
     subscribe() {}, canStream() { return true; }, write() {}, resize() {}, async stop() {}, relabel() {}, release() {},
     list() { return []; }, history() { return {}; }, instance() { return "i"; } };
-  const host = new PluginHost({ processes: new PluginProcesses(runner), environmentId: "", credential: async () => "",
+  // The host grant is the root and platform the plugin below advertises and launches in.
+  const host = new PluginHost({ processes: new PluginProcesses(runner, { cwdRoots: async () => [root], windows: true }),
+    environmentId: "", credential: async () => "",
     log: () => {} });
   // THE DAEMON'S LIFECYCLE PORT, as bin wires it: automatic starts reach the store through admitColdStart.
   const aifyHome = fs.mkdtempSync(path.join(os.tmpdir(), "aify-plugin-home-"));
@@ -126,7 +128,9 @@ test("THE HOST'S spawnEnv REACHES A DEFINED START through the plugin, asked abou
     list() { return []; }, history() { return {}; }, instance() { return "i"; } };
   const asked = [];
   const contributor = { service: "aify-dashboard", field: "secrets", async contribute({ definition }) { asked.push(definition); return { env: { OPENAI_API_KEY: "from-the-contributor" } }; } };
-  const host = new PluginHost({ processes: new PluginProcesses(runner), environmentId: "", credential: async () => "",
+  // The host grant is the root and platform the plugin below advertises and launches in.
+  const host = new PluginHost({ processes: new PluginProcesses(runner, { cwdRoots: async () => [root], windows: true }),
+    environmentId: "", credential: async () => "",
     log: () => {}, spawnEnv: () => [contributor] });
   // THE DAEMON'S LIFECYCLE PORT, as bin wires it, as the test above has it: on 0.9 a defined automatic start is admitted
   // through admitColdStart, and without it the start is refused before anything is contributed.

@@ -220,7 +220,8 @@ function pluginRig() {
     setTimeoutImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     clearTimeoutImpl: () => {},
   });
-  const host = new PluginHost({ processes: new PluginProcesses(runner), credential: async () => "" });
+  // The host grant is the root and platform the plugin above advertises and launches in.
+  const host = new PluginHost({ processes: new PluginProcesses(runner, { cwdRoots: async () => [dir], windows: false }), credential: async () => "" });
   const nextBeat = async () => {
     const timer = timers.filter((t) => t.ms === HEARTBEAT_INTERVAL_MS).at(-1);
     await timer.fn();
