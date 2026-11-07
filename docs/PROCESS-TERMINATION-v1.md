@@ -33,6 +33,13 @@ A dead root with an unresolved group is not a completed stop. The reaper still k
 release refusal is returned as unknown rather than reaped. Existing durable records can be retained,
 but this change adds no recovery format and does not establish hard-crash recovery (#17).
 
+If the root exits on its own while descendants keep its group alive, a later stop returns unknown
+without signalling that group. Repeated stops can therefore keep failing, with the entry retained,
+until the group is positively observed gone or this environment's lifetime ends. This is deliberate:
+a crashed root does not renew numeric-group kill authority. The planned remedy is verified reaping
+at an operator-owned restart under [#17](https://github.com/zimdin12/aify-env/issues/17). That recovery
+work is not implemented here; a restart alone is not a promise that these survivors will be cleaned up.
+
 ## Result propagation
 
 Runner's new group refusal includes:
