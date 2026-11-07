@@ -54,6 +54,16 @@ function execute(bash, script, env, args = [], input = '') {
   });
 }
 
+const HOOK_DEFAULTS = '\nAIFY_HERDR_WORKING=""\n';
+const HOOK_END = '\n# THE TURN-START RUNNER';
+function hookSettingsRegion(source) {
+  const begin = source.indexOf(HOOK_DEFAULTS);
+  const settings = source.indexOf('\nAIFY_HOOK_SETTINGS="$(mktemp', begin);
+  const end = source.indexOf(HOOK_END, settings);
+  assert.ok(begin >= 0 && settings > begin && end > settings, 'maintained hook defaults/settings boundaries required');
+  return source.slice(begin + 1, end);
+}
+
 class StartupComposition {
   constructor(root, harness, alteration) {
     this.root = root; this.harness = harness; this.alteration = alteration;
@@ -136,9 +146,8 @@ class StartupComposition {
   }
   async prepare(restore = false) {
     this.source = fs.readFileSync(path.join(WRAPPER, 'wrappers/claude-aify.sh.in'), 'utf8');
-    const begin = this.source.indexOf('AIFY_HOOK_SETTINGS="$(mktemp');
-    const end = this.source.indexOf('\n# THE TURN-START RUNNER', begin);
-    assert.ok(begin > 0 && end > begin);
+    // Include the template's own prelude, so newly added hook defaults cannot become missing fixture inputs.
+    const hookSettings = hookSettingsRegion(this.source).replaceAll('@@WRAPPER_DIR@@', forward(WRAPPER));
     const claim = this.source.match(/^\s+aify_lease_claim .*claude-code.*$/m)?.[0];
     const lifetime = this.source.match(/^aify_lifetime_start .*SessionStart.*$/m)?.[0];
     assert.ok(claim && lifetime, 'maintained caller sites required');
@@ -165,8 +174,7 @@ ${this.harness === 'claude' ? claim : `aify_lease_claim fixture ${this.harness} 
 ${this.harness === 'claude' ? lifetime : `aify_lifetime_start fixture ${this.harness} resident`}
 AIFY_BRIDGE_DIR_FWD=${q(forward(path.join(COMMS, 'mcp/stdio')))}
 AIFY_WRAPPER_DIR_FWD=${q(forward(WRAPPER))}
-AIFY_HERDR_WORKING=''; AIFY_HERDR_EVENTS=''
-${this.source.slice(begin, end)}
+${hookSettings}
 command ${node} ${fx} snapshot "$AIFY_HOOK_SETTINGS"\n`;
     const result = await this.run('prepare', body, argv);
     assert.equal(result.status, 0, result.stderr); assert.equal(result.signal, null);
@@ -206,6 +214,16 @@ async function fixture(t, harness = 'claude', alteration = '') {
   t.after(() => f.close()); await f.initialize(); return f;
 }
 const options = { skip: SKIP, timeout: 240_000 };
+
+// Existing composition cases prove execution; these controls pin refusal when a maintained extraction boundary moves.
+for (const marker of [HOOK_DEFAULTS, '\nAIFY_HOOK_SETTINGS="$(mktemp', HOOK_END]) {
+  test(`hook-settings extraction refuses a missing ${marker.trim().split(' ')[0]} boundary`, { skip: SKIP }, () => {
+    const source = fs.readFileSync(path.join(WRAPPER, 'wrappers/claude-aify.sh.in'), 'utf8');
+    assert.ok(hookSettingsRegion(source).startsWith('AIFY_HERDR_WORKING=""'));
+    assert.equal(source.split(marker).length, 2, 'the maintained boundary is unique');
+    assert.throws(() => hookSettingsRegion(source.replace(marker, '\n# fixture removed boundary')), /maintained hook defaults\/settings boundaries required/);
+  });
+}
 
 test('composed native SessionStart clears once, while applied turn-end remains non-clearing', options, async t => {
   const f = await fixture(t); await f.prepare();
