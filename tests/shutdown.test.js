@@ -12,6 +12,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createShutdown } from "../lib/shutdown.mjs";
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
+new ProcessEffectTripwire();
 
 function harness({ stopDelayMs = 0, stopThrowsFor = null } = {}) {
   const events = [];
@@ -50,8 +52,8 @@ test("every managed process is stopped BEFORE the process exits", async () => {
   await shutdown("SIGINT");
   const exitAt = events.indexOf("exit:0");
   assert.ok(exitAt >= 0, "shutdown never exited");
-  assert.ok(events.indexOf("stopped:a") < exitAt, "process a was still running at exit");
-  assert.ok(events.indexOf("stopped:b") < exitAt, "process b was still running at exit");
+  assert.ok(events.includes("stopped:a") && events.indexOf("stopped:a") < exitAt, "process a was still running at exit");
+  assert.ok(events.includes("stopped:b") && events.indexOf("stopped:b") < exitAt, "process b was still running at exit");
 });
 
 test("the server stops accepting before the processes are torn down", async () => {
