@@ -20,8 +20,10 @@ const PID = 4243;
 const CLI = fileURLToPath(new URL('../bin/aify-env-agents.mjs', import.meta.url));
 
 class StartupFixture {
-  constructor(root, harness) {
+  constructor(root, harness, { linux = false } = {}) {
     this.root = root;
+    this.launcher = linux ? '/fixture/bin/claude-aify' : process.execPath;
+    this.startToken = linux ? { ...JSON.parse(fs.readFileSync(new URL('./fixtures/process-identity-v1.json', import.meta.url), 'utf8')).token, pid: PID } : undefined;
     this.home = path.join(root, '.aify');
     this.harness = harness;
     this.known = true;
@@ -41,7 +43,9 @@ class StartupFixture {
       action: 'stop', requestedBy: 'operator' };
     this.key = `${listing.storeId}:${row.incarnation}:fixture`;
     const probe = pids => new Map(pids.map(pid => [pid, this.known
-      ? { alive: true, createdAtUs: WRITTEN - 1, commandLine: `bash "${process.execPath}"` }
+      ? this.startToken
+        ? { alive: true, platform: 'linux', startToken: this.startToken, createdAtUs: null, commandLine: `bash\0${this.launcher}\0` }
+        : { alive: true, createdAtUs: WRITTEN - 1, commandLine: `bash "${this.launcher}"` }
       : { alive: null, createdAtUs: null, commandLine: null }]));
     this.managed = new AgentStateHost({ aifyHome: this.home, instance: 'managed', population: 'managed',
       probe, nowUs: () => WRITTEN + 1000 });
@@ -54,7 +58,7 @@ class StartupFixture {
       stateHost: this.managed, residents: this.residents, definitions: this.definitions,
       installed: async () => new Set([this.harness]), runner: {
         start() { throw Error('runtime start forbidden'); }, stop() { throw Error('runtime stop forbidden'); },
-      }, killTree: async () => { throw Error('process kill forbidden'); } });
+      }, probe: async pids => probe(pids), killTree: async () => { throw Error('process kill forbidden'); } });
     assert.equal((await this.ports.lifecycle.execute(this.request)).status, 'done');
     assert.equal(this.stopped(), true);
   }
@@ -80,7 +84,8 @@ class StartupFixture {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, `fixture.${LIFETIME}.json`), JSON.stringify({ agentId: 'fixture',
       lifetime: LIFETIME, instance: 'residents', harness: this.harness, pid: PID,
-      launcher: process.execPath, writtenAtUs: WRITTEN, ...(operatorStart ? { operatorStart } : {}) }));
+      launcher: this.launcher, writtenAtUs: WRITTEN, ...(this.startToken ? { startToken: this.startToken } : {}),
+      ...(operatorStart ? { operatorStart } : {}) }));
     this.residents.refresh();
   }
   body() { return { instance: 'residents', lifetime: LIFETIME, harness: this.harness,
@@ -93,10 +98,10 @@ class StartupFixture {
       journal: fs.readFileSync(this.file, 'utf8') }, { consumed: false, reason, journal: before });
   }
 }
-async function fixture(t, harness = 'claude') {
+async function fixture(t, harness = 'claude', options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'resident-startup-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const result = new StartupFixture(root, harness);
+  const result = new StartupFixture(root, harness, options);
   await result.initialize(t);
   return result;
 }
@@ -125,6 +130,16 @@ test('a bound native SessionStart clears once through the real host route and du
   const before = fs.readFileSync(f.file, 'utf8');
   const replay = await f.acknowledge();
   f.assertRefusal(before, replay, 'stop-moved');
+});
+
+test('a bound Linux SessionStart consumes through its raw token, with no invented epoch birth', async t => {
+  const f = await fixture(t, 'claude', { linux: true }); f.capture(); f.record();
+  const current = f.ports.rawIdentity('fixture').current;
+  assert.deepEqual(current.startToken, f.startToken);
+  assert.equal(Object.hasOwn(current, 'createdAtUs'), false);
+  const answer = await f.acknowledge();
+  assert.equal(answer.status, 200); assert.equal(answer.body.consumed, true);
+  assert.equal(f.stopped(), false);
 });
 
 test('a later cold Stop before record publication wins over the old startup binding', async t => {

@@ -76,38 +76,32 @@ test("an isAlive that throws is treated as gone, not as alive", () => {
   assert.equal(plan.skipped[0].reason, "already gone");
 });
 
-// The identity probe itself. Injected platform and runner, so every branch is decidable without
-// killing anything or depending on what happens to be running on the test machine.
-
+// The pure identity judgment consumes the shared probe's answer; no per-entry OS IO remains here.
 import { defaultVerify } from "../lib/orphan-reap.mjs";
+const observed = commandLine => ({ alive: true, createdAtUs: RECORDED_AT * 1000, commandLine });
 
 test("a record with no launcher is never confirmed — there is nothing to match", () => {
-  // Records written before launchers were tracked. We genuinely cannot tell, so we do not kill.
-  assert.equal(defaultVerify({ pid: 1, launcher: "", startedAt: RECORDED_AT }, { platform: "win32", run: () => ({ stdout: "anything", startedAtOf: () => RECORDED_AT }) }), false);
+  assert.equal(defaultVerify({ pid: 1, launcher: "", startedAt: RECORDED_AT }, { platform: "win32", answer: observed("anything") }), false);
 });
 
 test("windows: a command line containing the launcher confirms it", () => {
-  // Backslashes built rather than typed: a literal one in a shell heredoc does not survive, and
-  // a silently de-escaped string made this test pass for the wrong reason once already.
   const BS = String.fromCharCode(92);
-  const run = () => ({ stdout: `C:${BS}Windows${BS}system32${BS}cmd.exe /c "C:${BS}launchers${BS}claude-aify"` });
-  assert.equal(defaultVerify({ pid: 1, launcher: "C:/launchers/claude-aify", startedAt: RECORDED_AT }, { platform: "win32", run, startedAtOf: () => RECORDED_AT }), true);
+  const commandLine = `C:${BS}Windows${BS}system32${BS}cmd.exe /c "C:${BS}launchers${BS}claude-aify"`;
+  assert.equal(defaultVerify({ pid: 1, launcher: "C:/launchers/claude-aify", startedAt: RECORDED_AT }, { platform: "win32", answer: observed(commandLine) }), true);
 });
 
 test("windows: a DIFFERENT command line is refused — the pid was recycled", () => {
-  const run = () => ({ stdout: "C:\Windows\explorer.exe" });
-  assert.equal(defaultVerify({ pid: 1, launcher: "C:/launchers/claude-aify", startedAt: RECORDED_AT }, { platform: "win32", run, startedAtOf: () => RECORDED_AT }), false);
+  assert.equal(defaultVerify({ pid: 1, launcher: "C:/launchers/claude-aify", startedAt: RECORDED_AT }, { platform: "win32", answer: observed("explorer.exe") }), false);
 });
 
 test("an empty command line is refused rather than treated as a match", () => {
-  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x", startedAt: RECORDED_AT }, { platform: "win32", run: () => ({ stdout: "   ", startedAtOf: () => RECORDED_AT }) }), false);
+  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x", startedAt: RECORDED_AT }, { platform: "win32", answer: observed("   ") }), false);
 });
 
-test("a probe that throws is refused", () => {
-  const run = () => { throw new Error("access denied"); };
-  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x", startedAt: RECORDED_AT }, { platform: "win32", run, startedAtOf: () => RECORDED_AT }), false);
+test("an unanswered shared probe is refused", () => {
+  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x", startedAt: RECORDED_AT }, { platform: "win32", answer: { alive: null, createdAtUs: null, commandLine: null } }), false);
 });
 
 test("an unsupported platform confirms nothing, so nothing is killed there", () => {
-  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x", startedAt: RECORDED_AT }, { platform: "darwin", run: () => ({ stdout: "/l/x", startedAtOf: () => RECORDED_AT }) }), false);
+  assert.equal(defaultVerify({ pid: 1, launcher: "/l/x", startedAt: RECORDED_AT }, { platform: "darwin", answer: observed("/l/x") }), false);
 });

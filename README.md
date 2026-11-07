@@ -181,6 +181,13 @@ then reads the record and attempts to reap verified leftovers before starting se
 dedicated `--instance-context` daemon skips that shared-record reap. Unconfirmed processes are left
 running and reported.
 
+Linux identity compares the owning writer's exact boot/PID/raw-start-tick token, never a wall-clock
+conversion. Old Linux records without a token stay unverified; a reader never backfills one from a
+currently live PID. Windows recovery shares one asynchronous OS query across the recorded population
+and retains its existing time policy. See [process identity](docs/PROCESS-IDENTITY-v1.md) for the record
+format, resident compatibility and gateway limits. Durable writes, unresolved-record retention and
+superseded-owner handling remain tracked in [#17](https://github.com/zimdin12/aify-env/issues/17).
+
 Stopping a launcher must also reach the agent it started. Windows uses `taskkill /T`; POSIX tries the
 process group, then the launcher pid. The POSIX piped fallback does not create its own group, so a
 reported launcher stop can leave descendants running. Whole-tree cleanup is not guaranteed there

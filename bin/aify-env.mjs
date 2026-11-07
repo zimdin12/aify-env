@@ -63,6 +63,7 @@ import { startDaemonView } from "../lib/daemon-view.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-processes.mjs";
 import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
+import { ProcessIdentityProbe } from '../lib/process-identity.mjs';
 import { killTree } from "../lib/kill-tree.mjs";
 import {
   showViewInsteadOfRefusing,
@@ -249,14 +250,16 @@ const OWNED_FILE = instanceContext?.processRecord ?? (process.env.AIFY_ENV_PROCE
 async function reapLeftovers() {
   // READ ONCE, so what is spared and what is written back are the same list.
   const recorded = readOwned(OWNED_FILE);
+  const observed = await new ProcessIdentityProbe().probe(recorded.flatMap(entry => [entry.pid, entry.owner]));
+  const ownerIsAlive = pid => observed.get(pid)?.alive !== false;
   // `ownerIsAlive` is the guard the port could not be: an entry written by an instance that is STILL
   // RUNNING belongs to that instance, not to a crash. Holding the port proves nobody else is serving
   // only when the port is a fixed one -- `--port 0` takes an ephemeral port that is always free, so
   // this function ran in full for a daemon that owned nothing and reaped a live environment's fleet.
   const leftovers = planOrphanReap(recorded, {
-    isAlive: defaultIsAlive,
-    verify: defaultVerify,
-    ownerIsAlive: defaultIsAlive,
+    isAlive: pid => observed.get(pid)?.alive === true,
+    verify: entry => defaultVerify(entry, { answer: observed.get(entry.pid) }),
+    ownerIsAlive,
   });
   for (const entry of leftovers.reap) {
     // The TREE, not the pid: the recorded process is a launcher, and the agent it started is a child of
@@ -277,7 +280,7 @@ async function reapLeftovers() {
   // above: the reaper spared another environment's processes and then deleted the only record that
   // they exist. Sparing a process and forgetting it is barely better than killing it -- the operator
   // still ends up with something running that nothing can clean up.
-  clearOwned(OWNED_FILE, { keep: entriesOwnedElsewhere(recorded, { ownerIsAlive: defaultIsAlive }) });
+  clearOwned(OWNED_FILE, { keep: entriesOwnedElsewhere(recorded, { ownerIsAlive }) });
 }
 
 const runner = new Runner({ ownedFile: OWNED_FILE,

@@ -71,7 +71,7 @@ async function start({ name, value = VALUE, branch = "terminal", buildSpec = dir
     return spawnedPipe(child);
   };
   const runner = new Runner({ ownedFile: path.join(root, "env-processes.json"), openTerminal: branch === "terminal" ? openTerminal : null,
-    spawnProcess, loadCheckpoint: async () => null,
+    spawnProcess, loadCheckpoint: async () => null, processIdentity: { captureChild: () => null }, // synthetic PID: no OS capture
     managedHost: () => ({ instance: "default", url: "http://127.0.0.1:1",
       host: { startManaged: (record) => { current = record; }, endManaged: () => ({ problem: "" }) } }) });
   const agents = { ...createAgentLifecyclePorts({ aifyHome, machineId: "m", stateHost: { rawIdentity: identity }, runner, definitions: store }),

@@ -137,7 +137,7 @@ test("a caller that names no launcher still gets a record, and the old value", a
 /** `defaultVerify` with a stubbed process probe, so this is decidable without spawning anything. */
 const verifyAgainst = (launcher, commandLine) => defaultVerify(
   { pid: 4242, launcher, startedAt: RECORDED_AT },
-  { platform: "win32", run: () => ({ stdout: commandLine }), startedAtOf: () => RECORDED_AT },
+  { platform: "win32", answer: { alive: true, commandLine, createdAtUs: RECORDED_AT * 1000 } },
 );
 
 // Someone else's bash. Nothing to do with us; it just happens to be bash, on a pid we once used.
@@ -181,7 +181,7 @@ test("an entry with no launcher is never reaped", () => {
   // NEGATIVE CONTROL on the probe itself, and the documented trade: a record written before launchers
   // were tracked cannot be verified, so it is left alone rather than guessed about.
   assert.equal(verifyAgainst("", OUR_OWN), false);
-  assert.equal(defaultVerify({ pid: 1, startedAt: RECORDED_AT }, { platform: "win32", run: () => ({ stdout: OUR_OWN, startedAtOf: () => RECORDED_AT }) }), false);
+  assert.equal(defaultVerify({ pid: 1, startedAt: RECORDED_AT }, { platform: "win32", answer: { alive: true, commandLine: OUR_OWN, createdAtUs: RECORDED_AT * 1000 } }), false);
 });
 
 // ── the launcher alone cannot tell a SIBLING agent from our own orphan ────────────────────────────
@@ -203,8 +203,7 @@ test("A SIBLING AGENT on a recycled pid is REFUSED, though its launcher matches 
     {
       platform: "win32",
       // The SAME launcher, because every claude agent on this host runs it.
-      run: () => ({ stdout: 'C:/Program Files/Git/bin/bash.exe "C:/launchers/claude-aify"' }),
-      startedAtOf: () => theirs,
+      answer: { alive: true, commandLine: 'C:/Program Files/Git/bin/bash.exe "C:/launchers/claude-aify"', createdAtUs: theirs * 1000 },
     },
   );
   assert.equal(verdict, false,
@@ -220,10 +219,8 @@ test("and OUR OWN process still verifies, so this narrows rather than disables t
     { pid: 4242, launcher: "C:/launchers/claude-aify", startedAt: ours },
     {
       platform: "win32",
-      run: () => ({ stdout: 'C:/Program Files/Git/bin/bash.exe "C:/launchers/claude-aify"' }),
-      // A second or two later: the record is stamped just after spawn, the OS reports the child's own
-      // creation, and the gap between them is however long the spawn took.
-      startedAtOf: () => ours + 1500,
+      // A second or two later, inside the legacy Windows tolerance.
+      answer: { alive: true, commandLine: 'C:/Program Files/Git/bin/bash.exe "C:/launchers/claude-aify"', createdAtUs: (ours + 1500) * 1000 },
     },
   );
   assert.equal(verdict, true, "our own process was refused, so nothing is ever reaped");
@@ -237,8 +234,7 @@ test("a start time that cannot be read means NO KILL", () => {
     { pid: 4242, launcher: "C:/launchers/claude-aify", startedAt: Date.parse("2026-09-04T09:00:00.000Z") },
     {
       platform: "win32",
-      run: () => ({ stdout: 'bash.exe "C:/launchers/claude-aify"' }),
-      startedAtOf: () => null,
+      answer: { alive: true, commandLine: 'bash.exe "C:/launchers/claude-aify"', createdAtUs: null },
     },
   );
   assert.equal(verdict, false, "an unanswerable start time was treated as agreement");
@@ -251,8 +247,7 @@ test("a record with NO start time is never reaped either", () => {
     { pid: 4242, launcher: "C:/launchers/claude-aify" },
     {
       platform: "win32",
-      run: () => ({ stdout: 'bash.exe "C:/launchers/claude-aify"' }),
-      startedAtOf: () => Date.now(),
+      answer: { alive: true, commandLine: 'bash.exe "C:/launchers/claude-aify"', createdAtUs: Date.now() * 1000 },
     },
   );
   assert.equal(verdict, false, "a record with no start anchor was reaped on the launcher alone");

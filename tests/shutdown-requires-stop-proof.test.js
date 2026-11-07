@@ -40,7 +40,8 @@ test('a real Runner matching exit permits shutdown to clear owned records', asyn
   Object.assign(child, { pid: 424242, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} },
     kill: () => { effects.push('console'); child.emit('close', null, 'SIGTERM'); } });
   const runner = new Runner({ openTerminal: null, loadCheckpoint: null, spawnProcess: () => spawnedPipe(child),
-    isAlive: () => true, ownedFile, killTree: async () => { effects.push('tree'); } });
+    isAlive: () => true, ownedFile, processIdentity: { captureChild: () => null }, // synthetic PID: no native observation
+    killTree: async () => { effects.push('tree'); } });
   const handle = await runner.start({ service: 'fixture', command: 'fixture', env: {},
     fileText: '#!/bin/bash\nHARNESS_WRAPPER_VERSION="1.0"' });
   assert.equal(readOwned(ownedFile)[0]?.id, handle.id, 'control: ownership exists before stop');

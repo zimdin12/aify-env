@@ -1,0 +1,29 @@
+{
+  "about": "Synthetic env/wrapper compatibility cases, not real agent records. Tokens are captured by an owning writer, never backfilled by a reader. Raw ticks deliberately exceed Number's exact integer range.",
+  "legacyResident": {
+    "agentId": "fixture-resident",
+    "lifetime": "7f3c9e2a-0000-4000-8000-000000000001",
+    "instance": "residents",
+    "harness": "hermes",
+    "pid": 41236,
+    "launcher": "/fixture/bin/hermes-aify",
+    "writtenAtUs": 1790950000500000
+  },
+  "token": {
+    "version": 1,
+    "platform": "linux",
+    "bootId": "d57f8bed-05a8-4d57-bd23-c59952256667",
+    "pid": 41236,
+    "startTicks": "9007199254740993"
+  },
+  "procStat": "41236 (hermes shell) S 200 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 9007199254740993 0\n",
+  "cases": [
+    { "name": "legacy tokenless record remains readable and unknown", "recordToken": null, "probeToken": "same", "verified": "unknown" },
+    { "name": "matching owned token admits the resident", "recordToken": "same", "probeToken": "same", "verified": "yes" },
+    { "name": "another boot never admits even with the same pid and ticks", "recordToken": "same", "probeToken": { "bootId": "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa" }, "verified": "unknown" },
+    { "name": "another tick never admits even with the same boot and pid", "recordToken": "same", "probeToken": { "startTicks": "9007199254740992" }, "verified": "unknown" },
+    { "name": "another pid never admits even with the same boot and ticks", "recordToken": "same", "probeToken": { "pid": 41237 }, "verified": "unknown" },
+    { "name": "unreadable token never admits even with an identical command line", "recordToken": "same", "probeToken": null, "verified": "unknown" },
+    { "name": "malformed record token stays readable and unknown", "recordToken": { "startTicks": 9007199254740992 }, "probeToken": "same", "verified": "unknown" }
+  ]
+}

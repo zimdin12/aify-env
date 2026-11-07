@@ -39,6 +39,7 @@ export function fixture(t, options = {}) {
   const registry = new ProcessRegistry({ onChange: () => observations.push(registry.list()) });
   const host = { startManaged: record => births.push(structuredClone(record)), endManaged: lifetime => { ends.push(lifetime); return {}; } };
   const runner = new Runner({ openTerminal: null, registry, ownedFile, loadCheckpoint: null,
+    processIdentity: { captureChild: () => null }, // most outcome cases supply a synthetic child PID
     managedHost: () => ({ host, instance: 'fixture', url: 'http://127.0.0.1:18802' }), ...options });
   const spec = { service: 'fixture', command: path.join(home, 'missing-command'), fileText: ALLOWED, args: [], agentId: 'fixture' };
   const effects = () => ({ observations, writes, births, current: registry.list(), fileExists: fs.existsSync(ownedFile) });
