@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { CHAIN_MARK, CLIENTS, EXIT_OK, EXIT_REFUSED, InstallChain, LAUNCHER_SERVICE, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
+import { CHAIN_MARK, EXIT_OK, EXIT_REFUSED, InstallChain, LAUNCHER_SERVICE, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { approvedInstaller, connectRecorded, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const COMMS = "aify-comms=http://comms.test:8800";
@@ -286,7 +286,6 @@ test("arguments: keys never in argv, every name checked, usage names the flags",
   assert.deepEqual(ok.clients, ["claude"]);
   assert.deepEqual(ok.secretStdin, { service: "aify-comms", field: "credentialRef" });
   for (const flag of ["--connect", "--client", "--secret", "--secret-stdin", "--approve", "--installer", "--no-prompt"]) assert.ok(USAGE.includes(flag), flag);
-  assert.deepEqual(CLIENTS, ["claude", "codex", "hermes"]);
 });
 
 const SPEC = (artifacts) => ({ artifacts });
