@@ -126,11 +126,11 @@ test("switched off, or with no configuration reader, nothing is typed", async ()
 test("THE REAL PATH: a carried claude terminal at the dialog gets DOWN, then Enter once the cursor is on Yes", async () => {
   const writes = [];
   const terminal = {
-    pid: 0, cols: CAPTURE.cols, rows: CAPTURE.rows, handlers: [],
+    pid: 424242, cols: CAPTURE.cols, rows: CAPTURE.rows, handlers: [],
     onData(fn) { this.handlers.push(fn); }, emit(text) { for (const fn of this.handlers) fn(text); },
     onExit() {}, write: (data) => writes.push(data), kill() {}, resize() {},
   };
-  const runner = new Runner({ openTerminal: () => terminal,
+  const runner = new Runner({ isAlive: () => true, killTree: async () => {}, openTerminal: () => terminal,
     managedHost: () => ({ instance: "default", url: "http://127.0.0.1:1", host: { startManaged() {}, endManaged: () => ({ problem: "" }) } }) });
   const processes = new PluginProcesses(runner);
   const log = [];

@@ -31,7 +31,7 @@ function fakeTerminal({ cols, rows }) {
   const handlers = [];
   const exits = [];
   return {
-    pid: 0, cols, rows,
+    pid: 424242, cols, rows,
     onData: (fn) => handlers.push(fn),
     emit(text) { for (const fn of handlers) fn(text); },
     onExit: (fn) => exits.push(fn),
@@ -58,7 +58,7 @@ test("POSITIVE CONTROL: the headless emulator is installed, so a real checkpoint
 
 test("the checkpoint hands over its rows as text, with the title and progress the process set", async () => {
   const terminal = fakeTerminal({ cols: 40, rows: 6 });
-  const processes = new PluginProcesses(new Runner({ openTerminal: () => terminal }));
+  const processes = new PluginProcesses(new Runner({ isAlive: () => true, killTree: async () => {}, openTerminal: () => terminal }));
   const { id } = await processes.start(SPEC);
 
   terminal.emit(`${title("✳ Claude Code")}${ESC}]9;4;0;${BEL}hello   \r\n日本 x\r\n`);
@@ -79,7 +79,7 @@ test("the checkpoint hands over its rows as text, with the title and progress th
 
 test("no checkpoint means no screen, and an unknown process has none either", async () => {
   const terminal = fakeTerminal({ cols: 40, rows: 6 });
-  const runner = new Runner({ openTerminal: () => terminal, loadCheckpoint: null });
+  const runner = new Runner({ isAlive: () => true, killTree: async () => {}, openTerminal: () => terminal, loadCheckpoint: null });
   const { id } = await runner.start(SPEC);
   assert.equal(await runner.screenText(id), null);
   assert.equal(await runner.screenText("nobody"), null);
@@ -94,7 +94,7 @@ const BLOCKED = `${clear}${title("✳ task")} Bash command\r\n\r\n   ls\r\n\r\n 
 
 async function managedTerminal(runtime) {
   const terminal = fakeTerminal({ cols: 80, rows: 16 });
-  const runner = new Runner({ openTerminal: () => terminal,
+  const runner = new Runner({ isAlive: () => true, killTree: async () => {}, openTerminal: () => terminal,
     managedHost: () => ({ instance: "default", url: "http://127.0.0.1:1",
       host: { startManaged() {}, endManaged: () => ({ problem: "" }) } }),
   });
