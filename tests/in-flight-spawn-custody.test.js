@@ -134,10 +134,10 @@ for (const boundary of ['checkpoint', 'gate', 'roots']) {
     const pending = failed(f.runner.start(f.spec, options));
     await tick(); cancelled = true; wait.resolve(boundary === 'roots' ? f.home : null);
     const refused = await pending;
-    assert.ok(refused.error instanceof StartAdmissionRefusal, 'late cancellation must be a typed admission refusal');
-    assert.equal(created, 0, 'no child may be created after cancellation during the final roots await');
-    assert.deepEqual(f.effects(), f.untouched);
-    assert.deepEqual(f.runner.shutdownView().list(), []);
+    assert.deepEqual({ typedRefusal: refused.error instanceof StartAdmissionRefusal, created,
+      effects: f.effects(), shutdown: f.runner.shutdownView().list() },
+    { typedRefusal: true, created: 0, effects: f.untouched, shutdown: [] },
+    'late cancellation must refuse with no child, public record, durable row or shutdown target');
     cancelled = false;
     const handle = await f.runner.start(f.spec, options);
     assert.equal(created, 1, 'positive control: the same path admits a fresh open start');
@@ -150,8 +150,9 @@ for (const rejected of [false, true]) {
     let created = 0;
     const f = fixture(t, { spawnProcess: () => { created++; const c = child(); queueMicrotask(() => c.emit('spawn')); return c; } });
     const result = await failed(f.runner.start(f.spec, { assertOpen: () => rejected ? Promise.reject(Error('fixture')) : Promise.resolve() }));
-    assert.equal(result.error?.name, 'TypeError');
-    assert.match(result.error?.message ?? '', /must be synchronous/);
-    assert.equal(created, 0); assert.deepEqual(f.effects(), f.untouched); await tick();
+    assert.deepEqual({ error: result.error?.name, message: result.error?.message, created, effects: f.effects() },
+      { error: 'TypeError', message: 'final spawn guard must be synchronous', created: 0, effects: f.untouched },
+      'thenable refusal must also leave creation and success bookkeeping untouched');
+    await tick();
   });
 }
