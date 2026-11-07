@@ -46,7 +46,7 @@ function fixture(t, { pipes = false, immediate = false, throws = false, checkpoi
     if (pipes) queueMicrotask(() => child.emit("spawn"));
     return child;
   };
-  const runner = new Runner({ openTerminal: pipes ? null : spawn, spawnProcess: spawn, loadCheckpoint: checkpoint,
+  const runner = new Runner({ platform: 'win32', openTerminal: pipes ? null : spawn, spawnProcess: spawn, loadCheckpoint: checkpoint,
     managedHost: () => owner, reportManaged: (problem) => reports.push(problem),
     isAlive: () => alive, killTree: async () => {} });
   const receiver = new AgentTurnEvents({ host, instance: "default" });

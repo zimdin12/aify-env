@@ -17,7 +17,7 @@ test('replayed Stop stays bound to H1 after the same terminal starts H2', async 
     return child;
   });
   let next = 0;
-  const runner = new Runner({ openTerminal: null, loadCheckpoint: null, ownedFile: null,
+  const runner = new Runner({ platform: 'win32', openTerminal: null, loadCheckpoint: null, ownedFile: null,
     spawnProcess: () => spawnedPipe(children[next++]), isAlive: () => true, stopExitWaitMs: 1,
     killTree: async pid => { effects.push(['tree', pid]); } });
   const spec = { service: 'fixture', command: 'fixture', env: {}, fileText: '#!/bin/bash\nHARNESS_WRAPPER_VERSION="1.0"' };

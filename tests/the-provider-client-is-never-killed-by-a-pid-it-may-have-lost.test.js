@@ -11,9 +11,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
 
-import { heldKill } from "../lib/plugins/aify-dashboard/held-kill.mjs";
+import { heldKill, PosixProcessGroup } from '../lib/plugins/ports.mjs';
+import { powershellPath } from '../lib/held-process-tree.mjs';
 import { killTree, runChild } from "../lib/plugins/aify-dashboard/provider-child.mjs";
+
+new ProcessEffectTripwire();
 
 function fakeChild() {
   const child = new EventEmitter();
@@ -59,9 +63,11 @@ test("where only the client itself can be killed, it is killed through its own h
   // fallback to the process itself is what runs.
   const signalled = [];
   const handled = [];
-  const own = { kill: (name) => { handled.push(name); return true; }, exitCode: null, signalCode: null };
+  const own = Object.assign(new EventEmitter(), { pid: 4242, kill: (name) => { handled.push(name); return true; }, exitCode: null, signalCode: null });
   const refuse = Object.assign(new Error("not permitted"), { code: "EPERM" });
-  await killTree(4242, { platform: "linux", own, signalProcess: (target, name) => { signalled.push(target); if (target < 0) throw refuse; } }).catch(() => {});
+  const group = new PosixProcessGroup({ child: own, detached: true, platform: 'linux',
+    signal: (target) => { signalled.push(target); throw refuse; } });
+  await killTree(4242, { platform: 'linux', own, group }).catch(() => {});
   assert.deepEqual(signalled, [-4242], "only the group was signalled by number");
   assert.deepEqual(handled, ["SIGKILL"], "the client itself was killed through its handle");
 });
@@ -115,7 +121,7 @@ test("runChild hands the kill the client's own handle and a live view of whether
   stop.abort();
   assert.equal(asked.length, 1);
   assert.equal(asked[0].pid, 4242);
-  assert.equal(asked[0].options?.own, child, "the client's own ChildProcess");
+  assert.equal(asked[0].options?.own === child, true, "the client's own ChildProcess");
   assert.equal(asked[0].options?.stillOurs?.(), true, "still ours before any exit");
   child.emit("exit", null, "SIGKILL");
   assert.equal(asked[0].options.stillOurs(), false, "and not once the exit is seen");
@@ -151,4 +157,24 @@ test("control: a stop while the client still runs kills its pid", async () => {
   const result = await r.run;
   assert.deepEqual(r.kills, [4242]);
   assert.equal(result.unconfirmed, "");
+});
+
+test("the kill helper is run by its absolute path, never by name", async () => {
+  assert.equal(powershellPath({ SystemRoot: "C:\\Windows" }), "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+  assert.equal(powershellPath({}), null);
+  assert.equal(powershellPath({ SystemRoot: "Windows" }), null, "a relative root is no root");
+  const started = [];
+  const recording = file => { started.push(file); throw new Error("not started in this test"); };
+  await assert.rejects(heldKill(4242, { stillOurs: () => true, start: recording, powershell: null }), /no SystemRoot/);
+  assert.deepEqual(started, [], "with no SystemRoot nothing is run by name");
+});
+
+test("on Windows, with nothing to tell whether the pid is still the client's, nothing is killed by it", async () => {
+  const held = [];
+  const own = { pid: 4242, killed: [], kill(name) { this.killed.push(name); return true; } };
+  await assert.rejects(killTree(4242, { platform: "win32", own, held: async pid => { held.push(pid); } }), /its tree was not walked/);
+  assert.deepEqual(held, []);
+  assert.deepEqual(own.killed, ["SIGKILL"]);
+  await assert.rejects(killTree(4242, { platform: "win32", held: async pid => { held.push(pid); } }), /nothing was killed by it/);
+  assert.deepEqual(held, []);
 });

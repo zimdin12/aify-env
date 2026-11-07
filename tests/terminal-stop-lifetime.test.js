@@ -28,7 +28,7 @@ async function fixture(t, { after = true, close = false, treeThrows = false } = 
   child.pid = 424242; child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.stdin = { write() {} };
   child.kill = () => { effects.push('console'); killed = true; if (close) child.emit('close', null, 'SIGTERM'); };
   const ownedFile = path.join(home, 'owned.json');
-  const runner = new Runner({ openTerminal: null, spawnProcess: () => spawnedPipe(child), loadCheckpoint: null, ownedFile, stopExitWaitMs: 5,
+  const runner = new Runner({ platform: 'win32', openTerminal: null, spawnProcess: () => spawnedPipe(child), loadCheckpoint: null, ownedFile, stopExitWaitMs: 5,
     processIdentity: { captureChild: () => null }, // synthetic PID: no native observation
     managedHost: () => ({ host, instance: 'fixture', url: 'http://127.0.0.1:12345' }),
     isAlive: () => { if (!killed) return true; if (after === 'throws') throw Error('probe unavailable'); return after; },

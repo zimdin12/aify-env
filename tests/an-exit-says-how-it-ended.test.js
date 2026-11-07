@@ -194,7 +194,7 @@ test("a stop the reaper's sweep overtakes is still recorded `stopped`; a reap wi
   };
   let releaseKill;
   const held = new Promise((resolve) => { releaseKill = resolve; });
-  const runner = new Runner({ openTerminal: null, spawnProcess, isAlive: (pid) => alive.get(pid), stopExitWaitMs: 1000,
+  const runner = new Runner({ platform: 'win32', openTerminal: null, spawnProcess, isAlive: (pid) => alive.get(pid), stopExitWaitMs: 1000,
     killTree: async (pid) => { alive.set(pid, false); await held; } });
   const reaper = createReaper(runner, { isAlive: (pid) => alive.get(pid) });
 
@@ -232,7 +232,7 @@ test("a stop that waits for the exit records `stopped` without the code or signa
     child = Object.assign(new EventEmitter(), { pid: 4242, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} }, kill() {} });
     return spawnedPipe(child);
   };
-  const runner = new Runner({ openTerminal: null, spawnProcess, isAlive: () => alive, stopExitWaitMs: 1000,
+  const runner = new Runner({ platform: 'win32', openTerminal: null, spawnProcess, isAlive: () => alive, stopExitWaitMs: 1000,
     killTree: async () => { alive = false; child.emit("close", 1, "SIGTERM"); } });
   const handle = await runner.start(spec("unused"));
   assert.equal((await runner.stop(handle.id)).stopped, true, "CONTROL: the stop saw the exit");

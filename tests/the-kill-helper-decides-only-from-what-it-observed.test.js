@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 
-import { HELPER_SOURCE, SOURCE_VARIABLE, helperEnv, helperScript, powershellPath } from "../lib/plugins/aify-dashboard/held-kill.mjs";
+import { HELPER_SOURCE, SOURCE_VARIABLE, helperEnv, helperScript, powershellPath } from '../lib/held-process-tree.mjs';
 
 const onlyWindows = process.platform !== "win32" && "the helper is Windows PowerShell";
 

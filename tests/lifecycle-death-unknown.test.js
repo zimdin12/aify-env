@@ -25,7 +25,7 @@ async function managed(t, isAlive) {
   child.pid = 424242; child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
   const effects = [], probes = [];
   child.stdin = { write() {} }; child.kill = () => effects.push('child');
-  const runner = new Runner({ openTerminal: null, loadCheckpoint: null, ownedFile: null,
+  const runner = new Runner({ platform: 'win32', openTerminal: null, loadCheckpoint: null, ownedFile: null,
     spawnProcess: () => spawnedPipe(child), managedHost: () => ({ host, instance: 'owner', url: 'http://127.0.0.1:12345' }),
     isAlive: pid => { probes.push(pid); return isAlive(pid); },
     killTree: async pid => { assert.equal(pid, child.pid); effects.push('tree'); } });

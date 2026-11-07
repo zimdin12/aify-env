@@ -72,7 +72,7 @@ test("a character split across two chunks reaches a subscriber WHOLE", async () 
   // `spawnProcess`, which is the name the Runner injects. My first version passed `spawn`, so the
   // fake was ignored, a real `node -e 0` ran, and the subscriber saw an empty string -- a test
   // failing for a reason that had nothing to do with encoding.
-  const runner = new Runner({ spawnProcess: () => spawnedPipe(child), openTerminal: null });
+  const runner = new Runner({ platform: 'win32', spawnProcess: () => spawnedPipe(child), openTerminal: null });
   const started = await runner.start({
     service: "test-service",
     fileText: ALLOWED,
@@ -111,7 +111,7 @@ test("A STDERR CHUNK BETWEEN TWO STDOUT READS does not corrupt either", async ()
                             [Buffer.from("warning: retrying\n", "utf8")]);
 
   const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
-  const runner = new Runner({ spawnProcess: () => spawnedPipe(child), openTerminal: null });
+  const runner = new Runner({ platform: 'win32', spawnProcess: () => spawnedPipe(child), openTerminal: null });
   const started = await runner.start({
     service: "test-service", fileText: ALLOWED, command: process.execPath, args: ["-e", "0"],
     useTerminal: false,
@@ -145,7 +145,7 @@ test("A STREAM THAT CLOSES MID-CHARACTER SAYS SO, rather than ending in silence"
   const child = bufferChild([full.subarray(0, full.length - 1)]);
 
   const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(String.fromCharCode(10));
-  const runner = new Runner({ spawnProcess: () => spawnedPipe(child), openTerminal: null });
+  const runner = new Runner({ platform: 'win32', spawnProcess: () => spawnedPipe(child), openTerminal: null });
   const started = await runner.start({
     service: "test-service", fileText: ALLOWED, command: process.execPath, args: ["-e", "0"],
     useTerminal: false,

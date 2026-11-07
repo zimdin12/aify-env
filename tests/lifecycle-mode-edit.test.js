@@ -39,7 +39,7 @@ async function fixture(t, mode) {
   const child = new EventEmitter();
   child.pid = pid; child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.stdin = { write() {} };
   child.kill = () => { effects.push('managed-console'); alive = false; child.emit('close', null, 'SIGTERM'); };
-  const runner = new Runner({ openTerminal: null, spawnProcess: () => spawnedPipe(child), ownedFile: null, loadCheckpoint: null,
+  const runner = new Runner({ platform: 'win32', openTerminal: null, spawnProcess: () => spawnedPipe(child), ownedFile: null, loadCheckpoint: null,
     managedHost: () => ({ host, instance: 'managed-owner', url: 'http://127.0.0.1:12345' }),
     isAlive: () => alive, killTree: async () => { effects.push('managed-tree'); } });
   const definitions = new DefinitionStore({ dir: path.join(home, 'definitions') });

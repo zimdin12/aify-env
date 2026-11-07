@@ -70,7 +70,7 @@ async function start({ name, value = VALUE, branch = "terminal", buildSpec = dir
     Object.assign(child, { pid: 4242, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} }, kill() {} });
     return spawnedPipe(child);
   };
-  const runner = new Runner({ ownedFile: path.join(root, "env-processes.json"), openTerminal: branch === "terminal" ? openTerminal : null,
+  const runner = new Runner({ platform: 'win32', ownedFile: path.join(root, "env-processes.json"), openTerminal: branch === "terminal" ? openTerminal : null,
     spawnProcess, loadCheckpoint: async () => null, processIdentity: { captureChild: () => null }, // synthetic PID: no OS capture
     managedHost: () => ({ instance: "default", url: "http://127.0.0.1:1",
       host: { startManaged: (record) => { current = record; }, endManaged: () => ({ problem: "" }) } }) });

@@ -28,6 +28,7 @@
   "exports": {
     "./package.json": "./package.json",
     "./service-plugins": "./lib/service-plugins.mjs",
+    "./plugin-ports": "./lib/plugins/ports.mjs",
     "./plugin-bootstrap": "./lib/plugin-bootstrap.mjs",
     "./start-spec": "./lib/start-spec.mjs",
     "./runner": "./lib/runner.mjs",

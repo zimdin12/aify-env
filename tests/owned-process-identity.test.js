@@ -37,7 +37,7 @@ for (const branch of ['pipe', 'terminal']) {
     const child = new EventEmitter();
     Object.assign(child, { pid: token.pid, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} },
       onData() {}, onExit() {}, write() {}, resize() {}, kill() { throw Error('fake child must not be killed'); } });
-    const runner = new Runner({ ownedFile: file, loadCheckpoint: null,
+    const runner = new Runner({ platform: 'win32', ownedFile: file, loadCheckpoint: null,
       openTerminal: branch === 'terminal' ? () => child : null, spawnProcess: () => spawnedPipe(child),
       processIdentity: { captureChild: supplied => {
         assert.equal(supplied, child); assert.equal(fs.existsSync(file), false, 'capture precedes durable publication');
@@ -55,7 +55,7 @@ for (const branch of ['pipe', 'terminal']) {
 test('a missed capture still records the owned process without inventing identity or reading an old record PID', async t => {
   const { root, file } = home(t), child = new EventEmitter(), captures = [];
   Object.assign(child, { pid: token.pid, stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write() {} } });
-  const runner = new Runner({ ownedFile: file, loadCheckpoint: null, openTerminal: null, spawnProcess: () => spawnedPipe(child),
+  const runner = new Runner({ platform: 'win32', ownedFile: file, loadCheckpoint: null, openTerminal: null, spawnProcess: () => spawnedPipe(child),
     processIdentity: { captureChild: supplied => { captures.push(supplied.pid); throw Error('unreadable own child'); } },
     isAlive: () => true, killTree: async () => { throw Error('unexpected killer'); } });
   const handle = await runner.start({ service: 'fixture', command: path.join(root, 'launcher'),

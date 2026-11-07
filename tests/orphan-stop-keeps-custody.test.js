@@ -18,7 +18,7 @@ async function fixture(route, outcome) {
     if (outcome === 'replacement') handles.remember('T', 'replacement-handle');
     if (outcome === 'verified' || outcome === 'replacement') child.emit('close', null, 'SIGTERM');
   };
-  const runner = new Runner({ openTerminal: null, loadCheckpoint: null, ownedFile: null,
+  const runner = new Runner({ platform: 'win32', openTerminal: null, loadCheckpoint: null, ownedFile: null,
     spawnProcess: () => spawnedPipe(child), isAlive: () => true, stopExitWaitMs: 1,
     killTree: async () => { effects.push('tree'); if (outcome === 'rejected') throw Error('uncertain tree kill'); } });
   const handle = await runner.start({ service: 'fixture', command: 'fixture', env: {},

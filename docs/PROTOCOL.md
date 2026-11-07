@@ -203,9 +203,10 @@ and a console sending one should be told rather than taking the environment down
 `204` when the process is gone. Stopping is idempotent: a caller retrying, or a reaper racing one, must
 not get an error for having been second, so an id this environment does not hold is `204` too.
 
-**`500` with `{stopped: false, problem}` when the process is still running after the kill.** Its pid is
-checked for up to a second after the kill lands, because the entry is released from the list before the
-kill and a survivor would otherwise vanish from every view while a caller was told it had stopped.
+**`500` with `{stopped: false, problem}` when cleanup is unconfirmed.** An owned piped POSIX group's
+present/unknown refusal cannot be overwritten by a dead root PID. Legacy Windows/PTY and untyped stop
+answers retain the existing subsequent PID-absence verification. See
+[owned process termination](PROCESS-TERMINATION-v1.md) for the typed group result and release contract.
 
 ## Known limitation: a TOCTOU window
 
@@ -230,11 +231,13 @@ listening port, then reads the record and attempts to reap verified leftovers be
 plugins. A dedicated `--instance-context` daemon skips that shared-record reap. Processes whose
 ownership cannot be confirmed are left running and reported.
 
-**Descendant cleanup has a POSIX piped gap.** A launcher is a script and the agent is its child, so
-ending only the recorded pid can leave the agent running. Windows uses `taskkill /T`; POSIX signals
-the process group and then the launcher pid. PTY children have their own group, but the POSIX piped
-fallback does not create one. A successful launcher stop therefore does not establish whole-tree
-cleanup on that path, including at graceful shutdown ([#13](https://github.com/zimdin12/aify-env/issues/13)).
+**Piped POSIX cleanup owns a group, not just a root PID.** Spawn creates a detached group without
+unref. Stop uses one bounded TERM/KILL budget and confirms absence only on ESRCH, even when the root
+has already closed; unknown cleanup retains custody. A child whose exit was seen before a new
+attempt cannot authorize a new numeric-group kill. Descendants that leave the group are outside its
+guarantee; numeric PGID custody is not a held-handle identity lease. Windows/PTY Runner stop keeps
+its existing owned ConPTY taskkill exception. Plugins use the released core live-child group/held
+ports. None of these live-child mechanisms changes recovered-record admission or hard-crash recovery.
 
 **The killing decision fails closed.** A recorded pid is only ended if the OS still reports it running
 the launcher we recorded. Pid reuse is real, and ending a stranger's process is a far worse failure

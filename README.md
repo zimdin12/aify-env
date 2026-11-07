@@ -188,10 +188,13 @@ and retains its existing time policy. See [process identity](docs/PROCESS-IDENTI
 format, resident compatibility and gateway limits. Durable writes, unresolved-record retention and
 superseded-owner handling remain tracked in [#17](https://github.com/zimdin12/aify-env/issues/17).
 
-Stopping a launcher must also reach the agent it started. Windows uses `taskkill /T`; POSIX tries the
-process group, then the launcher pid. The POSIX piped fallback does not create its own group, so a
-reported launcher stop can leave descendants running. Whole-tree cleanup is not guaranteed there
-([#13](https://github.com/zimdin12/aify-env/issues/13)); this also limits graceful-shutdown cleanup.
+Piped POSIX children start in their own process group, without unref. Ordinary stop gives that owned
+group TERM grace and then KILL within one bounded budget; only ESRCH confirms cleanup. A dead launcher
+alone cannot certify that its group ended, and unresolved custody survives close and reaper release.
+Descendants that leave the group are outside this guarantee. Windows/PTY Runner stop retains its
+existing `child.kill()` / `taskkill /T` path. Plugins use the core live-child termination ports rather
+than implementing another killer; see [owned process termination](docs/PROCESS-TERMINATION-v1.md) for
+the released API, Windows held-handle boundary and numeric-PGID limitations.
 
 One case it cannot fix and does not hide: if a launcher dies before the agent it started, the agent is
 orphaned with no parent, and no pid-tree walk can find it from the record.
