@@ -74,12 +74,13 @@ test("the lifecycle journal says so when a stop fact moves, after the write, and
   assert.equal(told, 1, "finishing with no stop fact moves none");
 });
 
-test("the daemon answers all three notices with an evaluation, and the runner hands its registry the notice", () => {
+test("the unmoved entry process notice and runner registry remain joined to evaluation", () => {
   // The daemon is never imported (importing it runs it), so its wiring is read, as the other daemon-wiring tests do.
   const daemon = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
   assert.match(daemon, /onProcessChange: \(\) => evaluateAgentState\(\)/);
-  assert.match(daemon, /new AgentTurnEvents\(\{[^}]*onApplied: evaluateAgentState/);
-  assert.match(daemon, /createAgentLifecyclePorts\(\{[\s\S]*?onStopChange: evaluateAgentState/);
+  assert.match(daemon, /evaluate: evaluateAgentState/, 'the real boot API receives that same entry evaluation function');
+  // Moved turn/lifecycle payloads are asserted once through the real API in daemon-boot.test.js.
+  // Their notification behavior is independently exercised by this file's actual receiver/journal cases.
   const runner = fs.readFileSync(new URL("../lib/runner.mjs", import.meta.url), "utf8");
   assert.match(runner, /new ProcessRegistry\(\{ onChange: deps\.onProcessChange \}\)/);
   const ports = fs.readFileSync(new URL("../lib/daemon-agent-lifecycle.mjs", import.meta.url), "utf8");

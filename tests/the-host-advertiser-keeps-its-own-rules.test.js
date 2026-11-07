@@ -9,6 +9,9 @@ import fs from "node:fs";
 import { test } from "node:test";
 
 import { HostAdvertiser } from "../lib/host-advertiser.mjs";
+import { BootFixture } from './fixtures/daemon-boot.mjs';
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
+new ProcessEffectTripwire();
 
 const REGISTRY = JSON.stringify({ version: 1, services: { svc: { endpoint: "http://127.0.0.2:1/mcp/sse", advertise: true } } });
 const DAEMON = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
@@ -37,27 +40,36 @@ test("A VIEW REFUSES THE BEAT ITSELF, not only the timer: a beat fired before th
   const view = advertiser({ stopped: () => true });
   await view.advertiser.beat();
   assert.deepEqual([view.reads, view.posts.length], [0, 0], "a process running nothing described the host");
-  assert.match(DAEMON, /stopped: \(\) => viewOnly,/, "the daemon's advertiser is not told when this process is a view");
+  assert.match(DAEMON, /stopped: \(\) => viewOnly \|\| boot\.cancelled,/, "the entry keeps the advertiser's own view/cancellation guard");
 });
 
 test("A PASS THAT THROWS IS A LOG LINE, never an unhandled rejection that ends the daemon and its workers", async () => {
-  const thrown = advertiser({ host: () => { throw new Error("no host facts"); } });
-  const logs = [];
-  const unhandled = [];
-  const onUnhandled = (reason) => unhandled.push(reason);
-  process.on("unhandledRejection", onUnhandled);
-  let stop = () => {};
+  const thrown = advertiser({ host: () => { throw new Error('no host facts'); } });
+  const logs = [], unhandled = [], boot = new BootFixture(); let starts = 0, cleared = 0, failure;
+  const actualStart = thrown.advertiser.start.bind(thrown.advertiser);
+  thrown.advertiser.start = options => { starts++; return actualStart({ ...options,
+    setIntervalImpl: () => ({}), clearIntervalImpl: () => cleared++ }); };
+  boot.options.advertiser = thrown.advertiser; boot.options.log = line => logs.push(line);
+  const onUnhandled = reason => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
   try {
-    stop = thrown.advertiser.start({ log: (line) => logs.push(line), setIntervalImpl: () => ({}), clearIntervalImpl: () => {} });
-    await new Promise((resolve) => setImmediate(resolve));
+    failure = await boot.boot().then(() => null, error => error);
+    await new Promise(resolve => setImmediate(resolve));
   } finally {
-    stop();
-    process.off("unhandledRejection", onUnhandled);
+    await boot.session.stop('advertising');
+    process.off('unhandledRejection', onUnhandled);
   }
-  assert.deepEqual(unhandled, [], "a throwing pass escaped as an unhandled rejection");
-  assert.ok(logs.some((line) => line.includes("advertise failed: no host facts")), `a failed pass was not logged: ${logs}`);
-  assert.match(DAEMON, /stopAdvertising = advertiser\.start\(\{ log: logLine \}\);/, "the daemon does not beat through the guarded start");
-  assert.doesNotMatch(DAEMON, /advertiser\.beat\(\)/, "the daemon calls a bare beat, which nothing catches");
+  assert.deepEqual({ failed: Boolean(failure), starts, cleared, unhandled: unhandled.length,
+    logged: logs.some(line => line.includes('advertise failed: no host facts')) },
+  { failed: false, starts: 1, cleared: 1, unhandled: 0, logged: true });
+});
+
+test('a cancelled boot refuses future advertiser beats before reading the registry', async () => {
+  const boot = new BootFixture(), r = advertiser({ stopped: () => boot.session.cancelled });
+  await r.advertiser.beat();
+  assert.deepEqual({ reads: r.reads, posts: r.posts.length }, { reads: 1, posts: 1 });
+  boot.session.cancel(); await r.advertiser.beat();
+  assert.deepEqual({ reads: r.reads, posts: r.posts.length }, { reads: 1, posts: 1 }, 'the cancelled pass creates no new read or post');
 });
 
 test("THE PLUGINS FOLLOW ONLY A REGISTRY THAT PARSES: a broken or absent one leaves them as they are", async () => {
@@ -67,5 +79,6 @@ test("THE PLUGINS FOLLOW ONLY A REGISTRY THAT PARSES: a broken or absent one lea
     await r.advertiser.beat();
     assert.deepEqual(followed, expected, JSON.stringify(registry));
   }
-  assert.match(DAEMON, /onServices: \(services\) => followServices\?\.\(services\),/, "the daemon's plugins do not follow the registry the beat reads");
+  assert.match(DAEMON, /onServices: \(services\) => \{ if \(!boot\.cancelled\) boot\.followServices\?\.\(services\); \},/,
+    'the unmoved advertiser callback forwards registry reads only while this boot is open');
 });

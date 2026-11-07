@@ -18,6 +18,7 @@ import { test } from "node:test";
 import { AgentStateHost } from "../lib/agent-state-host.mjs";
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
 import { handleRequest } from "../lib/protocol.mjs";
+import { BootFixture } from './fixtures/daemon-boot.mjs';
 
 const NOW = 1_790_950_000_600_000;
 const lifetime = (n) => `7f3c9e2a-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -85,18 +86,19 @@ test("THROUGH /agents/state: every plugin's offer is read, and one that throws i
   said(broken);
 });
 
-test("the daemon hands the plugins' screens to every state read: /agents/state, the sender and the Herdr panes", () => {
-  const source = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
-  const offer = 'screens: () => servicePlugins.capabilities("screens"),';
-  const between = (from, to) => { const at = source.indexOf(from); return at < 0 ? "" : source.slice(at, source.indexOf(to, at)); };
-  const protocol = between("protocolDeps: async () => (", "advertisingEnabled: ADVERTISE");
-  const observation = between("const stateObservation = {", "};");
-  const sender = between("const sendFor = (", "agentStateSender = sendFor(");
-  const panes = between("paneOpener = paneOpenerFor({", "});");
-  assert.ok(protocol.includes(offer), "GET /agents/state is not given the plugins' screens");
-  assert.ok(observation.includes(offer), "the observation the sender and the panes read is not given the plugins' screens");
-  assert.ok(sender.includes("...stateObservation,"), "the agent-state sender does not read that observation");
-  assert.ok(panes.includes("observation: { stateHost: agentState.host, ...stateObservation }"), "the Herdr panes do not read that observation");
+test("the daemon hands the plugins' screens to every state read: /agents/state, the sender and the Herdr panes", async () => {
+  const source = fs.readFileSync(new URL('../bin/aify-env.mjs', import.meta.url), 'utf8');
+  const begin = source.indexOf('protocolDeps: async () => ('), end = source.indexOf('\n}));', begin);
+  assert.ok(begin > 0 && end > begin, 'the unmoved HTTP dependencies have a real bounded end');
+  assert.ok(source.slice(begin, end).includes('screens: () => servicePlugins.capabilities("screens"),'));
+  const f = new BootFixture(), first = () => [], second = () => []; let offered = [first];
+  f.plugins.capabilities = name => name === 'screens' ? offered : [];
+  await f.boot();
+  assert.deepEqual({ sender: f.captured.sender.screens()[0] === first, pane: f.captured.pane.observation.screens()[0] === first },
+    { sender: true, pane: true });
+  offered = [second];
+  assert.deepEqual({ sender: f.captured.sender.screens()[0] === second, pane: f.captured.pane.observation.screens()[0] === second },
+    { sender: true, pane: true }, 'both moved readers ask the live registry instead of keeping boot sightings');
 });
 
 test("THROUGH THE SENDER: the published snapshot carries the word the screen decides", async (t) => {

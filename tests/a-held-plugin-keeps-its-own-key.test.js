@@ -19,6 +19,7 @@ import { credentialForTarget } from "../lib/credential-resolve.mjs";
 import { followRegistry, pluginCredential } from "../lib/plugin-bootstrap.mjs";
 import { pluginsForServices } from "../lib/plugins/index.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
+import { BootFixture } from './fixtures/daemon-boot.mjs';
 
 const NEWLINE = String.fromCharCode(10);
 const ALLOWED = ["#!/bin/bash", 'HARNESS_WRAPPER_VERSION="0.6.0"', ""].join(NEWLINE);
@@ -178,7 +179,7 @@ witness("THE DAEMON'S OWN WIRING hands the asking plugin's entry to the resolver
   const daemon = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
   const begin = daemon.indexOf("async function resolvePluginCredential(");
   const end = daemon.indexOf(NEWLINE + "}", begin);
-  const property = daemon.split(NEWLINE).filter((line) => line.includes("credential: async (service, field) =>"));
+  const property = daemon.split(NEWLINE).filter((line) => line.includes('credential: (service, field) =>'));
   assert.ok(begin > 0 && end > begin, "the daemon's resolver must remain identifiable");
   assert.equal(property.length, 1, "the host's credential property must remain identifiable");
   const resolved = [];
@@ -188,7 +189,9 @@ witness("THE DAEMON'S OWN WIRING hands the asking plugin's entry to the resolver
     credentialReading: () => ({}),
   };
   const { runInNewContext } = await import("node:vm");
-  const host = runInNewContext(`${daemon.slice(begin, end + 2)}; ({ ${property[0].trim()} })`, context);
+  const entry = runInNewContext(`${daemon.slice(begin, end + 2)}; ({ ${property[0].trim()} })`, context);
+  const boot = new BootFixture(); boot.options.credential = entry.credential;
+  await boot.boot(); const host = boot.captured.plugins;
   assert.equal(await host.credential(comms(OLD, "KEY_OLD")), "key-for-aify-comms");
   assert.equal(await host.credential(null), "", "no entry, no key");
   // And a named credential's field reaches pluginCredential: dropped, the plugin would be handed the API key instead.

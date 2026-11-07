@@ -41,7 +41,7 @@ import { postAdvertisement } from "../lib/post-advertisement.mjs";
 import { DEFAULT_PORT, portFromArgs } from "../lib/port-argument.mjs";
 import { anotherServesAt } from "../lib/serving-endpoint.mjs";
 import { instanceContextArgument } from "../lib/instance-context.mjs";
-import { prepareInstance, publishInstanceReady } from "../lib/instance-bootstrap.mjs";
+import { prepareInstance } from "../lib/instance-bootstrap.mjs";
 import { USAGE, asksForHelp, asksForVersion, refuseUnknownFlag } from "../lib/usage.mjs";
 import { createServer } from "node:http";
 import { createDaemonHttp } from "../lib/daemon-http.mjs";
@@ -52,14 +52,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { handleRequest } from "../lib/protocol.mjs";
-import { startInputSocket } from "../lib/input-socket-start.mjs";
 import { readHostConfig } from "../lib/host-config.mjs";
 import { readGrantedRoots } from "../lib/watch-roots.mjs";
 import { LaunchRoots, launchRootsPath } from "../lib/launch-roots.mjs";
 import { createReaper } from "../lib/reaper.mjs";
 import { createShutdown } from "../lib/shutdown.mjs";
 import { daemonShutdownHooks } from "../lib/shutdown-hooks.mjs";
-import { startDaemonView } from "../lib/daemon-view.mjs";
+import { BootSession, BootCancelled } from '../lib/daemon-boot-session.mjs';
+import { startDaemonBoot } from '../lib/daemon-boot.mjs';
 import { Runner, terminalSupport } from "../lib/runner.mjs";
 import { createOwnershipRecovery } from '../lib/ownership-bootstrap.mjs';
 import {
@@ -74,18 +74,9 @@ import { homedir, hostname } from "node:os";
 import { PackageBuild } from "../lib/build-identity.mjs";
 import { aifyLauncherFilesOnPath } from "../lib/launcher-scan.mjs";
 import { DefinitionStore } from "../lib/agent-definitions.mjs";
-import { outsideRootsWarning } from "../lib/definition-checks.mjs";
 import { readServices } from "../lib/services.mjs";
 import { ServicePlugins } from "../lib/service-plugins.mjs";
-import { startDaemonPlugins } from "../lib/daemon-plugin-bootstrap.mjs";
-import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
-import { SessionFolders, sessionsRoot } from "../lib/session-folders.mjs";
-import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
-import { AgentStateSender, REPORT_EVERY_MS } from "../lib/agent-state-sender.mjs";
-import { AgentTurnEvents } from "../lib/agent-turn-events.mjs";
-import { ModelSelections } from "../lib/model-selections.mjs";
 import { advertisementPathFor, pluginsForServices } from "../lib/plugins/index.mjs";
-import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
 import { pluginCredential } from "../lib/plugin-bootstrap.mjs";
 import { HostAdvertiser } from "../lib/host-advertiser.mjs";
 import { credentialRoot } from "../lib/credential-fs.mjs";
@@ -248,9 +239,10 @@ async function reapLeftovers() {
   return ownership.recovery.recover();
 }
 
+const boot = new BootSession();
 const runner = new Runner({ ownedFile: OWNED_FILE, ownedRecord: ownership.record,
-  startGate: () => ownership.recovery.admitStart(),
-  managedHost: () => agentState ? { ...agentState, url: `http://${HOST}:${server.address().port}` } : null,
+  startGate: () => ownership.recovery.admitStart(), assertOpen: boot.assertOpen,
+  managedHost: () => boot.agentState ? { ...boot.agentState, url: `http://${HOST}:${server.address().port}` } : null,
   reportManaged: (problem) => logLine(problem),
   // A process came or went: its agent's word is published now, not on the next sweep (the operator, 2026-10-25).
   onProcessChange: () => evaluateAgentState(),
@@ -259,11 +251,11 @@ const runner = new Runner({ ownedFile: OWNED_FILE, ownedRecord: ownership.record
 // SERVICE PLUGINS. This host runs processes for whoever asked; a plugin is how a SERVICE teaches it
 // to fetch that work. The daemon never names a service -- `pluginsForServices` maps registry entries
 // to plugins -- so adding a second `aify-` service changes nothing here.
-const servicePlugins = new ServicePlugins();
+const servicePlugins = new ServicePlugins({ canStart: () => !boot.cancelled });
 // THIS HOST'S AGENT DEFINITIONS (P0 C3, C4, C7, C10), shared by the plugins and `/agents/importable`. Made
 // outside the statements the bootstrap tests evaluate, so those hand the plugin a stand-in, never this one.
 // A removed definition may leave a session folder to remove (lib/session-folders.mjs).
-const definitionStore = new DefinitionStore({ onRemoved: (id) => agentState?.sessionFolders?.notice(id) });
+const definitionStore = new DefinitionStore({ onRemoved: (id) => boot.agentState?.sessionFolders?.notice(id) });
 
 /**
  * WHERE THIS HOST WILL RUN WORK: the directory it was started in, and below, plus the roots the operator added on
@@ -282,20 +274,9 @@ const LAUNCH_ROOTS = new LaunchRoots({ startFolder: process.cwd(), file: launchR
 /** The identity a plugin needs to name this environment to its service. The SHAPE of that name is
  *  the service's business, so only the facts travel. */
 function currentAdvertisementBody() {
-  // `hostIdentityFacts`, not a separate `environmentKind` call: ONE PROBE, THREE FACTS. Taking the
-  // probe twice is how the machine id the service arbitrates supersession on came to inherit an
-  // environment variable absent in many child processes, letting two tiers name one machine two
-  // different things with nothing raised.
-  const { kind, machineId } = hostIdentityFacts({
-    platform: process.platform,
-    hostname: hostname(),
-    env: process.env,
-    exists: existsSync,
-    isWsl: hostIsWsl(),
-  });
-  // The plugin is a second heartbeat writer, and with `"advertise": false` the only one: the body,
-  // machine id and currency pair included, is `pluginHeartbeatBody`'s (lib/advertise.mjs).
-  return pluginHeartbeatBody({ hostname: hostname(), kind, machineId, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk(),
+  const { hostname: hostName, kind, machineId } = boot.identity;
+  // Identity is shared with lifecycle/publication; disk and grants are still read at each use.
+  return pluginHeartbeatBody({ hostname: hostName, kind, machineId, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk(),
     launchRoots: LAUNCH_ROOTS.current() });
 }
 
@@ -333,19 +314,14 @@ const NO_DASHBOARD = ["1", "true", "yes"].includes(
  * a log line that vanished into a ring nobody is rendering would be worse than one printed over a
  * frame. So this flips on success and stays false otherwise.
  */
-let dashboardOwnsScreen = false;
-
 /** The daemon's own voice: into the view when it owns the screen, to stderr when it does not. */
 function logLine(message) {
-  if (dashboardOwnsScreen) {
+  if (boot.ownsScreen) {
     NOTICES.add(message);
     return;
   }
   process.stderr.write(`[aify-env] ${message}${chr10}`);
 }
-/** Set once the view is running, so shutdown can stop redrawing before it tears anything down. */
-let stopDashboard = () => {};
-
 // AND DIE TOGETHER — one path, in lib/shutdown.mjs, because there were two here and they disagreed.
 //
 // The other handler closed the server and exited on the grounds that this environment going down was
@@ -356,18 +332,23 @@ let stopDashboard = () => {};
 // The record on disk still covers the hard kill that runs no handler at all. Both halves are needed.
 const shutdown = createShutdown(daemonShutdownHooks({
   runner,
-  stopView: () => { stopAgentStateSending(); stopDashboard(); },
-  releaseResidents: () => agentState?.residents?.release(),
-  inputSocket: () => inputSocketServer,
-  servicePlugins,
+  stopView: () => {
+    boot.cancel();
+    stopAgentStateSending();
+    void boot.stop('advertising').catch(error => logLine(`advertising stop: ${error?.message || error}`));
+    void boot.stop('view').catch(error => logLine(`view stop: ${error?.message || error}`));
+  },
+  releaseResidents: () => boot.agentState?.residents?.release(),
+  inputSocket: () => ({ stop: () => boot.stop('socket') }),
+  servicePlugins: { stopAll: () => boot.finishBootAndStopPlugins(servicePlugins) },
   closeHttpServer: () => server.close(),
   // OURS ONLY, on the way out too. Shutdown emptied the whole file, so an environment stopping
   // normally erased a concurrently-running instance's record exactly as the boot reap did.
   clearOwned: () => runner.retireEndedRecords(),
-  exit: (code) => process.exit(code),
+  exit: (code) => process.exit(boot.failureExitCode ?? code),
   write: (line) => process.stderr.write(line),
   // B5: the managed key's sender, retired once its workers are stopped (lib/agent-state-sender.mjs retire).
-  retireAgentState: ({ signal }) => agentStateSender?.retire({ signal }),
+  retireAgentState: ({ signal }) => boot.sender?.retire({ signal }),
 }));
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) {
   try {
@@ -393,8 +374,6 @@ const traffic = { requests: 0, bytesOut: 0 };
 
 // The local input socket, once it is listening. Advertised on /health so a client discovers it
 // rather than guessing an address, and empty whenever this host has none.
-let inputSocketAddress = "";
-let inputSocketServer = null;
 const HOST_CONFIG = readHostConfig({ env: process.env });
 
 const server = createServer(createDaemonHttp({
@@ -402,15 +381,15 @@ const server = createServer(createDaemonHttp({
   protocolDeps: async () => (
       {
         runner,
-        turnEvents: agentState?.turnEvents,
-        gateways: agentState?.gateways,
-        modelSelections: agentState?.modelSelections,
-        stateHost: agentState?.host ?? null,
-        lifecycle: agentState?.lifecycle ?? null,
-        sessionFolders: agentState?.sessionFolders ?? null,
-        residents: agentState?.residents?.report() ?? null,
+        turnEvents: boot.agentState?.turnEvents,
+        gateways: boot.agentState?.gateways,
+        modelSelections: boot.agentState?.modelSelections,
+        stateHost: boot.agentState?.host ?? null,
+        lifecycle: boot.agentState?.lifecycle ?? null,
+        sessionFolders: boot.agentState?.sessionFolders ?? null,
+        residents: boot.agentState?.residents?.report() ?? null,
         observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
-        inputSocket: inputSocketAddress,
+        inputSocket: boot.inputSocket?.address ?? '',
         readFile: (path) => readFileSync(path, "utf8"),
         version: VERSION,
         build: BUILD,
@@ -465,25 +444,19 @@ let superseding = false;
  * attached. External review, Round 8 M15.
  */
 let viewOnly = false;
-/** Cleared by the refusal path when the advertise timer has already been armed. See `viewOnly`. */
-let stopAdvertising = null;
-//: Set once the service plugins have started: brings them level with a registry that was read.
-let followServices = null;
-let agentState = null;
-let agentStateSender = null, stateEvaluationTimer = null, stateSendingStopped = false, paneOpener = null;
 // The residents role is tried at the first evaluation and on every sweep while not held, and its population published
 // on the same beat (lib/daemon-residents.mjs).
 function evaluateAgentState() {
-  if (viewOnly || stateSendingStopped) return;
-  void agentStateSender?.tick().catch(() => logLine("agent state: evaluation-failed"));
-  void agentState?.residents?.tick().catch(() => logLine("residents: evaluation-failed"));
-  void paneOpener?.report().catch(() => logLine("herdr: pane reports failed"));
+  if (viewOnly || boot.sendingStopped) return;
+  void boot.sender?.tick().catch(() => logLine("agent state: evaluation-failed"));
+  void boot.agentState?.residents?.tick().catch(() => logLine("residents: evaluation-failed"));
+  void boot.paneOpener?.report().catch(() => logLine("herdr: pane reports failed"));
 }
 function stopAgentStateSending() {
-  stateSendingStopped = true;
-  if (stateEvaluationTimer) { clearInterval(stateEvaluationTimer); stateEvaluationTimer = null; }
-  agentStateSender?.stop();
-  void agentState?.residents?.release();
+  boot.sendingStopped = true;
+  if (boot.evaluationTimer) { clearInterval(boot.evaluationTimer); boot.evaluationTimer = null; }
+  boot.sender?.stop();
+  void boot.agentState?.residents?.release();
 }
 server.on("error", async (failure) => {
   if (failure?.code === "EADDRINUSE") {
@@ -565,8 +538,9 @@ server.on("error", async (failure) => {
       // yet (the flag stops it arming) or may already have (the clear stops it continuing). One
       // without the other is a race that presents as "sometimes it keeps advertising".
       viewOnly = true;
+      boot.cancel();
       stopAgentStateSending();
-      if (stopAdvertising) { stopAdvertising(); stopAdvertising = null; }
+      void boot.stop('advertising').catch(error => logLine(`advertising stop: ${error?.message || error}`));
       process.argv = [
         process.argv[0],
         fileURLToPath(new URL("./aify-env-tui.mjs", import.meta.url)),
@@ -606,162 +580,36 @@ server.on("error", async (failure) => {
 });
 
 server.listen(port, HOST, async () => {
-  const bound = server.address();
-  const support = terminalSupport();
-  try { agentState = bootDaemonAgentState({ aifyHome: join(homedir(), ".aify"), context: instanceContext,
-    url: `http://${HOST}:${bound.port}`, report: logLine, onAgentEnded: (id) => agentState?.sessionFolders?.notice(id) });
-    agentState.turnEvents = new AgentTurnEvents({ ...agentState, report: logLine, onApplied: evaluateAgentState });
-    agentState.modelSelections = new ModelSelections({ host: agentState.host, instance: agentState.instance,
-      residents: agentState.residents, definitions: definitionStore,
-      installed: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map(row => row.client)), report: logLine });
-    agentState.lifecycle = createAgentLifecyclePorts({ aifyHome: join(homedir(), ".aify"), owner: agentState.lifecycleOwner,
-      machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(),
-        env: process.env, exists: existsSync, isWsl: hostIsWsl() }).machineId,
-      stateHost: agentState.host, residents: agentState.residents, runner, definitions: definitionStore, onStopChange: evaluateAgentState,
-      processes: agentState.processes,
-      cwdRoots: () => LAUNCH_ROOTS.current(), windows: process.platform === 'win32',
-      installed: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) });
-  }
-  catch (error) { process.stderr.write(`[aify-env] agent state boot failed: ${error.message}\n`); process.exit(2); }
-  agentState.sessionFolders = new SessionFolders({ root: sessionsRoot(homedir()), definitions: definitionStore,
-    identity: agentState.lifecycle.rawIdentity, report: logLine });
-  void agentState.sessionFolders.reconcile().catch((error) => logLine(`session folders: ${error?.message || error}`));
-  // The listener is bound; recovery still verifies each original owner and child. It never
-  // treats a free port, a dead root or an attempted kill as confirmed tree cleanup.
-  if (instanceContext) {
-    try { publishInstanceReady(instanceContext, { pid: process.pid, envInstance: runner.instance(), port: bound.port, build: BUILD }); }
-    catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }
-  } else await reapLeftovers();
-
-  const stateObservation = { definitions: definitionStore, lifecycle: agentState.lifecycle, cwdRoots: () => LAUNCH_ROOTS.current(), screens: () => servicePlugins.capabilities("screens"),
-    observedHarnesses: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)) };
-  // Only after serving and successful durable boot/readiness. Sweep cadence is configurable;
-  // this fixed beat evaluates boot-anchored quiet epochs even when the sweep is much slower.
-  if (!viewOnly && !stateSendingStopped) {
-    // One sender per population: this daemon's own (managed) key now, the residents' key while it holds the role.
-    const sendFor = ({ instance, generation, ...population }) => new AgentStateSender({
-      identity: { machineId: hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
-        exists: existsSync, isWsl: hostIsWsl() }).machineId, instance, generation, build: BUILD },
-      ...stateObservation,
-      readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"), credentialOptions: credentialReading, report: logLine, ...population,
-    });
-    agentStateSender = sendFor({ instance: agentState.instance, generation: agentState.generation, stateHost: agentState.host });
-    agentState.residents.attachSender(sendFor);
-    evaluateAgentState();
-    stateEvaluationTimer = setInterval(evaluateAgentState, REPORT_EVERY_MS);
-    stateEvaluationTimer.unref();
-  }
-
-  // KEYSTROKES OVER A LOCAL SOCKET, when this host wants one. lib/input-socket-start.mjs owns the
-  // platform branches and the rule that failing to listen is not failing to serve.
-  //
-  // IT CARRIES INPUT AND RESIZE, NOTHING ELSE. Those two routes need the runner and nothing more, so
-  // the socket is not a second door onto the whole API: a frame naming any other path is refused.
-  inputSocketServer = await startInputSocket({
-    enabled: HOST_CONFIG.localSocket, port: bound.port, handleRequest, deps: () => ({ runner }), log: logLine,
-  });
-  inputSocketAddress = inputSocketServer?.address ?? "";
-
-  // START THE SERVICE PLUGINS, and only now: a plugin claims work, and work claimed before the
-  // leftover reap could be killed by it moments later. After LISTENING, because a plugin that claims
-  // a spawn needs this host able to run it.
-  //
-  // The bootstrap test evaluates these statements without importing the daemon or binding a port.
-  // Keep host identity in this payload so every plugin receives the canonical machine id.
-  paneOpener = paneOpenerFor({ env: process.env, dedicatedRoot: instanceContext?.root, base: `http://${HOST}:${bound.port}`,
-    node: process.execPath, script: fileURLToPath(import.meta.url), log: logLine, watchExit: (id, on) => runner.subscribe(id, () => {}, on),
-    observation: { stateHost: agentState.host, ...stateObservation } });
-  // A DEDICATED INSTANCE STARTS THEM TOO. Was `if (!instanceContext)`, which left it with no `agents`
-  // capability, so the picker answered 503 beside a service that was registered and healthy.
   try {
-    followServices = await startDaemonPlugins({
-      registry: servicePlugins, runner, paneOpener,
-      cwdRoots: () => LAUNCH_ROOTS.current(), windows: process.platform === 'win32',
-      // `field`: another of the entry's stored credentials (1e6101b; pluginCredential, plugin-bootstrap.mjs).
-      credential: async (service, field) => resolvePluginCredential(service, field),
-      log: (message) => logLine(message),
-      // What started plugins add to a defined worker's env, asked at each start (lib/plugins/aify-comms/spawn-env.mjs).
-      spawnEnv: () => servicePlugins.capabilities("spawnEnv"),
-      makeShared: () => ({
-        version: VERSION,
-        machineId: hostIdentityFacts({
-          platform: process.platform, hostname: hostname(), env: process.env,
-          exists: existsSync, isWsl: hostIsWsl(),
-        }).machineId,
-        // Resolved when asked rather than captured: a registry edit or a rotated key must reach a
-        // running plugin without a restart.
-        advertisement: async () => currentAdvertisementBody(),
-        cwdRoots: async () => LAUNCH_ROOTS.current(),
-        windows: process.platform === "win32",
-        definitions: definitionStore,
-        agents: agentState?.lifecycle ?? null,
-        installedHarnesses: async () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map((h) => h.client)),
-        // A herdr's DEDICATED instance starts plugins too, so a plugin that must run once per host (aify-dashboard's
-        // git watcher) asks this and defers while an ordinary aify-env answers at the default address.
-        servedElsewhere: instanceContext === null ? async () => false : ({ signal } = {}) => anotherServesAt(`http://127.0.0.1:${DEFAULT_PORT}`, { signal }),
-        watchRoots: async () => readGrantedRoots({ definitions: definitionStore }),  // what a plugin may read (lib/watch-roots.mjs)
-      }),
-      readServices: () => readServices(readFileSync(REGISTRY_FILE, "utf8")),
-      build: pluginsForServices,
-      report: (line) => process.stderr.write(`[aify-env] ${line}${chr10}`),
+    await startDaemonBoot({
+      session: boot, bound: server.address(), host: HOST, home: homedir(), instanceContext,
+      runner, definitions: definitionStore, plugins: servicePlugins, version: VERSION, build: BUILD, pid: process.pid,
+      env: process.env, node: process.execPath, script: fileURLToPath(import.meta.url), windows: process.platform === 'win32',
+      identity: () => {
+        const name = hostname();
+        return { hostname: name, ...hostIdentityFacts({ platform: process.platform, hostname: name,
+          env: process.env, exists: existsSync, isWsl: hostIsWsl() }) };
+      },
+      roots: () => LAUNCH_ROOTS.current(),
+      installed: () => new Set(installedHarnesses(aifyLauncherFilesOnPath()).map(row => row.client)),
+      readRegistry: () => readFileSync(REGISTRY_FILE, 'utf8'),
+      readServices: () => readServices(readFileSync(REGISTRY_FILE, 'utf8')), buildPlugins: pluginsForServices,
+      credential: (service, field) => resolvePluginCredential(service, field), credentialReading,
+      advertisement: currentAdvertisementBody, readGrantedRoots,
+      servedElsewhere: ({ signal } = {}) => anotherServesAt(`http://127.0.0.1:${DEFAULT_PORT}`, { signal }),
+      localSocket: HOST_CONFIG.localSocket, handleRequest, registryPath: REGISTRY_FILE,
+      noDashboard: NO_DASHBOARD, notices: NOTICES, shutdown,
+      recover: reapLeftovers, evaluate: evaluateAgentState, viewOnly: () => viewOnly,
+      advertiser, advertising: ADVERTISE,
+      log: logLine, report: line => process.stderr.write(`[aify-env] ${line}${chr10}`),
+      write: line => process.stdout.write(line),
     });
   } catch (error) {
-    process.stderr.write(`[aify-env] service plugins not started: ${error?.message || error}
-`);
+    if (error instanceof BootCancelled) return;
+    boot.failureExitCode = error?.exitCode ?? 1;
+    process.stderr.write(`${error?.message || error}${chr10}`);
+    void shutdown('boot-failed');
   }
-  // One write, so the banner arrives whole. Two writes is a race for anything reading startup output
-  // to know the process is up — including the tests, which caught exactly that.
-  process.stdout.write(
-    `aify-env ${VERSION} listening on http://${HOST}:${bound.port}\n`
-    // Said at startup rather than discovered when a console renders nothing.
-    + (support.available
-      // The backend is named only when it is the NON-default one, so a normal boot is unchanged and an
-      // operator running the conpty-DLL experiment can see at a glance that their variable took.
-      ? `terminals: available${support.conptyDll ? " (conpty DLL backend, AIFY_ENV_CONPTY_DLL=1)" : ""}\n`
-      : `terminals: UNAVAILABLE (${support.reason}) — processes will run with piped stdio\n`),
-  );
-
-  // THE TERMINAL THAT STARTS THE ENVIRONMENT SHOWS WHAT IT IS DOING. Operator request, 2026-08-24:
-  // running `aify-env` should open the view, not print two lines and go quiet.
-  //
-  // Only when stdout is a TTY. Piped or redirected -- a service manager, a log file, a test capturing
-  // startup -- keeps the plain banner, because screen-clearing escapes in a log are noise nobody asked
-  // for and that banner is what those readers parse.
-  //
-  // The view owns no lifecycle: `stop` is called from the shutdown path, so an interrupt still means
-  // "take the managed processes with you" rather than being pre-empted by a handler belonging to a
-  // screen. Two exit paths racing is the defect this repo just removed.
-  // THE VIEW IS ONE SUBJECT AND LIVES IN ONE MODULE. It carries the daemon's keyboard policy --
-  // Ctrl+C is this environment's shutdown, `q` is nothing -- and that policy could not be tested
-  // while it lived here, because importing this file STARTS a daemon.
-  const view = await startDaemonView({
-    endpoint: `http://${HOST}:${bound.port}`,
-    // `REGISTRY_FILE`, NOT a second `homedir()` join: one path with two resolvers is how the sealed
-    // one stops being the one that runs. External review, Round 8 H1.
-    registryPath: REGISTRY_FILE,
-    runner,
-    shutdown,
-    // A FUNCTION, NOT A CAPABILITY. Plugins start after the server binds, so a value resolved on
-    // this line would be null for the life of the process -- the same reason the request handler
-    // asks per request rather than capturing one.
-    agents: () => servicePlugins.capability("agents"),
-    herdrSpaces: Boolean(paneOpener),
-    notices: NOTICES,
-    enabled: !NO_DASHBOARD,
-    intervalMs: Number(process.env.AIFY_TUI_REFRESH_MS || 2000),
-    // SEPARATE FROM THE REFRESH INTERVAL, because they bound different costs: `intervalMs`
-    // bounds an HTTP round trip, this bounds a render while a console is open.
-    paneRepaintMs: Number(process.env.AIFY_PANE_REPAINT_MS || 80),
-    color: !process.env.NO_COLOR,
-  });
-  stopDashboard = view.stop;
-  // AFTER the first frame -- `startDaemonView` resolves once a screen is visible -- so nothing
-  // written before that is held back from a terminal that was not yet being repainted.
-  dashboardOwnsScreen = view.ownsScreen;
-  // THE AGENTS THIS ENVIRONMENT CANNOT START, said where it was started rather than at their first refused spawn.
-  definitionStore.list()
-    .then((listed) => outsideRootsWarning(listed.definitions, LAUNCH_ROOTS.current(), { windows: process.platform === "win32" }))
-    .then((warning) => { if (warning) logLine(warning); }, () => {});
 });
 
 const SWEEP_MS = Number(process.env.AIFY_SWEEP_MS || 30_000);
@@ -782,18 +630,14 @@ const advertiser = new HostAdvertiser({
   everyMs: Number(process.env.AIFY_ADVERTISE_MS || 30_000),
   redetectMs: Number(process.env.AIFY_ADVERTISE_REDETECT_MS || 300_000),
   readRegistry: () => readFileSync(REGISTRY_FILE, "utf8"),
-  onServices: (services) => followServices?.(services),
-  stopped: () => viewOnly,
+  onServices: (services) => { if (!boot.cancelled) boot.followServices?.(services); },
+  stopped: () => viewOnly || boot.cancelled,
   host: () => {
-    // ONE PROBE, THREE FACTS. `isWsl` used to be `kind === "wsl"`, so the machine id the service
-    // arbitrates supersession on inherited an environment variable that is absent in many child
-    // processes -- and the aify-comms bridge on the same host reads /proc, so the two tiers could name
-    // one machine two different things with nothing raised. `hostIdentityFacts` takes the probe once.
-    const { kind, os: hostOs, machineId } = hostIdentityFacts({ platform: process.platform, hostname: hostname(), env: process.env,
-      exists: existsSync, isWsl: hostIsWsl() });
+    // Stable identity is the same boot value used by lifecycle, senders and service plugins.
+    const { hostname: hostName, kind, os: hostOs, machineId } = boot.identity;
     const support = terminalSupport();
     // WHAT IS ON DISK NOW, beside what this process loaded at boot. Cached, so a beat every 30 seconds does not re-hash.
-    return { hostname: hostname(), kind, os: hostOs, machineId, terminal: support.available, terminalReason: support.reason,
+    return { hostname: hostName, kind, os: hostOs, machineId, terminal: support.available, terminalReason: support.reason,
       version: VERSION, instance: BUILD, codeOnDisk: PACKAGE_BUILD.onDisk(), launchRoots: LAUNCH_ROOTS.current() };
   },
   harnesses: () => installedHarnesses(aifyLauncherFilesOnPath()),
@@ -803,10 +647,4 @@ const advertiser = new HostAdvertiser({
   say: (line) => process.stderr.write(`[aify-env] ${line}${chr10}`),
 });
 
-if (ADVERTISE) {
-  // NOT FROM A VIEW. See `viewOnly`: a process that refused a takeover runs nothing, so describing
-  // this host from it hands the service capabilities nobody will deliver. The beat refuses from a view too.
-  if (!viewOnly) {
-    stopAdvertising = advertiser.start({ log: logLine });
-  }
-}
+// Advertising is acquired by startDaemonBoot only after a successful bind and nonthrowing boot.

@@ -115,9 +115,9 @@ test("THE REAL LAUNCH GUARD refuses a service's cwd that climbs out of a root wi
 
 test("THE DAEMON HANDS EVERY READER the live roots, not a list taken at start", () => {
   const source = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs"), "utf8");
-  assert.doesNotMatch(source, /CWD_ROOTS/, "a fixed list is still in use");
-  assert.match(source, /cwdRoots: async \(\) => LAUNCH_ROOTS\.current\(\)/, "the claim guard's roots are not read per claim");
-  assert.match(source, /cwdRoots: \(\) => LAUNCH_ROOTS\.current\(\)/, "agent state judges availability against a fixed list");
+  assert.match(source, /roots: \(\) => LAUNCH_ROOTS\.current\(\)/, 'the boot API receives the host live supplier');
+  assert.match(source, /cwdRoots: LAUNCH_ROOTS\.current\(\)/, 'HTTP dependencies ask on every request');
+  // Moved consumers' live reads are exercised by service-launch-roots/daemon-boot API tests; a bin-only negative scan would be vacuous.
   assert.match(source, /launchRootsFile: LAUNCH_ROOTS\.read\(\)/, "/health does not say what the file added");
 });
 

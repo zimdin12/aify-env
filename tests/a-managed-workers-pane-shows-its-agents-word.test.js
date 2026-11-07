@@ -208,7 +208,7 @@ test("THE DAEMON ASKS FOR THE REPORTS wherever it evaluates agent state, read ra
   // Importing bin/aify-env.mjs starts a daemon, so the one call that makes any of this happen is checked in its source.
   const source = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
   const evaluate = source.slice(source.indexOf("function evaluateAgentState() {"), source.indexOf("function stopAgentStateSending()"));
-  assert.match(evaluate, /void paneOpener\?\.report\(\)\.catch\(/, "no evaluation tells a pane its word");
+  assert.match(evaluate, /void boot\.paneOpener\?\.report\(\)\.catch\(/, "no evaluation tells the acquired boot pane its word");
 });
 
 test("THE LAUNCHER STANDS DOWN ONLY WHERE A WORD WILL COME: AIFY_HERDR_PANE_REPORTER=herdr:aify, beside the pane file", async (t) => {

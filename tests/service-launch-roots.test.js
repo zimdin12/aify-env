@@ -2,7 +2,7 @@
 // All effects are fake; this file can be selected for isolated guard mutants, never native qualification.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import fs from 'node:fs';
+import { BootFixture } from './fixtures/daemon-boot.mjs';
 import { PluginProcesses } from '../lib/service-plugins.mjs';
 import { Runner } from '../lib/runner.mjs';
 import { handleRequest } from '../lib/protocol.mjs';
@@ -30,18 +30,16 @@ function terminalRunner({ loadCheckpoint = null } = {}) {
 }
 const typed = error => error instanceof LaunchRootRefusal && error.code === 'LAUNCH_ROOTS_REFUSED';
 
-for (const [name, marker, endField] of [
-  ['plugin assembly', 'startDaemonPlugins({', 'credential:'],
-  ['core lifecycle', 'createAgentLifecyclePorts({', 'installed:'],
-]) test(`the actual daemon ${name} payload supplies live host roots and host platform`, () => {
-  // Importing the entry starts a daemon. Read its actual bounded payload prefix instead.
-  const source = fs.readFileSync(new URL('../bin/aify-env.mjs', import.meta.url), 'utf8');
-  const begin = source.indexOf(marker), end = source.indexOf(endField, begin);
-  assert.ok(begin > 0 && end > begin, 'the known payload and following field both exist');
-  const payload = source.slice(begin, end);
-  assert.match(payload, /cwdRoots:\s*\(\)\s*=>\s*LAUNCH_ROOTS\.current\(\)/, 'authority is the host live supplier, never a captured array or service request');
-  assert.match(payload, /windows:\s*process\.platform\s*===\s*['"]win32['"]/, 'the host platform selects lexical semantics');
-});
+for (const [name, key] of [['plugin assembly', 'plugins'], ['core lifecycle', 'lifecycle']]) {
+  for (const windows of [false, true]) test(`the actual daemon ${name} payload supplies live roots and windows=${windows}`, async () => {
+    const f = new BootFixture(); f.options.windows = windows;
+    await f.boot(); const payload = f.captured[key];
+    assert.equal(typeof payload.cwdRoots, 'function', 'authority remains a live supplier');
+    assert.deepEqual(payload.cwdRoots(), ['/workspace']);
+    f.facts.roots = ['/changed'];
+    assert.deepEqual({ roots: payload.cwdRoots(), windows: payload.windows }, { roots: ['/changed'], windows });
+  });
+}
 
 test('a generic plugin outside host roots refuses before its runner or post-start decoration', async () => {
   const runner = recordingRunner(); let decorated = 0;

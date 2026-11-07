@@ -59,13 +59,7 @@ test('the production pass asks through the daemon\'s cache: no read blocks, the 
     assert.equal(spawned.taken(), 0, 'nor did reclaiming it');
   });
 
-test('the daemon hands its lifecycle ports the cache\'s answer, without which no source is ever witnessed', () => {
-  // Read, never imported: importing bin starts the daemon. A dropped line fails closed and silently (nothing reclaimed).
-  const source = fs.readFileSync(path.join(import.meta.dirname, '../bin/aify-env.mjs'), 'utf8');
-  const call = source.slice(source.indexOf('createAgentLifecyclePorts({'), source.indexOf('});', source.indexOf('createAgentLifecyclePorts({')));
-  assert.match(call, /onStopChange/, 'positive control: the slice is the lifecycle ports call');
-  assert.match(call, /\bprocesses: agentState\.processes,/, 'the plugin\'s agents port answers from the daemon\'s ProcessProbeCache');
-});
+// The moved lifecycle cache/onStopChange payload is asserted once by daemon-boot.test.js's real API case.
 
 test('a pid reused after its agent ended keeps its old answer until the next probe lands, and only then is the source reclaimed',
   { skip: prerequisite }, async t => {

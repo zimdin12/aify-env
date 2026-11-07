@@ -25,6 +25,7 @@ import { createHandleBook, runOneControl } from "../lib/plugins/aify-comms/termi
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
 import { Runner } from "../lib/runner.mjs";
 import { PluginHost, PluginProcesses, ServicePlugins } from "../lib/service-plugins.mjs";
+import { BootFixture } from './fixtures/daemon-boot.mjs';
 
 const ALL = new Set(["claude", "codex", "hermes"]);
 const SECRETS = { project: "p1", names: ["OPENAI_API_KEY"] };
@@ -210,30 +211,27 @@ test("ROUTE B, RESTART: a refused contribution after the stop keeps the restart'
   assert.equal(h.starts.length, 0, "and no start");
 });
 
-test("ROUTE C STAYS REFUSED: the daemon's lifecycle ports supply no builder, and the default refuses before any start", async () => {
-  // The negative production-wiring control (rev 2, C). The day bin wires a `buildSpec` into these ports, C becomes a
-  // route that starts a defined worker without this boundary, and this fails.
-  const source = fs.readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
-  const at = source.indexOf("createAgentLifecyclePorts({");
-  assert.ok(at > 0, "bin calls createAgentLifecyclePorts");
-  let depth = 0;
-  let end = at + "createAgentLifecyclePorts(".length;
-  for (; end < source.length; end += 1) {
-    if (source[end] === "{" || source[end] === "(") depth += 1;
-    if (source[end] === "}" || source[end] === ")") depth -= 1;
-    if (depth === 0) break;
-  }
-  const call = source.slice(at, end + 1);
-  assert.match(call, /definitions: definitionStore/, "the extract is the call, which can be read for a key it holds");
-  assert.doesNotMatch(call, /buildSpec/, "the daemon wires no builder into its lifecycle ports");
-  assert.equal(source.split("createAgentLifecyclePorts(").length - 1, 1, "and nowhere else in bin");
-  // What that default means: a start with no invocation is refused, and nothing is started.
-  const h = await host();
-  const request = { id: "req-c", agentId: "lead", machineId: "m", storeId: h.storeId, expectedIncarnation: 1,
-    expectedRevision: 1, expectedLifetime: null, action: "start", requestedBy: "operator" };
-  const answer = await h.ports.lifecycle.execute(request);
-  assert.equal(answer.status, "refused");
-  assert.equal(answer.outcome, "lifecycle-launch-composition-unavailable");
-  assert.equal(h.starts.length, 0);
-  assert.ok(h.ports.lifecycle instanceof AgentLifecycle);
+test("ROUTE C STAYS REFUSED: the daemon's lifecycle ports supply no builder, and the default refuses before any start", async t => {
+  const h = await host(), f = new BootFixture(); let passed;
+  t.after(() => fs.rmSync(h.root, { recursive: true, force: true }));
+  f.options.home = h.root; f.options.definitions = h.store; f.options.runner = h.processes;
+  f.options.identity = () => ({ machineId: 'm', hostname: 'fixture' });
+  f.options.installed = () => ALL; f.options.roots = () => ['C:/work']; f.options.windows = true;
+  f.factories.state = options => {
+    fs.mkdirSync(options.aifyHome, { recursive: true });
+    new LifecycleJournal({ file: path.join(options.aifyHome, 'agent-lifecycle.json') }).initialize({ priorBoot: false });
+    return { ...f.state, host: { rawIdentity: h.identity, endManaged() {} }, lifecycleOwner: null,
+      residents: { ...f.state.residents, identity: h.identity } };
+  };
+  f.factories.lifecycle = options => { passed = options; return createAgentLifecyclePorts(options); };
+  await f.boot();
+  assert.ok(passed.definitions === h.store, 'the actual boot payload reaches the real host store');
+  assert.equal(Object.hasOwn(passed, 'buildSpec'), false, 'boot must not invent an unowned default composer');
+  const ports = f.session.agentState.lifecycle;
+  const request = { id: 'req-c', agentId: 'lead', machineId: 'm', storeId: h.storeId, expectedIncarnation: 1,
+    expectedRevision: 1, expectedLifetime: null, action: 'start', requestedBy: 'operator' };
+  const answer = await ports.lifecycle.execute(request);
+  assert.deepEqual({ status: answer.status, outcome: answer.outcome, starts: h.starts.length },
+    { status: 'refused', outcome: 'lifecycle-launch-composition-unavailable', starts: 0 });
+  assert.ok(ports.lifecycle instanceof AgentLifecycle);
 });

@@ -9,7 +9,7 @@
 // `HERDR_ENV` too, but opens no spaces -- there the console and attach are still the only way in.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { BootFixture } from './fixtures/daemon-boot.mjs';
 import { test } from "node:test";
 
 import { ConsoleSession } from "../lib/console-session.mjs";
@@ -37,9 +37,10 @@ test("A DAEMON THAT OPENS SPACES offers no attach and no console", async () => {
   assert.ok(!ordinary.withoutConsole);
 });
 
-test("THE DAEMON PASSES WHETHER IT OPENS SPACES, read rather than run because importing it starts one", () => {
-  const source = readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
-  assert.match(source, /startDaemonView\(\{[\s\S]*?herdrSpaces: Boolean\(paneOpener\)/);
+for (const spaces of [false, true]) test(`the real boot API passes whether it opens worker spaces: ${spaces}`, async () => {
+  const f = new BootFixture(); f.factories.pane = () => spaces ? () => {} : null;
+  await f.boot();
+  assert.equal(f.captured.view.herdrSpaces, spaces);
 });
 
 function session(extra = {}) {

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
 import { handleRequest } from '../lib/protocol.mjs';
+import { BootSession, BootCancelled } from '../lib/daemon-boot-session.mjs';
 new ProcessEffectTripwire();
 const source = fs.readFileSync(new URL('../bin/aify-env.mjs', import.meta.url), 'utf8');
 const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
@@ -24,23 +25,27 @@ test('the actual Runner payload receives the same record owner and host-wide adm
   const start = source.indexOf('const runner = new Runner('), end = source.indexOf('\n\n// SERVICE PLUGINS.', start);
   assert.ok(start >= 0 && end > start, 'actual Runner construction bounded independently');
   const record = {}, calls = [], ownership = { record, recovery: { admitStart: () => calls.push('admit') } };
-  const execute = new AsyncFunction('Runner', 'OWNED_FILE', 'ownership', source.slice(start, end) + '\nreturn runner;');
+  const execute = new AsyncFunction('Runner', 'OWNED_FILE', 'ownership', 'boot', source.slice(start, end) + '\nreturn runner;');
   class CaptureRunner { constructor(options) { this.options = options; } }
-  const runner = await execute(CaptureRunner, 'private-fixture-record', ownership);
+  const session = new BootSession();
+  const runner = await execute(CaptureRunner, 'private-fixture-record', ownership, session);
   assert.equal(runner.options.ownedRecord, record);
   assert.equal(typeof runner.options.startGate, 'function', 'the actual host payload must provide the admission callback');
   await runner.options.startGate();
   assert.deepEqual(calls, ['admit']);
+  assert.ok(runner.options.assertOpen === session.assertOpen, 'every actual Runner start receives the final boot fence');
+  session.cancel(); assert.throws(runner.options.assertOpen, BootCancelled);
 });
 
-test('the actual bound-listener recovery trigger reaches the core owner while dedicated instances still skip it', async () => {
+test('the actual bound-listener callback supplies the same recovery owner to boot', async () => {
   const body = source.match(/^async function reapLeftovers\(\) \{[\s\S]*?^\}/m)?.[0];
   assert.ok(body, 'actual named boot function found');
   const calls = [];
   await new AsyncFunction('ownership', body + '\nreturn reapLeftovers();')({ recovery: { recover: () => calls.push('recover') } });
   assert.deepEqual(calls, ['recover']);
   const listen = source.slice(source.indexOf('server.listen(port, HOST, async () => {'));
-  assert.match(listen, /if \(instanceContext\) \{[\s\S]*?publishInstanceReady[\s\S]*?\} else await reapLeftovers\(\);/);
+  assert.match(listen, /recover: reapLeftovers/, 'the actual bound callback supplies that recovery owner to boot');
+  // The moved shared/dedicated choice is exercised through startDaemonBoot in daemon-boot.test.js.
 });
 
 test('the actual supersede and shutdown payloads no longer call the unverified numeric killer or replace a shared keep snapshot', () => {

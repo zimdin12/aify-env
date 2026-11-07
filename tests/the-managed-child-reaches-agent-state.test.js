@@ -18,6 +18,7 @@ import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
 import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
 import { createOwnershipRecovery } from '../lib/ownership-bootstrap.mjs';
 import { turnsFile } from "../lib/turns-file.mjs";
+import { BootFixture } from './fixtures/daemon-boot.mjs';
 
 const AT = 1_790_950_000_600_000;
 const TEXT = '#!/bin/bash\nHARNESS_WRAPPER_VERSION="0.6.0"\n';
@@ -236,42 +237,41 @@ test("resident and managed facts share conflict selection; new owner does not ad
   assert.equal(next.current("lead", GIVEN).process.verified, "no");
 });
 
-test("actual daemon source statements lazily join boot host and bound URL for default and scoped instances", async (t) => {
-  const source = fs.readFileSync(new globalThis.URL("../bin/aify-env.mjs", import.meta.url), "utf8");
+test('unmoved Runner and HTTP wiring lazily join the actual boot host and bound URL', async t => {
+  const source = fs.readFileSync(new globalThis.URL('../bin/aify-env.mjs', import.meta.url), 'utf8');
   const runnerBlock = source.match(/const runner = new Runner\([\s\S]*?\n(?=\n\/\/ SERVICE PLUGINS)/)?.[0];
-  const bootBlock = source.match(/  try \{ agentState = bootDaemonAgentState\([\s\S]*?\n  catch \(error\) \{[^\n]+\}/)?.[0];
   const depsBlock = source.match(/  protocolDeps: async \(\) => \([\s\S]*?\n  \),/)?.[0];
-  assert.ok(runnerBlock && bootBlock && depsBlock, "unique actual bootstrap source boundaries");
-  const stateLines = depsBlock.split("\n").filter((line) => /stateHost:|observedHarnesses:|lifecycle:|modelSelections:/.test(line)).join("\n");
-  assert.match(stateLines, /stateHost:/, "actual HTTP dependencies omit booted host");
-  assert.match(stateLines, /observedHarnesses:/, "actual HTTP dependencies omit launcher observations");
-  assert.match(stateLines, /lifecycle:/, "actual HTTP dependencies omit the lifecycle stop facts");
-  for (const context of [null, { scope: "invocation-9" }]) {
-    const f = fixture(t);
-    const ownedFile = path.join(f.home, 'owned-fixture.json');
+  assert.ok(runnerBlock && depsBlock, 'unmoved Runner and protocol payload boundaries');
+  const stateLines = depsBlock.split('\n').filter(line => /stateHost:|observedHarnesses:|lifecycle:|modelSelections:/.test(line)).join('\n');
+  assert.match(stateLines, /stateHost:/); assert.match(stateLines, /observedHarnesses:/); assert.match(stateLines, /lifecycle:/);
+  for (const context of [null, { scope: 'invocation-9' }]) {
+    const f = fixture(t), bootstrap = new BootFixture(), ownedFile = path.join(f.home, 'owned-fixture.json');
     const ownership = await createOwnershipRecovery({ file: ownedFile, platform: 'win32', selfPid: 9, parentPid: 8, recover: !context,
       identity: { probe: async pids => new Map(pids.map(pid => [pid, { alive: true, createdAtUs: AT }])) }, report: () => {} });
-    const run = new Function("Runner", "bootDaemonAgentState", "AgentTurnEvents", "ModelSelections", "OWNED_FILE", "ownership", "join", "homedir", "instanceContext", "HOST", "bound", "logLine", "process", "server",
-      "createAgentLifecyclePorts", "hostIdentityFacts", "hostname", "existsSync", "hostIsWsl", "definitionStore",
-      "installedHarnesses", "aifyLauncherFilesOnPath", "evaluateAgentState",
-      `let agentState = null;\n${runnerBlock}\nconst readDeps = () => ({ ${stateLines} });\nif (readDeps().stateHost !== null) throw new Error("HTTP host captured before boot");\nif (typeof runner.deps.managedHost !== "function") throw new Error("actual bootstrap lacks lazy managedHost");\nconst before = () => runner.deps.managedHost();\nconst unready = before();\n${bootBlock}\nreturn { unready, owner: before(), http: readDeps() };`);
-    class CaptureRunner { constructor(deps) { this.deps = deps; } }
-    const observed = run(CaptureRunner,
-      (args) => bootDaemonAgentState({ ...args, probe: () => new Map(), nowUs: () => AT, nowMs: AT / 1000 }),
-      AgentTurnEvents, ModelSelections, ownedFile, ownership, path.join, () => f.home, context, "127.0.0.1", { port: 18802 }, () => {},
-      { stderr: { write() {} }, exit() { throw new Error("bootstrap failed"); }, platform: process.platform, env: {} },
-      { address: () => ({ port: 18802 }) },
-      createAgentLifecyclePorts, () => ({ machineId: "win32:test-host" }), () => "test-host", fs.existsSync, () => false,
-      null, () => [], () => [], () => {});
-    assert.equal(observed.unready, null);
-    assert.equal(observed.owner.instance, context?.scope ?? "default");
-    assert.equal(observed.owner.url, URL);
+    class CaptureRunner {
+      constructor(deps) { this.deps = deps; }
+      instance() { return 'fixture-runner'; }
+    }
+    const run = new Function('Runner', 'OWNED_FILE', 'ownership', 'boot', 'HOST', 'server', 'logLine',
+      'installedHarnesses', 'aifyLauncherFilesOnPath', 'evaluateAgentState',
+      `${runnerBlock}; return { runner, readDeps: () => ({ ${stateLines} }) };`);
+    const wiring = run(CaptureRunner, ownedFile, ownership, bootstrap.session, '127.0.0.1',
+      { address: () => ({ port: 18802 }) }, () => {}, () => [], () => [], () => {});
+    assert.equal(wiring.readDeps().stateHost, null, 'HTTP has no host before actual state boot');
+    assert.equal(wiring.runner.deps.managedHost(), null);
+    Object.assign(bootstrap.options, { home: f.home, instanceContext: context, runner: wiring.runner, advertising: false });
+    Object.assign(bootstrap.factories, {
+      state: args => bootDaemonAgentState({ ...args, probe: () => new Map(), nowUs: () => AT, nowMs: AT / 1000, pid: 9 }),
+      turns: args => new AgentTurnEvents(args), selections: args => new ModelSelections(args), lifecycle: createAgentLifecyclePorts,
+    });
+    await bootstrap.boot();
+    const observed = { owner: wiring.runner.deps.managedHost(), http: wiring.readDeps() };
+    assert.equal(observed.owner.instance, context?.scope ?? 'default'); assert.equal(observed.owner.url, URL);
     assert.ok(observed.owner.host instanceof AgentStateHost);
-    assert.ok(observed.http.modelSelections instanceof ModelSelections, "HTTP receives the booted model-selection owner");
-    assert.equal(observed.http.stateHost, observed.owner.host, "HTTP resolves the actual booted host per request");
-    const read = await handleRequest({ method: "GET", path: "/agents/state" }, observed.http);
-    assert.equal(read.status, 200);
-    assert.deepEqual(read.body.inputs, { operatorStop: "tracked" }, "the booted journal feeds the operator-stop input");
-    assert.equal(read.body.complete, false, "missing supporting observations stay unresolved");
+    assert.ok(observed.http.modelSelections instanceof ModelSelections, 'HTTP receives the booted model-selection owner');
+    assert.ok(observed.http.stateHost === observed.owner.host, 'HTTP resolves the actual booted host per request');
+    const read = await handleRequest({ method: 'GET', path: '/agents/state' }, observed.http);
+    assert.equal(read.status, 200); assert.deepEqual(read.body.inputs, { operatorStop: 'tracked' });
+    assert.equal(read.body.complete, false);
   }
 });

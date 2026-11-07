@@ -29,6 +29,9 @@ import { startDashboard } from "../lib/dashboard.mjs";
 import { collectSnapshot } from "../lib/view-snapshot.mjs";
 import { createNotices } from "../lib/notices.mjs";
 import { renderDashboard } from "../lib/tui.mjs";
+import { BootFixture } from './fixtures/daemon-boot.mjs';
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
+new ProcessEffectTripwire();
 
 const FETCH_FAILED = "terminal term_1788413603585_300f67a3 output not delivered: fetch failed";
 const NOWHERE = "http://127.0.0.2:1";
@@ -152,25 +155,24 @@ test("THE VIEW STILL RENDERS EVERYTHING ELSE, which is the control", async () =>
   }
 });
 
-test("THE SINK IS ROUTED, NOT DUPLICATED: the daemon writes stderr only when it owns no screen", () => {
-  // A SOURCE ASSERTION, deliberately, and the weaker instrument. Driving it for real means starting
-  // the daemon, and starting shared infrastructure to test it has cost this project a live fleet
-  // twice. What this pins is the shape the defect had: the plugin log sink must not be a bare
-  // stderr write, and the redirect must key on the view HAVING STARTED rather than on the intent to
-  // start it -- a dashboard that threw would otherwise swallow every message into a ring nobody
-  // renders.
-  const src = readFileSync(new URL("../bin/aify-env.mjs", import.meta.url), "utf8");
-  assert.match(src, /log: \(message\) => logLine\(message\)/,
-    "the plugin log sink writes somewhere other than the routed one");
-  assert.match(src, /if \(dashboardOwnsScreen\) \{\s*\n\s*NOTICES\.add\(message\);/,
-    "logLine no longer routes into the notices ring");
-  // UPGRADED 2026-09-06 from a literal to the real seam. This asserted `dashboardOwnsScreen = true`,
-  // which pinned WHERE the flag was written rather than that it was written from the truth. The view
-  // wiring now lives in `lib/daemon-view.mjs`, which is importable -- so whether it reports owning a
-  // screen is tested by CALLING it, in `the-daemon-view-keyboard-policy.test.js`. What is left here
-  // is the half that is genuinely about this file: the flag comes from the view's own answer and not
-  // from the intent to start one.
-  assert.match(src, /dashboardOwnsScreen = view\.ownsScreen;/,
-    "the screen-ownership flag no longer comes from the view's own answer");
-  assert.match(src, /notices: NOTICES,/, "the view is never given the ring");
+for (const ownsScreen of [false, true]) test(`the routed plugin sink follows the acquired view's actual ownership: ${ownsScreen}`, async () => {
+  const src = readFileSync(new URL('../bin/aify-env.mjs', import.meta.url), 'utf8');
+  const route = /function logLine\(message\) \{[\s\S]*?\n\}/.exec(src)?.[0];
+  assert.ok(route, 'the unmoved routed sink remains identifiable');
+  assert.match(src, /log: logLine,/, 'the entry hands that sink to the actual boot API');
+  assert.match(src, /notices: NOTICES,/, 'the same ring reaches the API');
+  const f = new BootFixture(), notices = createNotices({ now: () => 0 }), stderr = [];
+  const log = new Function('boot', 'NOTICES', 'process', 'chr10', `${route}; return logLine;`)(
+    f.session, notices, { stderr: { write: text => stderr.push(text) } }, '\n');
+  f.options.log = log; f.options.notices = notices;
+  f.factories.view = options => { f.captured.view = options; return { stop() {}, ownsScreen }; };
+  log('before');
+  assert.deepEqual({ stderr, notices: notices.recent().length }, { stderr: ['[aify-env] before\n'], notices: 0 });
+  await f.boot();
+  assert.equal(typeof f.captured.plugins.log, 'function');
+  assert.ok(f.captured.view.notices === notices, 'the produced view receives the actual ring');
+  f.captured.plugins.log('plugin');
+  assert.deepEqual({ stderr, notices: notices.recent().map(row => row.text) }, ownsScreen
+    ? { stderr: ['[aify-env] before\n'], notices: ['plugin'] }
+    : { stderr: ['[aify-env] before\n', '[aify-env] plugin\n'], notices: [] });
 });

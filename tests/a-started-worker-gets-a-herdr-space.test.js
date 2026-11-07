@@ -25,6 +25,7 @@ import assert from "node:assert/strict";
 
 import { paneOpenerFor } from "../lib/herdr-pane-opener.mjs";
 import { PluginProcesses } from "../lib/service-plugins.mjs";
+import { BootFixture } from './fixtures/daemon-boot.mjs';
 
 
 //: A dedicated invocation's root, and the socket its Herdr serves inside it.
@@ -388,22 +389,19 @@ test("A STATUS REPORT HERDR REFUSES LEAVES THE PANE OPEN, with no pane file", as
   assert.ok(logs.some(l => l.includes("with no status")), "a missing status was swallowed silently");
 });
 
-test("THE DAEMON BUILDS ONE, read rather than run, because importing it STARTS a daemon", async () => {
-  // A source assertion, used for the one reason that justifies it: importing `bin/aify-env.mjs` runs
-  // the daemon, which supersedes whatever serves this host and reaps its managed workers. The gate
-  // it defends is real -- an opener nothing constructs is an opener that never opens anything.
-  const { readFileSync } = await import("node:fs");
-  const { fileURLToPath } = await import("node:url");
-  const { dirname, join } = await import("node:path");
-  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs"), "utf8");
-  assert.match(source, /paneOpenerFor\(\{/, "the daemon never builds a pane opener");
-  const bootstrap = readFileSync(new URL("../lib/daemon-plugin-bootstrap.mjs", import.meta.url), "utf8");
-  assert.match(source, /registry: servicePlugins, runner, paneOpener,/, "the daemon never hands its opener to the plugin assembly");
-  assert.match(bootstrap, /new PluginProcesses\(runner, \{ onStarted: paneOpener, prepare: paneOpener\?\.prepare, cwdRoots, windows, currentCwd \}\)/, "the opener or host authority reaches no start, or the worker keeps the daemon's pane identity");
-  // AND THE EXIT IT CLOSES ON COMES FROM THE RUNNER. An opener built without `watchExit` opens every
-  // pane and closes none, which is invisible to every test above -- they inject their own.
-  assert.match(source, /watchExit: \(id, on\) => runner\.subscribe\(id, \(\) => \{\}, on\)/, "the opener learns no exit");
-  // AND ITS AUTHORITY IS THIS DAEMON'S OWN INVOCATION. Without it every opener is refused, and a
-  // dedicated instance silently stops opening spaces -- the very first defect, back again.
-  assert.match(source, /dedicatedRoot: instanceContext\?\.root/, "the opener is not bound to this invocation");
+test('the real boot API builds its invocation-bound opener and hands it the actual Runner exit feed', async () => {
+  const f = new BootFixture(), opener = () => {}, watched = []; let given;
+  f.options.instanceContext = { root: ROOT };
+  f.factories.pane = options => { given = options; return opener; };
+  f.runner.subscribe = (id, output, exit) => watched.push({ id, output, exit });
+  await f.boot();
+  assert.ok(f.captured.plugins.paneOpener === opener, 'the produced opener reaches the actual plugin assembly payload');
+  assert.equal(given.dedicatedRoot, ROOT);
+  assert.equal(typeof given.watchExit, 'function');
+  const ended = () => {}; given.watchExit('proc-1', ended);
+  assert.deepEqual({ count: watched.length, id: watched[0].id, output: typeof watched[0].output, exit: watched[0].exit === ended },
+    { count: 1, id: 'proc-1', output: 'function', exit: true });
+  const { readFileSync } = await import('node:fs');
+  const bootstrap = readFileSync(new URL('../lib/daemon-plugin-bootstrap.mjs', import.meta.url), 'utf8');
+  assert.match(bootstrap, /new PluginProcesses\(runner, \{ onStarted: paneOpener, prepare: paneOpener\?\.prepare, cwdRoots, windows, currentCwd \}\)/);
 });

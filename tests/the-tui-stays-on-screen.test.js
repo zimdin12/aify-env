@@ -28,6 +28,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { sealedHomeEnv } from "./_sealed-daemon-env.mjs";
+import { BootSession } from '../lib/daemon-boot-session.mjs';
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENTRY = path.join(HERE, "..", "bin", "aify-env.mjs");
@@ -105,17 +107,21 @@ test("`--once` still renders one frame and leaves", async () => {
 // test it has cost this project a live fleet twice. Both halves are checked, because either alone
 // leaves the race the fix exists to close.
 
-test("the refusal path stops this process describing the host", () => {
+test("the refusal path stops this process describing the host", async () => {
+  new ProcessEffectTripwire();
   const entry = readFileSync(ENTRY, "utf8");
-  assert.match(entry, /viewOnly = true;/,
-    "the refused-takeover branch no longer marks this process as a view, so the advertise block "
-    + "below it cannot tell that this host runs nothing");
-  assert.match(entry, /if \(stopAdvertising\) \{ stopAdvertising\(\); stopAdvertising = null; \}/,
-    "the refusal no longer stops an advertise timer that was ALREADY armed. Module evaluation does "
-    + "not wait for an event handler, so the flag alone covers only one of the two orders");
-  assert.match(entry, /if \(!viewOnly\) \{/,
-    "the advertise block no longer consults the view flag, so a refused takeover arms the timer "
-    + "anyway and describes a host it does not run");
+  const begin = entry.indexOf('      viewOnly = true;'), end = entry.indexOf('      process.argv = [', begin);
+  assert.ok(begin > 0 && end > begin, 'the actual refused-view transition is bounded');
+  // Execute only the existing transition with injected effects, never the daemon or takeover.
+  // Boot API tests cover advertising startup; this case pins the unmoved refusal wiring.
+  const boot = new BootSession(), effects = [];
+  boot.capture('advertising', () => () => effects.push('advertising'), stop => stop());
+  const transition = new Function('boot', 'stopAgentStateSending', 'logLine',
+    `let viewOnly = false;\n${entry.slice(begin, end)}\nreturn viewOnly;`);
+  const viewOnly = transition(boot, () => effects.push('sender'), message => effects.push(message));
+  await Promise.resolve();
+  assert.deepEqual({ viewOnly, cancelled: boot.cancelled, effects },
+    { viewOnly: true, cancelled: true, effects: ['sender', 'advertising'] });
 });
 
 // AND THE FIRST BEAT IS GUARDED TOO (R9-M9): the view check sits inside the beat itself. Held as behaviour in

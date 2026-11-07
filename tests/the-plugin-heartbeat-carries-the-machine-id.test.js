@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { hostIdentityFacts, pluginHeartbeatBody } from "../lib/advertise.mjs";
 import { CommsApi, mintBridgeIdentity } from "../lib/plugins/aify-comms/api.mjs";
+import { BootFixture } from './fixtures/daemon-boot.mjs';
 
 const HOST = { hostname: "StevenZ-L", kind: "windows", machineId: "win32:stevenz-l", instance: "b1", codeOnDisk: "b1" };
 
@@ -38,12 +39,18 @@ test("THE REQUEST the plugin sends keeps it: the body through CommsApi.heartbeat
   assert.ok(calls[0].body.bridgeId, "CONTROL: the plugin's own bridge id still travels");
 });
 
-test("THE DAEMON builds the plugin heartbeat from the host's machine id, through this function", () => {
-  const daemon = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "aify-env.mjs"), "utf8");
+test("THE DAEMON builds the plugin heartbeat from boot's canonical machine id and live disk facts", async () => {
+  const daemon = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'aify-env.mjs'), 'utf8');
   const body = /function currentAdvertisementBody\(\) \{([\s\S]*?)\n\}/.exec(daemon);
-  assert.ok(body, "the extractor found the daemon's builder");
-  assert.match(body[1], /const \{ kind, machineId \} = hostIdentityFacts\(/);
-  assert.match(body[1], /return pluginHeartbeatBody\(\{[^}]*\bmachineId\b[^}]*\}\);/);
-  // And the id is the one hostIdentityFacts answers, not a second derivation.
-  assert.equal(hostIdentityFacts({ platform: "win32", hostname: "StevenZ-L" }).machineId.length > 0, true);
+  assert.ok(body, 'the unmoved advertisement builder remains identifiable');
+  const f = new BootFixture();
+  f.options.identity = () => { f.identityCalls++; return { hostname: HOST.hostname,
+    ...hostIdentityFacts({ platform: 'win32', hostname: HOST.hostname, env: { COMPUTERNAME: HOST.hostname }, isWsl: false, exists: () => false }) }; };
+  await f.boot(); let disk = 'b1';
+  const build = new Function('boot', 'pluginHeartbeatBody', 'BUILD', 'PACKAGE_BUILD', 'LAUNCH_ROOTS',
+    `${body[0]}; return currentAdvertisementBody;`)(f.session, pluginHeartbeatBody, 'b1', { onDisk: () => disk }, { current: () => [] });
+  assert.equal(build().machineId, HOST.machineId);
+  disk = 'b2'; const after = build();
+  assert.deepEqual({ id: after.machineId, disk: after.metadata.codeOnDisk, identityCalls: f.identityCalls },
+    { id: HOST.machineId, disk: 'b2', identityCalls: 1 });
 });
