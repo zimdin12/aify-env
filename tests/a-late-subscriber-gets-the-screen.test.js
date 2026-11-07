@@ -38,7 +38,7 @@ const SPEC = { service: "test-service", fileText: ALLOWED, command: "fake", args
 function fakeTerminal({ cols, rows }) {
   const handlers = [];
   return {
-    pid: 0, cols, rows,
+    pid: 424242, cols, rows,
     onData: (fn) => handlers.push(fn),
     emit(text) { for (const fn of handlers) fn(text); },
     onExit: () => {}, write: () => {}, kill: () => {},
@@ -51,6 +51,8 @@ function runnerWithCheckpoints(terminal, extra = {}) {
   const made = [];
   const runner = new Runner({
     openTerminal: () => terminal,
+    isAlive: () => false,
+    killTree: async () => { throw Error('fake terminal must never reach a process-tree killer'); },
     loadCheckpoint: async () => {
       const make = await loadCheckpointFactory();
       return make && ((geometry) => { const c = make(geometry); made.push(c); return c; });
@@ -314,7 +316,7 @@ test("A PROCESS THAT EXITS WHILE A SNAPSHOT IS OUTSTANDING: the subscriber gets 
 test("WITHOUT A CHECKPOINT, A SUBSCRIBER GETS EXACTLY TODAY'S META AND REPLAY", async () => {
   for (const loadCheckpoint of [null, async () => null]) {
     const terminal = fakeTerminal({ cols: 50, rows: 8 });
-    const runner = new Runner({ openTerminal: () => terminal, loadCheckpoint, replayBytes: 16 });
+    const { runner } = runnerWithCheckpoints(terminal, { loadCheckpoint, replayBytes: 16 });
     const handle = await runner.start(SPEC);
     terminal.emit("0123456789abcdefGHIJ");
     const { events, handlers } = recorder();
