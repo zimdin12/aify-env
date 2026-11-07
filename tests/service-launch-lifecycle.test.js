@@ -9,6 +9,9 @@ import { DefinitionStore } from '../lib/agent-definitions.mjs';
 import { createAgentLifecyclePorts } from '../lib/daemon-agent-lifecycle.mjs';
 import { PluginProcesses } from '../lib/service-plugins.mjs';
 import { Runner } from '../lib/runner.mjs';
+import { OwnedProcessRecord } from '../lib/owned-process-record.mjs';
+import { SuccessorRecovery } from '../lib/successor-recovery.mjs';
+import { StartAdmissionRefusal, RecoveryPending } from '../lib/start-admission-refusal.mjs';
 import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
 new ProcessEffectTripwire();
 const ALLOWED = '#!/usr/bin/env node\nHARNESS_WRAPPER_VERSION="1.0"\n';
@@ -23,7 +26,7 @@ class LifecycleFixture {
     fs.writeFileSync(this.journal, JSON.stringify({ version: 1, records: {}, stops: {} }));
     this.definitions = new DefinitionStore({ dir: path.join(this.home, 'definitions') });
     const host = { startManaged: record => { this.current = record; }, endManaged: () => { this.current = null; return {}; } };
-    this.runner = new Runner({ platform: 'win32', loadCheckpoint: null,
+    this.runner = new Runner({ platform: 'win32', loadCheckpoint: null, startGate: () => this.gate?.(),
       managedHost: () => ({ host, instance: 'fixture', url: 'http://127.0.0.1:18802' }), isAlive: () => this.current !== null, killTree: async () => {},
       openTerminal: (command, args, options) => {
         if (this.openFailure) throw this.openFailure;
@@ -50,6 +53,46 @@ class LifecycleFixture {
   launch(request) { return { agentId: this.agent.id, runtime: 'hermes', definition: { storeId: request.storeId, incarnation: request.expectedIncarnation, revision: request.expectedRevision } }; }
   record() { return Object.values(JSON.parse(fs.readFileSync(this.journal, 'utf8')).records)[0]; }
 }
+
+async function heldRecovery(f) {
+  const identity = { probe: async pids => new Map(pids.map(pid => [pid, { alive: true, createdAtUs: 1700000000000000 }])) };
+  const recovery = new SuccessorRecovery({ platform: 'win32', selfPid: 424242, parentPid: 424241,
+    record: new OwnedProcessRecord(path.join(f.home, 'owned-fixture.json'), { report: () => {} }), identity, report: () => {},
+    termination: { incumbent: async () => ({ state: 'unknown', problem: 'original remains live' }) } });
+  await recovery.supersede({ pid: 443000 });
+  assert.equal((await recovery.recover()).ready, false);
+  f.gate = () => recovery.admitStart();
+}
+
+// #17 adds a second trusted no-spawn type; #15's old cases cannot prove this new producer reaches each catch.
+for (const lane of ['direct', 'invoked', 'automatic']) {
+  test(`${lane} lifecycle classifies an actual ownership-recovery gate as a terminal no-spawn refusal`, async t => {
+    const f = new LifecycleFixture(t); await f.seed(); await heldRecovery(f);
+    const ports = f.ports(), request = await f.request();
+    const processes = new PluginProcesses(f.runner, { cwdRoots: () => f.roots, windows: true });
+    if (lane === 'automatic') {
+      const launch = f.launch(request);
+      const result = await outcome(ports.admitColdStart(launch, () => processes.start({ ...f.spec(), agentId: launch.agentId, definition: launch.definition }), async () => true));
+      assert.equal(result.error, null, 'the actual typed recovery refusal is a known answer');
+      assert.match(result.value?.refused ?? '', /ownership recovery is incomplete/);
+    } else {
+      const invocation = lane === 'invoked' ? { buildSpec: async () => f.spec(), start: (prepared, locked) => locked(() => processes.start(prepared)) } : null;
+      const result = invocation ? await ports.lifecycle.execute(request, invocation) : await ports.lifecycle.execute(request);
+      assert.equal(result.status, 'refused');
+      assert.match(result.outcome, /ownership recovery is incomplete/);
+    }
+    assert.deepEqual({ starts: f.spawns.length, phase: f.record().phase }, { starts: 0, phase: 'terminal' });
+    assert.ok(new RecoveryPending('fixture') instanceof StartAdmissionRefusal);
+  });
+}
+
+test('a counterfeit ownership-recovery code stays execution-unknown', async t => {
+  const f = new LifecycleFixture(t); await f.seed();
+  f.gate = () => { throw Object.assign(Error('ownership recovery is incomplete'), { code: 'OWNERSHIP_RECOVERY_PENDING' }); };
+  const answer = await f.ports().lifecycle.execute(await f.request());
+  assert.deepEqual({ status: answer.status, outcome: answer.outcome, phase: f.record().phase, starts: f.spawns.length },
+    { status: 'failed', outcome: 'execution-unknown', phase: 'pending', starts: 0 });
+});
 
 test('core lifecycle outside roots is a terminal typed refusal and starts nothing', async t => {
   const f = new LifecycleFixture(t); await f.seed(); f.roots = [];

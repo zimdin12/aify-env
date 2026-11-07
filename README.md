@@ -191,8 +191,11 @@ Linux identity compares the owning writer's exact boot/PID/raw-start-tick token,
 conversion. Old Linux records without a token stay unverified; a reader never backfills one from a
 currently live PID. Windows recovery shares one asynchronous OS query across the recorded population
 and retains its existing time policy. See [process identity](docs/PROCESS-IDENTITY-v1.md) for the record
-format, resident compatibility and gateway limits. Durable writes, unresolved-record retention and
-superseded-owner handling remain tracked in [#17](https://github.com/zimdin12/aify-env/issues/17).
+format, resident compatibility and gateway limits. The [owned-record recovery contract](docs/OWNED-PROCESS-RECOVERY-v1.md)
+defines durable writes, retained uncertainty and exact displaced-owner handling. A successor captures
+an incumbent's birth itself, including legacy health without birth fields, and fences managed/raw
+starts until that original writer is positively gone. A failed probe is a visible refusal, not a silent
+hold. The contract states the operator's recovery path and the remaining shared-file/downgrade limits.
 
 Piped POSIX children start in their own process group, without unref. Ordinary stop gives that owned
 group TERM grace and then KILL within one bounded budget; only ESRCH confirms cleanup. A dead launcher
@@ -202,8 +205,10 @@ existing `child.kill()` / `taskkill /T` path. Plugins use the core live-child te
 than implementing another killer; see [owned process termination](docs/PROCESS-TERMINATION-v1.md) for
 the released API, Windows held-handle boundary and numeric-PGID limitations.
 
-One case it cannot fix and does not hide: if a launcher dies before the agent it started, the agent is
-orphaned with no parent, and no pid-tree walk can find it from the record.
+If a launcher dies before the agent it started, a PID-tree walk cannot recover that orphaned subtree.
+A dead-root surviving group stays durably recorded and is reported unverified, with no signal; a
+saved PGID alone does not prove original ownership across a restart gap. Recovery closes silent loss,
+not automatic cleanup of every survivor. A durable group witness or OS containment is separate work.
 
 ## The agents this host defines (0.8)
 

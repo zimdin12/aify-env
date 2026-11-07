@@ -61,15 +61,11 @@ import { createShutdown } from "../lib/shutdown.mjs";
 import { daemonShutdownHooks } from "../lib/shutdown-hooks.mjs";
 import { startDaemonView } from "../lib/daemon-view.mjs";
 import { Runner, terminalSupport } from "../lib/runner.mjs";
-import { clearOwned, entriesOwnedElsewhere, readOwned } from "../lib/owned-processes.mjs";
-import { defaultVerify, planOrphanReap } from "../lib/orphan-reap.mjs";
-import { ProcessIdentityProbe } from '../lib/process-identity.mjs';
-import { killTree } from "../lib/kill-tree.mjs";
+import { createOwnershipRecovery } from '../lib/ownership-bootstrap.mjs';
 import {
   showViewInsteadOfRefusing,
   workLostToSupersession,
 } from "../lib/environment-checks.mjs";
-import { defaultIsAlive } from "../lib/reaper.mjs";
 import { askIncumbent } from "../lib/incumbent.mjs";
 
 /** Whether the thing holding our port is an aify-env, and which pid it is. */
@@ -236,9 +232,10 @@ const chr10 = String.fromCharCode(10);
 // instance started is still running with nothing able to name them. The record is the authority, and
 // the next instance cleans up from it.
 const OWNED_FILE = instanceContext?.processRecord ?? (process.env.AIFY_ENV_PROCESS_RECORD || join(homedir(), ".aify", "env-processes.json"));
+const ownership = await createOwnershipRecovery({ file: OWNED_FILE, recover: !instanceContext });
 
-// REAP ONLY ONCE THE PORT IS OURS. Everything in the record belongs to whichever instance wrote it,
-// and it is an ORPHAN only if nobody is still serving. Holding the port is what proves that.
+// Recover only after binding. Port ownership is not process ownership: the recovery owner verifies
+// child/owner identity and holds successor writes until the exact displaced predecessor is gone.
 //
 // This ran BEFORE listening, and the order was the bug: a second start read the record of the instance
 // already running, found its processes alive and verifiably ours, killed them as orphans, and only
@@ -248,42 +245,11 @@ const OWNED_FILE = instanceContext?.processRecord ?? (process.env.AIFY_ENV_PROCE
 // The killing decision still fails CLOSED: a pid that cannot be confirmed as ours is left alone and
 // reported. Pid reuse is real, and ending a stranger's process is a worse failure than the leak.
 async function reapLeftovers() {
-  // READ ONCE, so what is spared and what is written back are the same list.
-  const recorded = readOwned(OWNED_FILE);
-  const observed = await new ProcessIdentityProbe().probe(recorded.flatMap(entry => [entry.pid, entry.owner]));
-  const ownerIsAlive = pid => observed.get(pid)?.alive !== false;
-  // `ownerIsAlive` is the guard the port could not be: an entry written by an instance that is STILL
-  // RUNNING belongs to that instance, not to a crash. Holding the port proves nobody else is serving
-  // only when the port is a fixed one -- `--port 0` takes an ephemeral port that is always free, so
-  // this function ran in full for a daemon that owned nothing and reaped a live environment's fleet.
-  const leftovers = planOrphanReap(recorded, {
-    isAlive: pid => observed.get(pid)?.alive === true,
-    verify: entry => defaultVerify(entry, { answer: observed.get(entry.pid) }),
-    ownerIsAlive,
-  });
-  for (const entry of leftovers.reap) {
-    // The TREE, not the pid: the recorded process is a launcher, and the agent it started is a child of
-    // it. Reaping only the launcher leaves exactly the process an operator cared about.
-    const killed = await killTree(entry.pid);
-    process.stderr.write(killed
-      ? `[aify-env] reaped orphan pid ${entry.pid} (${entry.service}) and its children, from a previous instance${chr10}`
-      : `[aify-env] could not reap pid ${entry.pid} (${entry.service})${chr10}`);
-  }
-  for (const { entry, reason } of leftovers.skipped) {
-    // Said out loud rather than swallowed. "Left running because we could not prove it was ours" is
-    // something an operator must be able to act on.
-    if (reason !== "already gone") {
-      process.stderr.write(`[aify-env] left pid ${entry.pid} (${entry.service}) alone: ${reason}${chr10}`);
-    }
-  }
-  // KEEP WHAT BELONGS TO A LIVE INSTANCE. This was an unconditional empty, which undid the guard
-  // above: the reaper spared another environment's processes and then deleted the only record that
-  // they exist. Sparing a process and forgetting it is barely better than killing it -- the operator
-  // still ends up with something running that nothing can clean up.
-  clearOwned(OWNED_FILE, { keep: entriesOwnedElsewhere(recorded, { ownerIsAlive }) });
+  return ownership.recovery.recover();
 }
 
-const runner = new Runner({ ownedFile: OWNED_FILE,
+const runner = new Runner({ ownedFile: OWNED_FILE, ownedRecord: ownership.record,
+  startGate: () => ownership.recovery.admitStart(),
   managedHost: () => agentState ? { ...agentState, url: `http://${HOST}:${server.address().port}` } : null,
   reportManaged: (problem) => logLine(problem),
   // A process came or went: its agent's word is published now, not on the next sweep (the operator, 2026-10-25).
@@ -397,9 +363,7 @@ const shutdown = createShutdown(daemonShutdownHooks({
   closeHttpServer: () => server.close(),
   // OURS ONLY, on the way out too. Shutdown emptied the whole file, so an environment stopping
   // normally erased a concurrently-running instance's record exactly as the boot reap did.
-  clearOwned: () => clearOwned(OWNED_FILE, {
-    keep: entriesOwnedElsewhere(readOwned(OWNED_FILE), { ownerIsAlive: defaultIsAlive }),
-  }),
+  clearOwned: () => runner.retireEndedRecords(),
   exit: (code) => process.exit(code),
   write: (line) => process.stderr.write(line),
   // B5: the managed key's sender, retired once its workers are stopped (lib/agent-state-sender.mjs retire).
@@ -450,6 +414,8 @@ const server = createServer(createDaemonHttp({
         readFile: (path) => readFileSync(path, "utf8"),
         version: VERSION,
         build: BUILD,
+        ownerIdentity: ownership.ownerIdentity,
+        ownershipRecovery: ownership.recovery.status(),
         codeOnDisk: PACKAGE_BUILD.onDisk(),
         cwdRoots: LAUNCH_ROOTS.current(),
         launchRootsFile: LAUNCH_ROOTS.read(),
@@ -615,9 +581,11 @@ server.on("error", async (failure) => {
       + `version ${holder.version ?? "unknown"}).${chr10}`,
     );
     try {
-      await killTree(holder.pid);
-    } catch {
-      // Reported by the retry failing, rather than swallowed here where it would read as success.
+      await ownership.recovery.supersede(holder);
+    } catch (error) {
+      process.stderr.write(`aify-env: takeover refused: ${error?.message || error}${chr10}`);
+      process.exit(69);
+      return;
     }
     // Give the socket time to be released before trying again. A tighter loop just spends the same
     // wait in more attempts.
@@ -658,8 +626,8 @@ server.listen(port, HOST, async () => {
   agentState.sessionFolders = new SessionFolders({ root: sessionsRoot(homedir()), definitions: definitionStore,
     identity: agentState.lifecycle.rawIdentity, report: logLine });
   void agentState.sessionFolders.reconcile().catch((error) => logLine(`session folders: ${error?.message || error}`));
-  // THE PORT IS OURS, so anything left in the record is genuinely an orphan. Not before: see
-  // reapLeftovers.
+  // The listener is bound; recovery still verifies each original owner and child. It never
+  // treats a free port, a dead root or an attempted kill as confirmed tree cleanup.
   if (instanceContext) {
     try { publishInstanceReady(instanceContext, { pid: process.pid, envInstance: runner.instance(), port: bound.port, build: BUILD }); }
     catch (error) { process.stderr.write(`${error.message}\n`); process.exit(2); }

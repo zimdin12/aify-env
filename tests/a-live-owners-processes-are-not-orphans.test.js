@@ -19,6 +19,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
+new ProcessEffectTripwire();
 
 import { planOrphanReap } from "../lib/orphan-reap.mjs";
 
@@ -62,7 +64,8 @@ test("an owner probe that THROWS leaves the process alone", () => {
     ownerIsAlive: () => { throw new Error("cannot probe"); },
   });
   assert.deepEqual(plan.reap, []);
-  assert.match(plan.skipped[0].reason, /still running/);
+  assert.equal(plan.skipped[0].state, 'unknown');
+  assert.match(plan.skipped[0].reason, /could not be verified gone/);
 });
 
 test("the owner check runs AFTER the already-gone check, so a dead process is not reported as somebody's", () => {

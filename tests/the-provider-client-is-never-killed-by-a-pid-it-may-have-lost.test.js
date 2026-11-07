@@ -102,7 +102,7 @@ test("the Windows kill answers go only while the client's exit is unseen when it
   // later. The decision is now read when the helper says it holds the process, and only then.
   let exited = false;
   const late = recordingHelper(() => { exited = true; });
-  await assert.rejects(heldKill(4242, { stillOurs: () => !exited, start: late.start, powershell: "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" }), /exited before its process was held, so nothing was killed by pid/);
+  await assert.rejects(heldKill(4242, { stillOurs: () => !exited, start: late.start, powershell: "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" }), /held root could not be verified, so nothing was killed by pid/);
   assert.deepEqual(late.answers, ["no\n"], "an exit seen before held is answered no");
   // Control: the same helper with the client still running is answered go, and the kill resolves.
   const live = recordingHelper();

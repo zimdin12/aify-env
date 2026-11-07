@@ -55,13 +55,16 @@ Windows keeps the existing CreationDate-to-microsecond precision and policies: r
 be strictly before the record's `writtenAtUs` (equality is unknown), while env's own child recovery
 keeps its legacy millisecond comparison and start-time tolerance. The probe itself retains all
 microseconds; only that legacy recovery comparison floors to milliseconds. The complete Windows reap
-population uses one asynchronous query, not one or two PowerShell launches per entry. Unsupported
-platforms remain unknown. Durable writes, unresolved-record retention and superseded-owner handling
-remain #17's scope; this identity change does not claim those cleanup guarantees.
+population uses one asynchronous admission query, not one or two PowerShell launches per entry.
+Effect confirmation and a displaced-owner quiescence check are separate bounded phases. Unsupported
+platforms remain unknown. [Owned-record recovery v1](OWNED-PROCESS-RECOVERY-v1.md) now defines durable
+writes, unresolved retention and superseded-owner handling; these are not consequences of token equality alone.
 
-Owned records still name their owner by PID only. #22 does not verify that owner's original identity,
-infer an owner token from a saved PID, or add owner-based kill permission. The existing conservative
-owner-liveness guard is unchanged. Owner identity publication and its compatibility policy belong to #17.
+New host-owned rows may carry ownerIdentity, captured for the daemon itself while alive and kept
+separate from the child's startToken. Legacy PID-only live/unknown owners stay protected. A successor
+captures a shape-identified incumbent's observed birth at takeover start, including legacy health with
+no birth fields; this observation never backfills stored child/owner identities. The recovery contract
+owns that producer format, compatibility policy and effect/retirement fences.
 
 Fixtures in `tests/fixtures/process-identity-v1.json` bind legacy parsing and Linux token compatibility.
 They are format examples, not records of real agents. Wrapper uses the same fixtures when its writer

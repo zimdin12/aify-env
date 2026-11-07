@@ -15,6 +15,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
+new ProcessEffectTripwire();
 
 //: A FIXED START INSTANT for the tests below, which are about the COMMAND LINE.
 //: `defaultVerify` also requires the process's real start time to match the one the record
@@ -70,10 +72,12 @@ test("a verify that THROWS is treated as a rejection, not as permission", () => 
   assert.equal(plan.skipped[0].reason, "not ours any more");
 });
 
-test("an isAlive that throws is treated as gone, not as alive", () => {
+test("an isAlive that throws is unknown, never an already-gone cleanup certificate", () => {
+  // Corrected17 contract: refusing to signal is not proof a retained row can be erased.
   const plan = planOrphanReap([entry()], { isAlive: () => { throw new Error("EPERM?"); }, verify: () => true });
   assert.deepEqual(plan.reap, []);
-  assert.equal(plan.skipped[0].reason, "already gone");
+  assert.deepEqual({ state: plan.skipped[0].state, reason: plan.skipped[0].reason },
+    { state: 'unknown', reason: 'process liveness is unknown' });
 });
 
 // The pure identity judgment consumes the shared probe's answer; no per-entry OS IO remains here.

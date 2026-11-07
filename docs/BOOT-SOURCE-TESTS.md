@@ -2,11 +2,16 @@
 
 When changing `bin/aify-env.mjs`, run the complete source-reader population below, as well as the tests for the changed behavior. Importing that entry point starts the daemon; source-executed fixtures instead supply its dependencies explicitly. A new boot dependency must reach those fixtures too.
 
-## Census: 2026-11-06
+## Census: 2026-11-07
 
-The resolved population contains **28 tracked automated test files**: 23 direct/aliased source readers and five indirect readers. The indirect readers are `agent-definitions-have-one-writer`, `aify-env-installs-the-wrapper-it-was-tested-against`, `no-oversized-source-file`, `only-a-plugin-may-know-a-service` (whole-source walks), and `bin-names-cannot-collide` (the package's declared bin target).
+The maintained population contains **30 automated test files**: 25 direct/aliased source readers and five indirect readers. The indirect readers are `agent-definitions-have-one-writer`, `aify-env-installs-the-wrapper-it-was-tested-against`, `no-oversized-source-file`, `only-a-plugin-may-know-a-service` (whole-source walks), and `bin-names-cannot-collide` (the package's declared bin target).
 
 The census checked tracked `tests/` sources for the entry filename, `new Function`/VM execution, file reads and generic `lib`/`bin` walks; it resolved aliases such as `ENTRY` and the manifest bin target. The managed-child bootstrap reader was the positive control; `runner.test.js`, which does not read the entry source, was the negative control. This is a source-reader gate, not the separate population of tests that only launch a sealed child process. Refresh the census when readers or their helpers change; a filename search alone misses the indirect readers.
+
+The 2026-11-07 refresh adds `service-launch-roots.test.js` (both real host grant payloads) and
+`ownership-wiring.test.js` (ownership initialization, Runner gate, takeover, reap and shutdown payloads).
+`orphan-process-identity.test.js` now exercises the importable recovery owner directly; it no longer
+extracts the inline bin body. Its batching/legacy-owner coverage remains a separate behavior gate.
 
 Run from the development checkout through the normal isolated runner, with the project's required identity stripping and explicit peer-checkout environment. On Windows with the peers available, this population permits no skips or cancellations. Other platforms must name any platform-only cases not run.
 
@@ -29,7 +34,9 @@ npm test -- \
   tests/launch-roots.test.js \
   tests/no-oversized-source-file.test.js \
   tests/only-a-plugin-may-know-a-service.test.js \
+  tests/ownership-wiring.test.js \
   tests/production-picker-bootstrap.test.js \
+  tests/service-launch-roots.test.js \
   tests/the-activity-read-asks-the-os-without-blocking.test.js \
   tests/the-daemon-sends-agent-state.test.js \
   tests/the-daemon-speaks-into-the-view-not-through-it.test.js \

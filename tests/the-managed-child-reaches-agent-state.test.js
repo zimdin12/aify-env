@@ -16,6 +16,7 @@ import { PluginProcesses } from "../lib/service-plugins.mjs";
 import { runOneControl, createHandleBook } from "../lib/plugins/aify-comms/terminal-controls.mjs";
 import { bootDaemonAgentState } from "../lib/daemon-agent-state.mjs";
 import { createAgentLifecyclePorts } from "../lib/daemon-agent-lifecycle.mjs";
+import { createOwnershipRecovery } from '../lib/ownership-bootstrap.mjs';
 import { turnsFile } from "../lib/turns-file.mjs";
 
 const AT = 1_790_950_000_600_000;
@@ -247,14 +248,17 @@ test("actual daemon source statements lazily join boot host and bound URL for de
   assert.match(stateLines, /lifecycle:/, "actual HTTP dependencies omit the lifecycle stop facts");
   for (const context of [null, { scope: "invocation-9" }]) {
     const f = fixture(t);
-    const run = new Function("Runner", "bootDaemonAgentState", "AgentTurnEvents", "ModelSelections", "OWNED_FILE", "join", "homedir", "instanceContext", "HOST", "bound", "logLine", "process", "server",
+    const ownedFile = path.join(f.home, 'owned-fixture.json');
+    const ownership = await createOwnershipRecovery({ file: ownedFile, platform: 'win32', selfPid: 9, parentPid: 8, recover: !context,
+      identity: { probe: async pids => new Map(pids.map(pid => [pid, { alive: true, createdAtUs: AT }])) }, report: () => {} });
+    const run = new Function("Runner", "bootDaemonAgentState", "AgentTurnEvents", "ModelSelections", "OWNED_FILE", "ownership", "join", "homedir", "instanceContext", "HOST", "bound", "logLine", "process", "server",
       "createAgentLifecyclePorts", "hostIdentityFacts", "hostname", "existsSync", "hostIsWsl", "definitionStore",
       "installedHarnesses", "aifyLauncherFilesOnPath", "evaluateAgentState",
       `let agentState = null;\n${runnerBlock}\nconst readDeps = () => ({ ${stateLines} });\nif (readDeps().stateHost !== null) throw new Error("HTTP host captured before boot");\nif (typeof runner.deps.managedHost !== "function") throw new Error("actual bootstrap lacks lazy managedHost");\nconst before = () => runner.deps.managedHost();\nconst unready = before();\n${bootBlock}\nreturn { unready, owner: before(), http: readDeps() };`);
     class CaptureRunner { constructor(deps) { this.deps = deps; } }
     const observed = run(CaptureRunner,
       (args) => bootDaemonAgentState({ ...args, probe: () => new Map(), nowUs: () => AT, nowMs: AT / 1000 }),
-      AgentTurnEvents, ModelSelections, null, path.join, () => f.home, context, "127.0.0.1", { port: 18802 }, () => {},
+      AgentTurnEvents, ModelSelections, ownedFile, ownership, path.join, () => f.home, context, "127.0.0.1", { port: 18802 }, () => {},
       { stderr: { write() {} }, exit() { throw new Error("bootstrap failed"); }, platform: process.platform, env: {} },
       { address: () => ({ port: 18802 }) },
       createAgentLifecyclePorts, () => ({ machineId: "win32:test-host" }), () => "test-host", fs.existsSync, () => false,

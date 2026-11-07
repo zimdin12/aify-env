@@ -50,6 +50,13 @@ most common health body in existence and identifies nobody. Reporting what you O
 The consequence for this protocol: those two fields may gain members, but neither may become optional
 without breaking every consumer's ability to tell an environment from a stranger on the same port.
 
+The host also reports its optional `ownerIdentity` (null when owning capture failed) and
+`ownershipRecovery: {ready, state, problem, displacedPid, unresolvedRecords}`. A bound listener with
+`ready:false` serves diagnostics but refuses managed/raw starts. `status:"healthy"` alone is not spawn
+readiness. An explicit later start request rechecks a held predecessor's observed original identity;
+there is no new periodic recovery timer. See [owned-record recovery](OWNED-PROCESS-RECOVERY-v1.md)
+for the legacy switch and operator recovery path.
+
 `traffic` is this environment's OWN io. It is the only traffic aify-env can honestly report -- it has
 no visibility into what a service does elsewhere, and a number meaning anything wider would be
 invented.
@@ -243,18 +250,18 @@ has already closed; unknown cleanup retains custody. A child whose exit was seen
 attempt cannot authorize a new numeric-group kill. Descendants that leave the group are outside its
 guarantee; numeric PGID custody is not a held-handle identity lease. Windows/PTY Runner stop keeps
 its existing owned ConPTY taskkill exception. Plugins use the released core live-child group/held
-ports. None of these live-child mechanisms changes recovered-record admission or hard-crash recovery.
+ports. The separate [recovered-record contract](OWNED-PROCESS-RECOVERY-v1.md) binds owner/child birth,
+recorded group scope and cleanup confirmation. It never manufactures live-child custody from an old PID.
 
 **The killing decision fails closed.** A recorded pid is only ended if the OS still reports it running
 the launcher we recorded. Pid reuse is real, and ending a stranger's process is a far worse failure
 than the leak being fixed — anything unconfirmed is left running and reported on stderr, where an
 operator can act on it.
 
-**One case is genuinely unrecoverable, and is not papered over.** If a launcher dies BEFORE the agent it
-started, the agent is orphaned with no parent, and no pid-tree walk can find it from the record.
-Reaping a tree requires the tree to still exist. On Windows this is what happens when the environment
-is killed and the pty tears the shell down with it. Closing it properly needs an OS job object rather
-than bookkeeping.
+**A dead root cannot renew ownership of survivors.** A PID-tree walk cannot find an already orphaned
+subtree. A surviving numeric group without its original live-root or durable surviving-member witness
+stays recorded as unverified and is never signalled by a successor. #17 closes silent custody loss,
+not automatic survivor cleanup; a stronger durable group witness or OS containment is separate work.
 
 **On Windows there is no graceful path from another process.** `SIGTERM` there is `TerminateProcess`:
 the target dies immediately and no handler runs. So every external stop is the ungraceful one, and the

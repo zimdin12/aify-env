@@ -1,11 +1,17 @@
-// Exact identity -> reap decisions and actual boot batching. All killers, OS queries and record IO are injected.
+// Exact identity -> reap decisions and real recovery batching. OS effects are injected; record IO uses private fixtures.
 // The old Linux verifier reads procfs directly: block that IO while watching the new contract fail on old source.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { before, after, test } from 'node:test';
 import { defaultVerify, planOrphanReap, START_TIME_TOLERANCE_MS } from '../lib/orphan-reap.mjs';
-import { entriesOwnedElsewhere } from '../lib/owned-processes.mjs';
+import os from 'node:os';
+import path from 'node:path';
+import { OwnedProcessRecord } from '../lib/owned-process-record.mjs';
+import { RecoveredProcessTermination } from '../lib/recovered-process-termination.mjs';
+import { SuccessorRecovery } from '../lib/successor-recovery.mjs';
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
+new ProcessEffectTripwire();
 import { ProcessIdentityProbe } from '../lib/process-identity.mjs';
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/process-identity-v1.json', import.meta.url), 'utf8'));
 const originalRead = fs.readFileSync;
@@ -68,44 +74,49 @@ for (const [name, createdAtUs, admitted] of [
   });
 }
 
-test('boot reap batches ten recorded PIDs and the owner into one asynchronous Windows query, with an injected killer', async t => {
+function batchFixture(t, ownerAlive) {
+  // Real core body and exact record deltas; independent top-level cases keep either failure from hiding the other.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'reap-batch-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const file = path.join(home, 'owned.json');
   const entries = Array.from({ length: 10 }, (_, index) => ({ ...base, id: `entry-${index}`, pid: 100 + index, launcher: 'C:/fixture/launcher' }));
   for (const entry of entries) delete entry.startToken;
-  const calls = [], killed = [], messages = [], writes = [];
-  let ownerAlive = false;
-  class InjectedIdentity extends ProcessIdentityProbe {
-    constructor() {
-      super({ platform: 'win32', readFile: noIO, state: noIO, runSync: noIO,
-        run: (command, args, options, done) => {
-          calls.push({ command, args: [...args] });
-          const rows = entries.map(entry => ({ pid: entry.pid, created: new Date(at).toISOString(), cmd: entry.launcher }));
-          if (ownerAlive) rows.push({ pid: 17, created: null, cmd: null }); // legacy owner PID, no stored birth/token
-          done(null, JSON.stringify(rows), '');
-        } });
-    }
-  }
-  const source = originalRead(new URL('../bin/aify-env.mjs', import.meta.url), 'utf8');
-  const body = source.match(/^async function reapLeftovers\(\) \{[\s\S]*?^\}/m)?.[0];
-  assert.ok(body, 'the exact boot recovery function was found; the daemon is never imported');
-  const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
-  const run = new AsyncFunction('readOwned', 'OWNED_FILE', 'ProcessIdentityProbe', 'planOrphanReap', 'defaultIsAlive',
-    'defaultVerify', 'killTree', 'process', 'chr10', 'clearOwned', 'entriesOwnedElsewhere', body + '\nreturn reapLeftovers();');
-  const execute = () => run(() => entries, 'fixture-only-owned-file', InjectedIdentity, planOrphanReap, pid => pid !== 17 || ownerAlive,
-    (entry, options) => defaultVerify(entry, { platform: 'win32', run: noIO, startedAtOf: noIO, ...options }),
-    async pid => { killed.push(pid); return true; }, { stderr: { write: text => messages.push(text) } }, '\n',
-    (file, options) => writes.push({ file, options }), entriesOwnedElsewhere);
-  await execute();
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, 'powershell.exe');
-  const wanted = [...calls[0].args.at(-1).matchAll(/ProcessId=(\d+)/g)].map(match => Number(match[1]));
-  assert.deepEqual(new Set(wanted), new Set([...entries.map(entry => entry.pid), 17]));
-  assert.deepEqual(killed, entries.map(entry => entry.pid));
-  assert.equal(writes.length, 1); assert.equal(messages.length, entries.length);
-  await t.test('a live legacy PID-only owner still protects its records without a new owner identity or kill permission', async () => {
-    ownerAlive = true; calls.length = 0; killed.length = 0; messages.length = 0; writes.length = 0;
-    await execute();
-    assert.equal(calls.length, 1, 'still one asynchronous observation batch');
-    assert.deepEqual({ killed, retained: writes[0]?.options.keep }, { killed: [], retained: entries },
-      'the conservative legacy owner guard still prevents both kill and record loss');
-  });
+  const calls = [], killed = [], messages = [];
+  const identity = new ProcessIdentityProbe({ platform: 'win32', readFile: noIO, state: noIO, runSync: noIO,
+    run: (command, args, options, done) => {
+      calls.push({ command, args: [...args] });
+      const rows = entries.map(entry => ({ pid: entry.pid, created: new Date(at).toISOString(), cmd: entry.launcher }));
+      if (ownerAlive) rows.push({ pid: 17, created: null, cmd: null });
+      done(null, JSON.stringify(rows), '');
+    } });
+  const record = new OwnedProcessRecord(file, { report: noIO });
+  const termination = new RecoveredProcessTermination({ platform: 'win32', identity, selfPid: 999, parentPid: 998,
+    held: async (pid, { stillOurs }) => {
+      const createdAt100ns = String((BigInt(at * 1000) + 11644473600000000n) * 10n);
+      assert.equal(stillOurs({ createdAt100ns }), true, 'the actual observed child birth admits the held scope');
+      killed.push(pid);
+    } });
+  fs.writeFileSync(file, JSON.stringify(entries));
+  const recovery = new SuccessorRecovery({ record, identity, termination, platform: 'win32', selfPid: 999, parentPid: 998, report: text => messages.push(text) });
+  return { entries, calls, killed, messages, record, recovery };
+}
+
+test('boot reap batches ten recorded PIDs and the owner into one asynchronous Windows query, with a held-birth-verified injected killer', async t => {
+  const f = batchFixture(t, false);
+  await f.recovery.recover();
+  assert.equal(f.calls.length, 1, 'one asynchronous admission population query, not one per entry');
+  assert.equal(f.calls[0].command, 'powershell.exe');
+  const wanted = [...f.calls[0].args.at(-1).matchAll(/ProcessId=(\d+)/g)].map(match => Number(match[1]));
+  assert.deepEqual(new Set(wanted), new Set([...f.entries.map(entry => entry.pid), 17]));
+  assert.deepEqual(f.killed, f.entries.map(entry => entry.pid));
+  assert.deepEqual(f.record.load().entries, []);
+  assert.equal(f.messages.filter(text => text.includes('confirmed reachable-held-tree cleanup')).length, f.entries.length);
+});
+
+test('a live legacy PID-only owner still protects its records without a new owner identity or kill permission', async t => {
+  const f = batchFixture(t, true);
+  await f.recovery.recover();
+  assert.equal(f.calls.length, 1, 'still one asynchronous observation batch');
+  assert.deepEqual({ killed: f.killed, retained: f.record.load().entries }, { killed: [], retained: f.entries },
+    'the conservative legacy owner guard still prevents both kill and record loss');
 });

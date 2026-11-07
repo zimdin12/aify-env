@@ -121,13 +121,13 @@ export class KnownWindowsTree {
   }
 
   /** endOwnedChildTree's `held` port: the core heldKill, its start restricted to this tree. */
-  held = (pid, { stillOurs } = {}) => {
+  held = (pid, { stillOurs, timeoutMs } = {}) => {
     this.#heldCalls.push(pid);
     if (this.#root === null || this.#grandchild === null) return Promise.reject(new Error("the fixture tree is not known yet, so nothing was killed"));
     if (pid !== this.#root) return Promise.reject(new Error(`${pid} is not the fixture's root ${this.#root}, so nothing was killed`));
     // Negative probe input, not a killer mutation: record the request, issue no native effect, then test-owned DONE cleanup.
     if (this.#recordOnly) return Promise.resolve();
-    return heldKill(pid, { stillOurs, start: (file, args, options) => this.#start(pid, file, args, options) });
+    return heldKill(pid, { stillOurs, timeoutMs, start: (file, args, options) => this.#start(pid, file, args, options) });
   };
 
   /** Start the core's helper only if it is exactly the core's helper for this root; run it on the known tree. */

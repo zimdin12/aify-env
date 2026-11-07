@@ -30,15 +30,17 @@ positive-PID fallback.
 
 Runner retains group custody through root exit/close and reaper release until absence is proved.
 A dead root with an unresolved group is not a completed stop. The reaper still kills nothing; a group
-release refusal is returned as unknown rather than reaped. Existing durable records can be retained,
-but this change adds no recovery format and does not establish hard-crash recovery (#17).
+release refusal is returned as unknown rather than reaped. The separate [owned-record recovery
+contract](OWNED-PROCESS-RECOVERY-v1.md) defines durable metadata, successor admission and retention;
+these live-child ports do not themselves grant recovered-PID authority.
 
 If the root exits on its own while descendants keep its group alive, a later stop returns unknown
 without signalling that group. Repeated stops can therefore keep failing, with the entry retained,
 until the group is positively observed gone or this environment's lifetime ends. This is deliberate:
-a crashed root does not renew numeric-group kill authority. The planned remedy is verified reaping
-at an operator-owned restart under [#17](https://github.com/zimdin12/aify-env/issues/17). That recovery
-work is not implemented here; a restart alone is not a promise that these survivors will be cleaned up.
+a crashed root does not renew numeric-group kill authority. #17 persists this uncertainty and reports
+an unverified group without signalling it. It closes silent custody loss, not automatic survivor
+cleanup. A durable surviving-group witness or OS containment is separate, unimplemented work;
+a restart alone does not promise these survivors will be cleaned up.
 
 ## Result propagation
 
@@ -59,13 +61,15 @@ Request-id replay stays tied to the same stop witness; uncertainty does not gran
 
 ## Windows held handles
 
-`heldKill(pid, {stillOurs, start?, powershell?})` returns Promise<void>. The caller must own a live child
-and provide a current exit-unseen witness. Self/parent/init targets are refused before a helper starts.
-The helper holds the root before the callback decides go/no-go; held handles preserve identity while
-the reachable tree is ended. Unknown open/query/list/wait/termination outcomes reject. This API does
-not accept a recovered PID or claim an already orphaned subtree was reached. The moved C# algorithm
-and handshake are the existing ones; the implementation lives in core. The old plugin module is a
-compatibility re-export only, not a second implementation.
+`heldKill(pid, {stillOurs, start?, powershell?, timeoutMs?})` returns Promise<void>. The helper opens
+and holds the root before calling `stillOurs({createdAt100ns})` for go/no-go. Live-child callers keep
+their current exit-unseen witness and may ignore the argument. The recovered-record adapter instead
+requires the actual held creation clock to match its freshly observed birth; a saved PID is never
+sufficient. Self/parent/init targets are refused before a helper starts. An optional positive timeout
+cancels only the newly spawned helper and leaves target cleanup unconfirmed; it never sends a second
+command after go. Unknown open/query/list/wait/termination outcomes reject. Completion describes the
+reachable held tree, not a subtree orphaned before acquisition. The C# algorithm remains unchanged;
+the old plugin module is a compatibility re-export, not a second implementation.
 
 `endOwnedChildTree(pid, {platform?, own?, group?, stillOurs?, held?, timeoutMs?})` selects the strict
 owned-group or held-child port. A supplied own handle must match pid. A best-effort own-handle kill
@@ -79,9 +83,11 @@ with a hold-root-before-console design is outside this change. “Taskkill is re
 universal claim.
 
 The older core killTree API remains a best-effort attempted boolean for its existing callers, not a
-cleanup certificate. Recorded orphan/resident/gateway consumers retain their existing verification
-and fences. Supersede retains its health-shape-identified PID policy; it is not relabelled birth-verified.
-No new gateway, owner-record, token-backfill, process-query or Linux clock-conversion authority is added.
+cleanup certificate. Resident/gateway consumers retain their existing verification and fences.
+Owned-record recovery now captures the shape-identified incumbent's actual birth through the shared
+probe, fences writes until that original writer is gone, and verifies matching cleanup scope before
+retirement; see [owned-record recovery](OWNED-PROCESS-RECOVERY-v1.md). This does not authenticate a
+malicious local health responder, backfill old tokens or add gateway/Linux wall-clock authority.
 
 ## Qualification boundary
 

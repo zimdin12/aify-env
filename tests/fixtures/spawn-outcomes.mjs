@@ -36,6 +36,13 @@ export function fixture(t, options = {}) {
     if (String(file) === ownedFile) writes.push(JSON.parse(String(bytes)));
     return original.call(this, file, bytes, ...args);
   });
+  //17 publishes through durable temp/fsync/rename. Count the actual target replacement, not the temp write.
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', function(from, to, ...args) {
+    const result = rename.call(this, from, to, ...args);
+    if (String(to) === ownedFile) writes.push(JSON.parse(fs.readFileSync(ownedFile, 'utf8')));
+    return result;
+  });
   const registry = new ProcessRegistry({ onChange: () => observations.push(registry.list()) });
   const host = { startManaged: record => births.push(structuredClone(record)), endManaged: lifetime => { ends.push(lifetime); return {}; } };
   // Only supplied synthetic spawners use the legacy Win32 syscall profile; the missing-command cases stay native.
