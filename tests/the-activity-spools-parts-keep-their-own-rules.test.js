@@ -9,6 +9,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { createRequire, syncBuiltinESMExports } from 'node:module';
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
+new ProcessEffectTripwire();
 
 import { ActivityOperationLock } from "../lib/plugins/aify-dashboard/activity-operation-lock.mjs";
 import { activityDeclared } from "../lib/plugins/aify-dashboard/activity-protocol.mjs";
@@ -119,10 +122,10 @@ test("ActivityRetirement: a witness only from a single, alive, matching identity
     .ended({ witness: { ...WITNESS, agentId: "other" }, source: SOURCE }), false, "an invalid witness proves nothing");
 });
 
-test("activityLaunchEnv: the switch, and each of the grant's bounds only when the grant sets it", () => {
-  assert.deepEqual(activityLaunchEnv({}), { AIFY_FILE_ACTIVITY: "1" });
+test("activityLaunchEnv: only explicit bounds, never the producer switch", () => {
+  assert.deepEqual(activityLaunchEnv({}), {});
   assert.deepEqual(activityLaunchEnv({ sessionBytes: 1024, maxAgeMs: 60_000 }),
-    { AIFY_FILE_ACTIVITY: "1", AIFY_ACTIVITY_SESSION_BYTES: "1024", AIFY_ACTIVITY_MAX_AGE_MS: "60000" });
+    { AIFY_ACTIVITY_SESSION_BYTES: "1024", AIFY_ACTIVITY_MAX_AGE_MS: "60000" });
 });
 
 test("wrapperActivity: the policy is the wrapper's reading of the producer's own env, and a wrapper without validators is refused", async (t) => {
@@ -134,13 +137,49 @@ test("wrapperActivity: the policy is the wrapper's reading of the producer's own
     "export const validActivityRecord = () => true;",
     "export const safeAgentId = () => true;",
   ].join("\n"));
-  const admitted = await wrapperActivity({ wrapperCheckout: checkout, sessionBytes: 99 });
+  const admitted = await wrapperActivity({ wrapperCheckout: checkout, leaseDirectory: path.join(checkout, 'leases'), sessionBytes: 99 });
   assert.deepEqual(admitted.policy, { sessionBytes: 99 }, "the policy is not what the producer's env would give, or kept `enabled`");
   const bare = path.join(scratch(t), "bare");
   fs.mkdirSync(path.join(bare, "lib"), { recursive: true });
   fs.writeFileSync(path.join(bare, "lib", "file-activity.mjs"), "export const activityConfiguration = () => ({});");
   await assert.rejects(wrapperActivity({ wrapperCheckout: bare }), /wrapper-validator/);
   await assert.rejects(wrapperActivity({ wrapperCheckout: path.join(checkout, "missing") }), /wrapper-checkout/);
+});
+
+// Default-location admission is new; explicit-grant tests cannot pin these two producer-owned inputs.
+test('wrapperActivity refuses a relative installed npm root without guessing CWD', async t => {
+  const packages = scratch(t), checkout = path.join(packages, 'aify-wrapper');
+  fs.mkdirSync(path.join(checkout, 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(checkout, 'lib/file-activity.mjs'),
+    'export const activityConfiguration=()=>({}); export const validActivityRecord=()=>true; export const safeAgentId=()=>true;');
+  fs.writeFileSync(path.join(checkout, 'lib/agent-lease.mjs'), `export const leaseDirectory=()=>${JSON.stringify(packages)};`);
+  const cp = createRequire(import.meta.url)('node:child_process'), original = cp.spawnSync;
+  let asked = 0;
+  cp.spawnSync = (command, args) => {
+    assert.deepEqual([command, args], ['npm', ['root', '-g']]); asked++;
+    return { status: 0, stdout: path.relative(process.cwd(), packages) };
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(wrapperActivity({}), /^Error: wrapper-checkout$/);
+    assert.equal(asked, 1, 'the installed-path owner was actually queried');
+  } finally { cp.spawnSync = original; syncBuiltinESMExports(); }
+});
+
+test('wrapperActivity refuses a relative leaseDirectory result from the wrapper owner', async t => {
+  const checkout = scratch(t); fs.mkdirSync(path.join(checkout, 'lib'));
+  fs.writeFileSync(path.join(checkout, 'lib/file-activity.mjs'),
+    'export const activityConfiguration=()=>({enabled:false,sessionBytes:7}); export const validActivityRecord=()=>true; export const safeAgentId=()=>true;');
+  fs.writeFileSync(path.join(checkout, 'lib/agent-lease.mjs'), 'export const leaseDirectory=()=>"relative-lease";');
+  await assert.rejects(wrapperActivity({ wrapperCheckout: checkout }), /^Error: lease-directory$/);
+});
+
+test('ActivityShipper never defaults an unreadable configuration into a source grant', async () => {
+  let asked = 0;
+  const shipper = new ActivityShipper({ endpoint: 'e', api: { serviceSpec: async () => { asked++; return {}; } },
+    config: () => ({ config: null, problem: 'unreadable' }) });
+  await shipper.pass();
+  assert.deepEqual({ asked, state: shipper.state() }, { asked: 0, state: null });
 });
 
 test("activityDirectories: each admitted agent's activity-v2 folder, sorted; lease files and unsafe names are skipped", (t) => {
@@ -154,10 +193,10 @@ test("activityDirectories: each admitted agent's activity-v2 folder, sorted; lea
   assert.deepEqual(activityDirectories(path.join(lease, "missing"), safe), []);
 });
 
-test("ActivityShipper: no activity section is inactive and asks nothing; an undeclared service is said once per pass and asked once", async (t) => {
+test("ActivityShipper: explicit off asks nothing; an undeclared service is said once per pass and asked once", async (t) => {
   let asked = 0;
   const api = { serviceSpec: async () => { asked += 1; return {}; }, fileActivity: async () => assert.fail("shipped undeclared") };
-  const off = new ActivityShipper({ api, endpoint: "e", agents: null, config: () => ({ config: {} }) });
+  const off = new ActivityShipper({ api, endpoint: "e", agents: null, config: () => ({ config: { activity: { enabled: false } } }) });
   await off.pass();
   assert.equal(off.state(), null);
   assert.equal(asked, 0, "an inactive shipper asked the service");

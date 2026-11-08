@@ -1,6 +1,6 @@
 # File activity consumer, ingress v1 and storage v2
 
-File activity is disabled by default. This plugin does not enable the dashboard capability or a wrapper producer. Core lifecycle, agent-state, Herdr, status and worker-secret contributions are unchanged.
+The consumer defaults on when its activity configuration is absent. It does not enable the dashboard capability or a wrapper producer, and does not inject `AIFY_FILE_ACTIVITY=1`. Producer and receiver defaults have separate owners and qualification. Core lifecycle, agent-state, Herdr, status and worker-secret contributions are unchanged.
 
 ## Configuration
 
@@ -23,11 +23,13 @@ The maintained plugin configuration reader supplies `plugins["aify-dashboard"].a
 }
 ```
 
-Enabling it requires an explicit boolean `true` and both absolute paths. `wrapperCheckout` is an execution grant, like `providerCheckout`: the plugin imports JavaScript from that trusted checkout. Do not grant an untrusted or automatically located installation. There is no home scan, global-package fallback or implicit execution grant.
+An absent activity section uses the canonical installed `aify-wrapper` package, resolved through the existing global npm root and its real path. The wrapper's existing `leaseDirectory()` owns the lease home, including `AIFY_AGENT_LEASE_DIR`; the result must be absolute. This default source is resolved once per shipper. There is no home scan, CWD guess, record-carried descriptor or per-launch-home discovery. An unresolved installation reports unknown coverage.
+
+An explicit override still requires boolean `enabled: true` and both absolute paths. `wrapperCheckout` is an execution grant: the plugin imports JavaScript from that trusted checkout. Do not grant an untrusted checkout. `enabled: false` stops the consumer. Malformed or unreadable configuration is not absence and cannot select the default source.
 
 `leaseDirectory` must be the producer's exact absolute lease directory. Discovery considers `<leaseDirectory>/<validated agentId>/activity-v2`, not transcripts or lease-record contents. `activity-v1` is untouched. Symlink/junction ancestors and unexpected entry types refuse admission. Regular lease files are ignored. Missing and empty raw roots are not initialized. Admission assumes cooperating local writers, not hostile same-user ancestor replacement.
 
-The consumer imports only the granted checkout's `lib/file-activity.mjs` validators. The producer exposes append only. The plugin owns cursors, ACKs, gap identity, age and recovery. Displayed settings are defaults and inclusive maxima; optional values may only lower them. Each raw line retains its original validated policy. A wider consumer setting cannot widen an old line's byte/age allowance. A stricter session-count setting refuses an over-limit root rather than omitting sources. Use the approved STORAGEv2 wrapper source recorded in the private receipt.
+The consumer imports the admitted wrapper's `lib/file-activity.mjs` validators and policy, and its `lib/agent-lease.mjs` resolver when a lease home was not explicitly supplied. Producer enablement is discarded when reading bounds: an individual producer's explicit off prevents new records, not consumption of unrelated historical queues. Optional managed-worker policy-bound contributions remain; they never set or override the producer switch. Every safe agent directory is eligible, including resident sources. The producer exposes append only. The plugin owns cursors, ACKs, gap identity, age and recovery. Displayed settings are defaults and inclusive maxima; optional values may only lower them. Each raw line retains its original validated policy. A wider consumer setting cannot widen an old line's byte/age allowance. A stricter session-count setting refuses an over-limit root rather than omitting sources. Use the approved STORAGEv2 wrapper source recorded in the private receipt.
 
 Configuration is read on each maintained plugin tick. Disabling it stops new activity passes. Stop or detach aborts the current request, waits for it to unwind, and forbids late ACK/recovery writes. Declining to another environment suppresses discovery and delivery on that same lifecycle. Activity has no independent watcher or immediate drain/retry loop. Each tick selects at most one existing agent directory in round-robin order and submits at most one source batch. The cursor remains local and durable across plugin/process restarts.
 
@@ -47,7 +49,7 @@ Only HTTP 200 with the exact version/batch ID, ordered results, admitted disposi
 
 ## Checkpoints, clocks and retirement
 
-State lives outside the producer root at `<leaseDirectory>/<agentId>/.aify-dashboard-activity-v2/<sha256(receiver endpoint)>/state.json`. The existing plugin context supplies no state directory; this location stays inside the explicit lease grant without a new home/config path. Receiver hashing prevents cross-receiver ACK reuse. The checkpoint is capped at 256 KiB and 16 source entries; a staged interval has at most 128 dispositions and 32 gaps. A fixed temporary file and exclusive operation lock add bounded overhead. Writes fsync the temporary file and atomically rename it. Ordinary drained reads do not publish or fsync a checkpoint.
+State lives outside the producer root at `<leaseDirectory>/<agentId>/.aify-dashboard-activity-v2/<sha256(receiver endpoint)>/state.json`. The existing plugin context supplies no state directory; this location stays inside the admitted lease home without a new home/config path. Receiver hashing prevents cross-receiver ACK reuse. The checkpoint is capped at 256 KiB and 16 source entries; a staged interval has at most 128 dispositions and 32 gaps. A fixed temporary file and exclusive operation lock add bounded overhead. Writes fsync the temporary file and atomically rename it. Ordinary drained reads do not publish or fsync a checkpoint.
 
 Checkpoint transactions require the existing optional `koffi` 3.3.3 dependency and its matching native platform package. Missing native support refuses the operation; there is no unlocked fallback or native-free transaction claim. On Windows, a non-inheritable `CreateFileW` handle with zero sharing owns the stable `lock` rendezvous until close or process death. The rendezvous is never unlinked. POSIX `flock` is implemented but not qualified by the native Windows receipts. This lock serializes consumer operations, not producer hooks. Directory-fsync and power-loss durability are not claimed.
 

@@ -1,6 +1,5 @@
-// File activity for a worker this host starts from a definition (aify-dashboard #52). A definition cannot name an
-// AIFY_* variable, so the aify-dashboard plugin contributes AIFY_FILE_ACTIVITY itself, through a second spawnEnv offer,
-// when its `activity` grant is enabled and `activity.managed` covers the agent. The secrets offer is unchanged.
+// A managed worker may receive explicit policy bounds, but producer activation belongs to the wrapper.
+// The contribution must neither inject flag1 nor turn an explicit off into a refused start. Secrets are unchanged.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -14,16 +13,15 @@ const GRANT = { enabled: true, leaseDirectory: "C:/lease", wrapperCheckout: "C:/
 const configured = (activity) => () => ({ config: activity === undefined ? {} : { activity }, problem: "" });
 const signal = new AbortController().signal;
 const ask = (offer, definition = { id: "lead", env: {} }) => offer.contribute({ definition, signal });
-const ON = { env: { AIFY_FILE_ACTIVITY: "1" } };
 const NOTHING = { env: {} };
 
-test("managed true contributes the switch to every defined start", async () => {
-  assert.deepEqual(await ask(activityContributor({ config: configured({ ...GRANT, managed: true }) })), ON);
+test("managed true never injects the producer switch", async () => {
+  assert.deepEqual(await ask(activityContributor({ config: configured({ ...GRANT, managed: true }) })), NOTHING);
 });
 
-test("a list of ids contributes to a listed agent and to no other", async () => {
+test("an id list never injects the producer switch", async () => {
   const offer = activityContributor({ config: configured({ ...GRANT, managed: ["lead", "coder"] }) });
-  assert.deepEqual(await ask(offer, { id: "coder", env: {} }), ON);
+  assert.deepEqual(await ask(offer, { id: "coder", env: {} }), NOTHING);
   assert.deepEqual(await ask(offer, { id: "reviewer", env: {} }), NOTHING);
 });
 
@@ -43,9 +41,9 @@ test("a malformed grant or an unreadable configuration contributes nothing and r
   assert.deepEqual(await ask(problem), NOTHING);
 });
 
-test("the grant's bounds travel with the switch, so the producer and the shipper hold one policy", async () => {
+test("the grant's bounds travel without changing producer enablement", async () => {
   const offer = activityContributor({ config: configured({ ...GRANT, managed: true, sessionBytes: 65536, maxSessions: 4, maxAgeMs: 3600000 }) });
-  assert.deepEqual(await ask(offer), { env: { AIFY_FILE_ACTIVITY: "1", AIFY_ACTIVITY_SESSION_BYTES: "65536",
+  assert.deepEqual(await ask(offer), { env: { AIFY_ACTIVITY_SESSION_BYTES: "65536",
     AIFY_ACTIVITY_MAX_SESSIONS: "4", AIFY_ACTIVITY_MAX_AGE_MS: "3600000" } });
 });
 
@@ -69,14 +67,20 @@ test("the plugin offers the secrets contributor first and the activity contribut
   assert.equal(Object.hasOwn(offers[1], "field"), false, "the activity offer supplies no definition field");
 });
 
-test("a defined start gets the switch, and a launch that sets it itself is refused, not overridden", async () => {
+test("a defined start gets no switch through the real spawn-env boundary", async () => {
   const offer = activityContributor({ config: configured({ ...GRANT, managed: true }) });
   const definitionFor = async () => ({ agent: { id: "lead", env: {} } });
   const launch = (env = {}) => ({ agentId: "lead", definition: { storeId: "s", incarnation: "i", revision: 1 }, env });
   const started = await spawnEnvFor({ launch: launch(), env: { PATH: "p" }, contributors: [offer], definitionFor, windows: true });
-  assert.equal(started.env?.AIFY_FILE_ACTIVITY, "1");
-  const collided = await spawnEnvFor({ launch: launch({ AIFY_FILE_ACTIVITY: "0" }), env: { AIFY_FILE_ACTIVITY: "0" }, contributors: [offer], definitionFor, windows: true });
-  assert.match(collided.refused ?? "", /collides with a variable the launch sets/);
+  assert.equal(Object.hasOwn(started.env, "AIFY_FILE_ACTIVITY"), false);
   const bare = await spawnEnvFor({ launch: { agentId: "lead", env: {} }, env: { PATH: "p" }, contributors: [offer], definitionFor, windows: true });
   assert.equal(Object.hasOwn(bare.env, "AIFY_FILE_ACTIVITY"), false, "a start from no definition is not asked");
+});
+
+test("explicit producer off survives the real spawn-env boundary without refusing the launch", async () => {
+  const offer = activityContributor({ config: configured({ ...GRANT, managed: true }) });
+  const definitionFor = async () => ({ agent: { id: "lead", env: {} } });
+  const launch = { agentId: "lead", definition: { storeId: "s", incarnation: "i", revision: 1 }, env: { AIFY_FILE_ACTIVITY: "0" } };
+  const disabled = await spawnEnvFor({ launch, env: { AIFY_FILE_ACTIVITY: "0" }, contributors: [offer], definitionFor, windows: true });
+  assert.deepEqual({ refused: disabled.refused ?? null, flag: disabled.env?.AIFY_FILE_ACTIVITY }, { refused: null, flag: "0" });
 });

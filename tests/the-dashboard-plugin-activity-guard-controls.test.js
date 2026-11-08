@@ -137,7 +137,7 @@ test(`batch transform refuses over-budget ${budget} population`, () => {
 
 test('explicit grants and symlink admission fail before the storage owner is called', { skip: prerequisite }, async t => {
   const f = await fixture(t);
-  assert.equal(activityGrant({}), null, 'absent enablement stays off');
+  assert.deepEqual(activityGrant({}), {}, 'absent configuration selects installed source defaults');
   assert.equal(activityGrant({ activity: { enabled: false } }), null, 'disabled stays off');
   for (const value of [null, true, [], { enabled: 'true' }, { enabled: true }, { enabled: true, leaseDirectory: 'relative', wrapperCheckout: f.config.activity.wrapperCheckout }]) {
     assert.throws(() => activityGrant({ activity: value }), /configuration/, 'missing or malformed grant refused');

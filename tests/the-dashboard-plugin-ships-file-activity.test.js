@@ -3,7 +3,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
 import { fixture, prerequisite, delay, until } from './_activity-fixture.mjs';
+new ProcessEffectTripwire();
 
 test('activity test worker uses the selected native runtime', () => {
   console.log(JSON.stringify({ activityWorker: { version: process.version, execPath: process.execPath } }));
@@ -31,6 +37,44 @@ test('configured plugin ships only immutable event metadata and commits the real
   assert.equal(f.bodies[0].coverage.reportEveryMs, null, 'no invented freshness cadence');
   assert.equal(Object.hasOwn(f.bodies[0], 'wsl'), false, 'no changing WSL retry facts');
   assert.equal(f.open().read().token, null, 'committed ACK retires actual source bytes');
+});
+
+// New property: the consumer's absent grant resolves installed owners and ships a resident source.
+// Existing configured-delivery coverage cannot catch a shipper that silently remains off without that grant.
+// This creates an existing spool record with real producer code, not a resident runtime/default-on claim.
+// Producer trace: aify-lifetime.sh exports AIFY_ENV_INSTANCE=residents and AIFY_LIFETIME;
+// aify-tool-event.mjs passes those as instanceId/incarnation to activityEvent and uses leaseDirectory.
+test('absent activity grant ships an existing resident record through the real plugin without an env contribution', { skip: prerequisite }, async t => {
+  const f = await fixture(t, { records: 0 });
+  const wrapper = process.env.AIFY_WRAPPER_REPO;
+  const { activityEvent } = await import(pathToFileURL(path.join(wrapper, 'lib/file-activity.mjs')));
+  const record = activityEvent({ input: { session_id: 'resident-session', cwd: 'C:/fixture/project', tool_name: 'Read', tool_input: { file_path: 'resident.txt' } },
+    identity: { machineId: 'win32:fixture', instanceId: 'residents', agentId: 'agent-1', incarnation: randomUUID() },
+    outcome: 'success', observedAt: Date.now() });
+  assert.ok(record, 'actual wrapper validator admits the resident producer shape');
+  assert.equal(f.producer().append(record).ok, true);
+  delete f.config.activity; f.save();
+  const packages = path.join(f.root, 'global-node-modules'), linked = path.join(packages, 'aify-wrapper');
+  fs.mkdirSync(packages); fs.symlinkSync(wrapper, linked, 'junction');
+  const cp = createRequire(import.meta.url)('node:child_process'), original = cp.spawnSync;
+  const oldLease = process.env.AIFY_AGENT_LEASE_DIR; let queries = 0;
+  cp.spawnSync = (command, args) => {
+    assert.deepEqual([command, args], ['npm', ['root', '-g']], 'only the installed-root query is admitted');
+    queries++; return { status: 0, stdout: packages };
+  };
+  process.env.AIFY_AGENT_LEASE_DIR = f.leases; syncBuiltinESMExports();
+  const p = f.plugin({ overrides: { tickMs: 1 } });
+  try {
+    await p.start(f.host);
+    await until(() => (p.state().activity?.passes ?? 0) >= 2, 'absent-grant plugin must execute its existing activity ticks');
+    assert.deepEqual({ batches: f.bodies.length, events: f.bodies[0]?.events, source: f.bodies[0]?.source },
+      { batches: 1, events: [record.event], source: record.source });
+    assert.equal(f.open().read().token, null, 'the real receipt commits the reopened cursor');
+    assert.equal(queries, 1, 'default installed source is resolved once per shipper, not on every tick');
+  } finally {
+    await p.stop(); cp.spawnSync = original; syncBuiltinESMExports(); fs.unlinkSync(linked);
+    if (oldLease === undefined) delete process.env.AIFY_AGENT_LEASE_DIR; else process.env.AIFY_AGENT_LEASE_DIR = oldLease;
+  }
 });
 
 test('plugin startup checks activity capability once across idle ticks', { skip: prerequisite }, async t => {
