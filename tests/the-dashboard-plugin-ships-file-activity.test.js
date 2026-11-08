@@ -44,7 +44,9 @@ test('configured plugin ships only immutable event metadata and commits the real
 // This creates an existing spool record with real producer code, not a resident runtime/default-on claim.
 // Producer trace: aify-lifetime.sh exports AIFY_ENV_INSTANCE=residents and AIFY_LIFETIME;
 // aify-tool-event.mjs passes those as instanceId/incarnation to activityEvent and uses leaseDirectory.
-test('absent activity grant ships an existing resident record through the real plugin without an env contribution', { skip: prerequisite }, async t => {
+for (const failFirst of [false, true]) test(failFirst
+  ? 'a failed default-source lookup is retried on the next tick and ships the existing record'
+  : 'absent activity grant ships an existing resident record through the real plugin without an env contribution', { skip: prerequisite }, async t => {
   const f = await fixture(t, { records: 0 });
   const wrapper = process.env.AIFY_WRAPPER_REPO;
   const { activityEvent } = await import(pathToFileURL(path.join(wrapper, 'lib/file-activity.mjs')));
@@ -60,17 +62,18 @@ test('absent activity grant ships an existing resident record through the real p
   const oldLease = process.env.AIFY_AGENT_LEASE_DIR; let queries = 0;
   cp.spawnSync = (command, args) => {
     assert.deepEqual([command, args], ['npm', ['root', '-g']], 'only the installed-root query is admitted');
-    queries++; return { status: 0, stdout: packages };
+    queries++;
+    return failFirst && queries === 1 ? { status: 1, stdout: '' } : { status: 0, stdout: packages };
   };
   process.env.AIFY_AGENT_LEASE_DIR = f.leases; syncBuiltinESMExports();
   const p = f.plugin({ overrides: { tickMs: 1 } });
   try {
     await p.start(f.host);
-    await until(() => (p.state().activity?.passes ?? 0) >= 2, 'absent-grant plugin must execute its existing activity ticks');
+    await until(() => (p.state().activity?.passes ?? 0) >= (failFirst ? 3 : 2), 'absent-grant plugin must execute its existing activity ticks');
     assert.deepEqual({ batches: f.bodies.length, events: f.bodies[0]?.events, source: f.bodies[0]?.source },
       { batches: 1, events: [record.event], source: record.source });
     assert.equal(f.open().read().token, null, 'the real receipt commits the reopened cursor');
-    assert.equal(queries, 1, 'default installed source is resolved once per shipper, not on every tick');
+    assert.equal(queries, failFirst ? 2 : 1, 'only a failed lookup is retried; successful source resolution stays cached');
   } finally {
     await p.stop(); cp.spawnSync = original; syncBuiltinESMExports(); fs.unlinkSync(linked);
     if (oldLease === undefined) delete process.env.AIFY_AGENT_LEASE_DIR; else process.env.AIFY_AGENT_LEASE_DIR = oldLease;
