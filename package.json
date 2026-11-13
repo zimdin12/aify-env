@@ -10,7 +10,8 @@
   "files": [
     "lib/",
     "bin/",
-    "docs/",
+    "docs/*.md",
+    "docs/0.9/",
     "VERSION",
     "README.md"
   ],

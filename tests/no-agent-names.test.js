@@ -16,7 +16,12 @@ function filesAt(file) {
 
 function violations() {
   const packaged = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).files;
-  const files = [...new Set([...packaged, 'tests/'].flatMap(name => filesAt(path.join(ROOT, name))))];
+  const roots = [...packaged, 'tests/'].flatMap(pattern => {
+    const found = fs.globSync(pattern, { cwd: ROOT });
+    assert.ok(found.length, `source pattern matched nothing: ${pattern}`);
+    return found.flatMap(name => filesAt(path.join(ROOT, name)));
+  });
+  const files = [...new Set(roots)];
   return files.flatMap(file => {
     const relative = path.relative(ROOT, file).split(path.sep).join('/');
     // Historical captures keep exact bytes, including JSON receipts; their maintained source drivers are still checked.

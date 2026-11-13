@@ -2,11 +2,12 @@
 
 Every env review runs this complete population in addition to behavior/caller tests. A boot-file wiring change also runs [BOOT-SOURCE-TESTS.md](BOOT-SOURCE-TESTS.md). These bounded gates do not replace the full tag-candidate suite.
 
-## Census: 2026-11-06
+## Census: 2026-11-13
 
-The **25 files** below are selected by their inputs, not by the feature being changed:
+The **27 files** below are selected by their inputs, not by the feature being changed:
 
 - Export/name/package indexes read `lib/`, root tests, `package.json`, the declared bin/export targets, version declarations and the command registry.
+- Identity hygiene expands package-file globs and scans maintained source/tests. The pack gate checks npm's actual inventory, all current docs, and exclusion of historical evidence.
 - Structural gates walk production source for size, definition writers and plugin-boundary coupling; the wrapper-pin gate scans the install source; the shell gate scans root/scripts installers.
 - Test-safety gates enumerate test source, directly or through `_daemon-spawns.mjs`, and check registry/home/port seals. The doctor-home gate also enumerates tests. Runner gates cover named selectors, concurrency and inherited session identity.
 - Documentation gates consume the actual README key/layout tables, while the view-field gate enumerates `lib/tui-panes`. The allowlist gate checks that the actual README is not executable.
@@ -24,6 +25,8 @@ npm test -- \
   tests/allowlist.test.js \
   tests/bin-names-cannot-collide.test.js \
   tests/every-export-is-tested.test.js \
+  tests/historical-evidence-is-not-packaged.test.js \
+  tests/no-agent-names.test.js \
   tests/no-command-substitution-in-installer-strings.test.js \
   tests/no-oversized-source-file.test.js \
   tests/no-test-binds-a-hardcoded-port.test.js \
