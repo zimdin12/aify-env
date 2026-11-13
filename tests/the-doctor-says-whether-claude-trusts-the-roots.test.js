@@ -68,11 +68,27 @@ test("claude-trust-roots: unknown roots or an unreadable claude config is UNANSW
     { roots: [], claudeConfig: claude({}) },
     { roots: ["C:/w"], claudeConfig: null },
     { roots: ["C:/w"], claudeConfig: "{ not json" },
-    { roots: ["C:/w"], claudeConfig: "{}" },
+    ...['null', '[]', 'true', '3', '"text"', '{"projects":null}', '{"projects":[]}', '{"projects":false}', '{"projects":3}', '{"projects":"bad"}']
+      .map(claudeConfig => ({ roots: ["C:/w"], claudeConfig })),
   ]) {
     assert.equal(row(claudeTrustRootsVerdict({ ...facts, folderTrustOn: true, windows: true })).state, "unanswered", JSON.stringify(facts));
   }
 });
+
+for (const folderTrustOn of [true, false]) {
+  test(`fresh valid config without projects is known empty trust, folderTrust=${folderTrustOn}`, () => {
+    const facts = Object.freeze({ roots: Object.freeze(["C:/work"]), claudeConfig: "{}", folderTrustOn, windows: true });
+    const verdict = claudeTrustRootsVerdict(facts);
+    assert.deepEqual([row(verdict).state, verdict.code], folderTrustOn ? ["passed", "answered"] : ["failed", "untrusted"]);
+    if (!folderTrustOn) assert.match(verdict.fix, /open claude once in C:\/work.*folderTrust on/);
+    const added = [];
+    checkAutoConfirm({ add: (name, ok, code) => added.push([name, ok, code]), roots: facts.roots,
+      config: () => ({ config: { autoConfirm: { folderTrust: folderTrustOn } }, problem: "" }),
+      readClaudeConfig: () => "{}", windows: true });
+    assert.deepEqual(added.at(-1), ["claude-trust-roots", folderTrustOn, folderTrustOn ? "answered" : "untrusted"]);
+    assert.deepEqual(facts.roots, ["C:/work"]);
+  });
+}
 
 test("checkAutoConfirm adds both rows, and the trust row reads the folderTrust switch from the same config", () => {
   const added = [];
