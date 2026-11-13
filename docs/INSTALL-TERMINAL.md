@@ -32,4 +32,18 @@ An exact filesystem-reader replant made both assertions fail again. Restoring th
 
 The portable 22.20.0 runtime came from `https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz`. Its SHA-256 matched the vendor's SHASUMS256.txt, `00bbd05e306ea68b6e13e17360d0e2f680b493ef95f2fea1c4296ff7437530bc`. It was extracted outside every repository and executed from a private fixture home.
 
-The earlier staging hang had no captured holder. This differential witness establishes the reader defect on these owned PTYs, not the identity of that historical staging holder. Native Windows console teardown was not exercised. The existing regular-file terminal fixture tests consent ordering only and explicitly adapts its synthetic input.
+The earlier staging hang had no captured holder. This differential witness establishes the reader defect on these owned PTYs, not the identity of that historical staging holder. The existing regular-file terminal fixture tests consent ordering only and explicitly adapts its synthetic input.
+
+## Native Windows console qualification
+
+Run the same normal test environment with `npm test -- tests/install-terminal-conpty.test.js`. This requires native Windows, the installed node-pty binding and an explicit wrapper source checkout. Other platforms report this Windows-only qualification as NOT_RUN.
+
+The rig runs the actual interactive entry in a real owned ConPTY, without a tty spoof or stream replacement. It answers the real policy-consent prompt with y and n. Policy preparation and connect are private fixture effects, not real policy or installation actions. A local owned HTTP fixture supplies service metadata; no service API or external host is contacted. The target must exit naturally within three seconds of its final report. Refusal must prepare nothing and publish no registry.
+
+PASSES IN TESTS on native Windows Node22.20.0 with DLL-backed ConPTY on 2026-11-13. The initial witness was red on both the pre-reader-swap source2fe275c and sourceaa47181: neither displayed the prompt, and both refused. This was a pre-existing Windows console-path defect, not a regression from the terminal ReadStream change.
+
+A separate owned-console control reported true stdout/stdin isTTY flags. Relative CONIN$ opens failed with ENOENT in the private working directory. Explicit Win32 device-namespace opens succeeded, the input constructed a real terminal ReadStream, and the output wrote a known marker. A deliberately absent file returned ENOENT. These controls distinguish a usable console from the wrong filesystem lookup.
+
+The four-line product change uses `\\.\CONIN$` and `\\.\CONOUT$` on Windows, with the same open flags. Linux paths are unchanged. Both y/n cases then passed with natural target exits0/78 and no cleanup signals. Exact input/output path replants made both real-prompt assertions red. A separate post-report timer plant made both natural-exit assertions red; only that owned terminal was ended. Every restore used saved source bytes and a matching hash.
+
+The rig selects DLL ConPTY so timeout cleanup does not enumerate another console. Its node-pty owner process exits explicitly only after observing the target's onExit event and recording its result. This handles the known parent PipeWrap retention already documented by pty-smoke; it does not force the subject entry to exit or count forced cleanup as natural exit. The non-DLL ConPTY branch, a manually opened Windows Terminal window and other native Windows Node versions were not qualified by this run.

@@ -104,8 +104,8 @@ async function askTerminal(question, { windows }) {
   if (!process.stdout.isTTY) return null;
   let input, output;
   try {
-    input = new ReadStream(fs.openSync(windows ? "CONIN$" : "/dev/tty", "r"));
-    output = fs.createWriteStream(null, { fd: fs.openSync(windows ? "CONOUT$" : "/dev/tty", "w") });
+    input = new ReadStream(fs.openSync(windows ? "\\\\.\\CONIN$" : "/dev/tty", "r"));
+    output = fs.createWriteStream(null, { fd: fs.openSync(windows ? "\\\\.\\CONOUT$" : "/dev/tty", "w") });
   } catch {
     input?.destroy();
     return null;
