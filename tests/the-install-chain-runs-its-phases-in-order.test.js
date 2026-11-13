@@ -7,13 +7,13 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { CHAIN_MARK, EXIT_OK, EXIT_REFUSED, InstallChain, LAUNCHER_SERVICE, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
-import { approvedInstaller, connectRecorded, envWithout, gitCheckout, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, connectRecorded, envWithout, gitCheckout, packageAssets, registryKeyEnv, registryPath, runMarked, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const COMMS = "aify-comms=http://comms.test:8800";
 const plan = (...extra) => parseChainArgs(["--connect", COMMS, "--client", "claude", "--secret", "aify-comms.credentialRef=/k", ...extra]);
 
 /** Fake ports that record every call in order. */
-function host({ present = [], published = false, connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, assetsExit = 0, pkgAssets = null, installed = {}, keyEnv = { "aify-comms": ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"] }, packages = true } = {}) {
+function host({ present = [], connectExit = 0, env = {}, installer = { path: "/src/install.sh" }, assetsWrite = false, assetsExit = 0, pkgAssets = null, installed = {}, keyEnv = { "aify-comms": ["CLAUDE_MCP_API_KEY", "AIFY_API_KEY"] }, packages = true } = {}) {
   const calls = [];
   const registry = { bytes: "R1" };
   const io = {
@@ -23,7 +23,8 @@ function host({ present = [], published = false, connectExit = 0, env = {}, inst
     // Approval prompting has its own file (the-install-chain-asks-before-an-unapproved-artifact.test.js).
     unapproved: async () => [],
     askTerminal: async () => null,
-    publishedKey: async (name) => { calls.push(["publishedKey", name]); return published; },
+    policyReadiness: () => ({ state: "ready", command: null, reason: "fixture ready" }),
+    preparePolicy: async () => { throw new Error("unexpected preparation"); },
     ensurePackages: async () => { calls.push(["ensurePackages"]); return packages; },
     approvedInstaller: async (name) => { calls.push(["approvedInstaller", name]); return installer; },
     runInstaller: async (file, args, opts = {}) => { calls.push(["installer", file, ...args]); if (args[0] === "--assets-only") calls.push(["without", ...(opts.without ?? [])]); calls.push(["quiet", args[0], opts.quiet === true]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return args[0] === "--assets-only" ? assetsExit : 0; },
@@ -103,6 +104,7 @@ const WRAPPER_EXPORTS = {
   "connect-http.mjs": ["fetchSpec"],
   "service-spec.mjs": ["validateSpec", "tupleDigest"],
   "path-lookup.mjs": ["resolveOnPath"],
+  "channel-install.mjs": ["channelPolicyReadiness"],
   "package-install.mjs": ["installedCommit", "binFiles", "npmTool", "npmCliBeside"],
 };
 function fakeWrapper({ skipFile = "", skipExport = "", catalogue = { approved: ["d1"] }, reportFile = true } = {}) {
@@ -127,7 +129,7 @@ test("a wrapper module is usable only with the functions and catalogue the chain
   const noFile = await wrapperModules(fakeWrapper({ skipFile: "package-install.mjs" }));
   assert.match(noFile.problem, /lacks lib\/package-install\.mjs/);
   assert.match(noFile.problem, /npm install -g .*aify-wrapper.*git pull/s);
-  for (const missing of ["validateSpec", "binFiles", "fetchSpec"]) {
+  for (const missing of ["validateSpec", "binFiles", "fetchSpec", "channelPolicyReadiness"]) {
     const noExport = await wrapperModules(fakeWrapper({ skipExport: missing }));
     assert.match(noExport.problem ?? "", new RegExp(`does not export ${missing}`), `a wrapper without ${missing} passed`);
     assert.match(noExport.problem, /npm install -g .*aify-wrapper.*git pull/s);
@@ -163,7 +165,7 @@ test("registryKeyEnv reads each connected service's keyEnv from the registry, an
 
 test("a package's assets bin that exits non-zero is a reported problem, never a skip", async () => {
   const bin = { command: "/node", args: ["/pkg/bin/aify-dashboard-assets.mjs"] };
-  const { io, calls } = host({ present: ["claude"], published: true, installer: null, pkgAssets: bin, assetsExit: 1 });
+  const { io, calls } = host({ present: ["claude"], installer: null, pkgAssets: bin, assetsExit: 1 });
   const dash = parseChainArgs(["--connect", "aify-dashboard=http://dash.test:9700", "--client", "claude", "--no-prompt"]);
   const { exit, report } = await new InstallChain(dash, io).run();
   assert.deepEqual(calls.find((c) => c[0] === "installer"), ["installer", bin, "--assets-only", "--client", "claude", "http://dash.test:9700"]);
@@ -179,17 +181,17 @@ test("without --no-prompt a pending client is reported, not failed", async () =>
   assert.deepEqual(report.pending, ["claude: pending (CLI absent)"]);
 });
 
-test("a missing key stops the run before anything is acquired, connected or rendered, naming it", async () => {
-  const { io, calls } = host();
+test("required-key refusal belongs to connect and still stops before render", async () => {
+  const { io, calls } = host({ connectExit: 78 });
   const bare = parseChainArgs(["--connect", COMMS, "--client", "claude", "--no-prompt"]);
   const { exit, report } = await new InstallChain(bare, io).run();
   assert.equal(exit, EXIT_REFUSED);
-  assert.match(report.problems[0], /missing aify-comms\.credentialRef/);
-  assert.deepEqual(calls.map((c) => c[0]), ["publishedKey"]);
+  assert.match(report.problems[0], /connect aify-comms: exit 78/);
+  assert.equal(calls.some(c => c[0] === "render"), false);
 });
 
-test("a key already published on this host is reused, so a reconnect needs none supplied", async () => {
-  const { io, calls } = host({ present: ["claude"], published: true });
+test("a connect that admits an absent supplied key is not refused by a duplicate env key gate", async () => {
+  const { io, calls } = host({ present: ["claude"] });
   const bare = parseChainArgs(["--connect", COMMS, "--client", "claude", "--no-prompt"]);
   const { exit } = await new InstallChain(bare, io).run();
   assert.equal(exit, EXIT_OK);
@@ -326,16 +328,7 @@ test("a service's installer runs only from an approved tuple, checked out at its
   assert.match((await approvedInstaller("aify-comms", "http://c", ports({ fetchSpec: async () => SPEC([GIT, { ...GIT, id: "two" }]) }))).problem, /more than one/);
 });
 
-test("a key counts as published only when the registry names a reference the store can read", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chain-reg-"));
-  const registry = path.join(dir, "services.json");
-  fs.writeFileSync(registry, JSON.stringify({ version: 1, services: { "aify-comms": { endpoint: "http://c", credentialRef: "aify-comms.key" } } }));
-  const ok = async ({ ref }) => ({ state: ref === "aify-comms.key" ? "ok" : "missing" });
-  assert.equal(await hasPublishedKey("aify-comms", { registry, read: ok, root: dir }), true);
-  assert.equal(await hasPublishedKey("aify-comms", { registry, read: async () => ({ state: "missing" }), root: dir }), false);
-  assert.equal(await hasPublishedKey("aify-comms", { registry, read: async () => { throw new Error("EACCES"); }, root: dir }), false);
-  assert.equal(await hasPublishedKey("aify-dashboard", { registry, read: ok, root: dir }), false);
-  assert.equal(await hasPublishedKey("aify-comms", { registry: path.join(dir, "none.json"), read: ok, root: dir }), false);
+test("the chain uses the explicitly selected registry or the user's own default", () => {
   assert.equal(registryPath({ AIFY_SERVICE_REGISTRY: "/r.json" }, "/h"), "/r.json");
   assert.equal(registryPath({}, "/h"), path.join("/h", ".aify", "services.json"));
 });

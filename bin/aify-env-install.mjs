@@ -18,7 +18,7 @@ import { createInterface } from "node:readline/promises";
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
 import { wrapperInstallSource } from "../lib/wrapper-pin.mjs";
-import { approvedInstaller, connectRecorded, envWithout, gitCheckout, globalNpmRoot, hasPublishedKey, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, connectRecorded, envWithout, gitCheckout, globalNpmRoot, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const plan = parseChainArgs(process.argv.slice(2));
 if (plan.problem) process.stderr.write(`aify-env install: ${plan.problem}\n${USAGE}\n`);
@@ -52,7 +52,10 @@ async function runChain(plan) {
     // The terminal itself, never stdin: stdin may carry the service key. Null when there is none to ask through.
     askTerminal: (question) => askTerminal(question, { windows }),
     unapproved: (name, url, approve) => unapprovedArtifacts(name, url, { ...wrapper, approve }),
-    publishedKey: (name) => hasPublishedKey(name, { registry }),
+    windows,
+    policyReadiness: clients => wrapper.channelPolicyReadiness({ clients, env }),
+    preparePolicy: ({ file, args, elevate }) => spawnSync(elevate ? "sudo" : file,
+      elevate ? [file, ...args] : args, { env, stdio: "inherit" }).status,
     ensurePackages: async () => {
       if (!fs.existsSync(path.join(wrapperRoot, "package.json"))) {
         say(`installing aify-wrapper (${wrapperSource})`);

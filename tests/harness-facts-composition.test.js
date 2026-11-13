@@ -47,7 +47,8 @@ for (const resident of [false, true]) {
     const parsed = chain.parseChainArgs(['--connect', 'aify-comms=http://example.invalid', '--client', 'fixture-extra', '--no-prompt']);
     assert.equal(parsed.problem, ''); assert.ok(chain.CLIENTS.includes('fixture-extra')); assert.match(chain.USAGE, /fixture-extra/);
     const rendered = [];
-    const result = await new chain.InstallChain(parsed, { env: {}, say() {}, publishedKey: async () => true,
+    const result = await new chain.InstallChain(parsed, { env: {}, say() {}, unapproved: async () => [],
+      policyReadiness: () => ({ state: 'ready', command: null, reason: 'fixture policy' }),
       ensurePackages: async () => true, approvedInstaller: async () => null, connect: async () => ({ status: 0 }),
       packageAssets: async () => null, render: async client => { rendered.push(client); return 0; },
       registryHash: async () => 'unchanged', keyEnv: async () => [], cliPresent: () => true,

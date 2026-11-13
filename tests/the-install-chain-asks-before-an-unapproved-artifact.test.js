@@ -20,7 +20,9 @@ function host({ unapproved = [BRIDGE], answer = "y" } = {}) {
     ask: async () => "",
     askTerminal: async (question) => { asked.push(question); return answer; },
     unapproved: async (name, url, approve) => { calls.push(["unapproved", name, [...approve]]); return unapproved.filter((u) => !approve.includes(u.digest)); },
-    publishedKey: async () => false,
+    policyReadiness: () => ({ state: "ready", command: null, reason: "fixture ready" }),
+    preparePolicy: async () => { throw new Error("unexpected policy preparation"); },
+    windows: false,
     ensurePackages: async () => true,
     approvedInstaller: async (name, url, approve) => { calls.push(["approvedInstaller", [...approve]]); return { path: "/src/install.sh" }; },
     runInstaller: async () => 0,
@@ -56,18 +58,24 @@ test("anything but yes refuses the run, names the artifact, and connects nothing
   }
 });
 
-test("--no-prompt never asks and adds nothing, so connect refuses exactly as before", async () => {
+test("--no-prompt refuses an unknown artifact before connect with one complete digest-bound command", async () => {
   const given = host();
-  await new InstallChain(plan("--no-prompt"), given.io).run();
+  const { exit } = await new InstallChain(plan("--no-prompt"), given.io).run();
+  assert.equal(exit, EXIT_REFUSED);
   assert.equal(given.asked.length, 0);
-  assert.deepEqual(given.calls.find((c) => c[0] === "connect"), ["connect", []]);
+  assert.equal(given.calls.some(c => c[0] === "connect"), false);
+  const commands = given.io.said.join("\n").split("\n").filter(line => line.startsWith("'aify-env' 'install'"));
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0], "'aify-env' 'install' '--connect' 'aify-comms=http://comms.test:8800' '--client' 'claude' '--secret' 'aify-comms.credentialRef=/k' '--no-prompt' '--approve' 'D1'");
 });
 
-test("with no terminal to ask through, nothing is added and the old refusal stands", async () => {
+test("with no terminal, an unknown artifact refuses before connect and prints the same runnable action", async () => {
   const given = host({ answer: null });
-  await new InstallChain(plan(), given.io).run();
+  const { exit } = await new InstallChain(plan(), given.io).run();
+  assert.equal(exit, EXIT_REFUSED);
   assert.equal(given.asked.length, 1);
-  assert.deepEqual(given.calls.find((c) => c[0] === "connect"), ["connect", []]);
+  assert.equal(given.calls.some(c => c[0] === "connect"), false);
+  assert.equal(given.io.said.join("\n").split("\n").filter(line => line.startsWith("'aify-env' 'install'")).length, 1);
 });
 
 test("CONTROL: an already approved artifact is not asked about", async () => {
@@ -75,6 +83,57 @@ test("CONTROL: an already approved artifact is not asked about", async () => {
   const { exit } = await new InstallChain(plan(), given.io).run();
   assert.equal(exit, EXIT_OK);
   assert.equal(given.asked.length, 0);
+});
+
+const PREPARE = { file: "/usr/bin/node", args: ["/wrapper/channel-install.mjs", "prepare-policy", "--path", "/etc/policy.json"], elevate: true };
+
+for (const answer of [null, "n", "yes"]) {
+  test(`policy-only preparation requires consent and a fresh owner read, answer ${answer}`, async () => {
+    const given = host({ unapproved: [], answer });
+    let reads = 0, preparations = 0;
+    given.io.policyReadiness = clients => {
+      assert.deepEqual(clients, ["claude"]);
+      reads++;
+      return preparations ? { state: "ready", command: null, reason: "prepared" }
+        : { state: "needs-action", command: PREPARE, reason: "absent policy" };
+    };
+    given.io.preparePolicy = async command => { assert.equal(command, PREPARE); preparations++; return 0; };
+    const { exit } = await new InstallChain(plan(), given.io).run();
+    const yes = answer === "yes";
+    assert.equal(exit, yes ? EXIT_OK : EXIT_REFUSED);
+    assert.equal(preparations, yes ? 1 : 0);
+    assert.equal(reads, yes ? 2 : 1);
+    assert.equal(given.calls.some(c => c[0] === "connect"), yes);
+    if (!yes) assert.equal(given.io.said.join("\n").split("\n").filter(line => line.startsWith("'sudo' '/usr/bin/node'")).length, 1);
+  });
+}
+
+test("noninteractive policy absence never prompts, prepares or publishes", async () => {
+  const given = host({ unapproved: [] });
+  given.io.policyReadiness = () => ({ state: "needs-action", command: PREPARE, reason: "absent" });
+  const { exit } = await new InstallChain(plan("--no-prompt"), given.io).run();
+  assert.equal(exit, EXIT_REFUSED);
+  assert.equal(given.asked.length, 0);
+  assert.equal(given.calls.some(c => c[0] === "connect"), false);
+});
+
+test("a preparation exit zero without owner readiness still refuses before publication", async () => {
+  const given = host({ unapproved: [], answer: "yes" });
+  given.io.policyReadiness = () => ({ state: "needs-action", command: PREPARE, reason: "still absent" });
+  given.io.preparePolicy = async () => 0;
+  const { exit } = await new InstallChain(plan(), given.io).run();
+  assert.equal(exit, EXIT_REFUSED);
+  assert.equal(given.calls.some(c => c[0] === "connect"), false);
+});
+
+test("an unknown or owner-refused policy result cannot authorize connect", async () => {
+  for (const result of [null, { state: "unknown" }, { state: "refused", command: null, reason: "admin policy" }]) {
+    const given = host({ unapproved: [] });
+    given.io.policyReadiness = () => result;
+    const { exit } = await new InstallChain(plan(), given.io).run();
+    assert.equal(exit, EXIT_REFUSED);
+    assert.equal(given.calls.some(c => c[0] === "connect"), false);
+  }
 });
 
 test("unapprovedArtifacts lists what neither the catalogue nor --approve covers, and skips a pending source", async () => {
