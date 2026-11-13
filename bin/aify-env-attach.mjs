@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Attach this terminal to a process aify-env is running.
 //
-//   aify-env attach sc-lead        by the name the operator thinks in
+//   aify-env attach agent-1        by the name the operator thinks in
 //   aify-env attach <process-id>   by the id the protocol uses
 //
 // THE HERDR PROPERTY, and the reason this exists: it ATTACHES to a real terminal rather than

@@ -36,10 +36,10 @@ function fakeAgents({ list = { agents: [], problem: "" }, start = { started: tru
 }
 
 test("POSITIVE CONTROL: the list route answers with what the capability returned", async () => {
-  const agents = fakeAgents({ list: { agents: [{ id: "ef-tester", status: "available" }], problem: "" } });
+  const agents = fakeAgents({ list: { agents: [{ id: "fx-af0000", status: "available" }], problem: "" } });
   const answer = await handleRequest({ method: "GET", path: "/agents/startable" }, deps({ agents }));
   assert.equal(answer.status, 200);
-  assert.deepEqual(answer.body.agents.map((a) => a.id), ["ef-tester"]);
+  assert.deepEqual(answer.body.agents.map((a) => a.id), ["fx-af0000"]);
   assert.equal(answer.body.problem, "");
 });
 
@@ -64,10 +64,10 @@ test("THE LIST BODY ALWAYS CARRIES BOTH FIELDS, so a view has one shape to rende
 
 test("POSITIVE CONTROL: the start route passes the id through and reports a start", async () => {
   const agents = fakeAgents();
-  const answer = await handleRequest({ method: "POST", path: "/agents/ef-tester/start", body: {} }, deps({ agents }));
+  const answer = await handleRequest({ method: "POST", path: "/agents/fx-af0000/start", body: {} }, deps({ agents }));
   assert.equal(answer.status, 200);
   assert.equal(answer.body.started, true);
-  assert.deepEqual(agents.calls, [{ call: "start", agentId: "ef-tester" }]);
+  assert.deepEqual(agents.calls, [{ call: "start", agentId: "fx-af0000" }]);
 });
 
 test("A REFUSED START IS 409 AND SAYS WHY, so neither signal alone misleads", async () => {

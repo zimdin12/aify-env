@@ -3,7 +3,7 @@
 // The service fences a definition push and a change-request claim on the environment row's machine id
 // (aify-comms P0 C3/C4). The full advertiser normally supplies it; a registry entry with
 // `"advertise": false` stops that advertiser, leaving the plugin's heartbeat the only writer, and without
-// the id both calls were refused 409 (comms-senior-dev's whole-range review of 0.8, executed against the
+// the id both calls were refused 409 (agent-0000000389's whole-range review of 0.8, executed against the
 // final service). The body is built by a pure function because the daemon (bin/aify-env.mjs) is never
 // imported by a test; its one call site is read instead.
 import { test } from "node:test";

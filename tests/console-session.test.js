@@ -234,7 +234,7 @@ test("attaching opens the pane even when it was hidden", () => {
 });
 
 test("ATTACHMENT FOLLOWS THE PROCESS WHEN A ROW ABOVE IT DISAPPEARS", () => {
-  // P1, found by comms-senior-dev 2026-09-08. The existing guard only fires when the WATCHED process
+  // P1, found by agent-0000000389 2026-09-08. The existing guard only fires when the WATCHED process
   // is gone. Remove a DIFFERENT one and the watched process still exists, so `pty` mode stays on --
   // while `selected` is an INDEX, and every row below the removal has just shifted up by one.
   //

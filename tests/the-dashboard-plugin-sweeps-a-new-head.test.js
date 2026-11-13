@@ -1,7 +1,7 @@
 // The aify-dashboard plugin sweeping a watched folder's new head with the code provider's sweep client
 // (aify-project-graph scripts/post-watch-signals.mjs), so a commit's effect on anchored code reaches the dashboard
 // without anyone running it by hand. The client is faked here; when it is started, what it is handed and what its exit
-// means are the subject. The exit codes are its owner's (graph-tech-lead, 2026-10-19).
+// means are the subject. The exit codes are its owner's (fx-ak0000000000, 2026-10-19).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -117,7 +117,7 @@ test("the client is handed no reporter name, so a restarted aify-env continues t
 });
 
 test("exit codes mean what the client's owner said: 0 and 3 settle the head, 4 waits, 2 runs again, anything else is a bug", () => {
-  // The codes are aify-project-graph 5d693d63's (scripts/lib/sweep-outcome.mjs EXIT), split by graph-tech-lead after a
+  // The codes are aify-project-graph 5d693d63's (scripts/lib/sweep-outcome.mjs EXIT), split by fx-ak0000000000 after a
   // closed port was measured exiting 1 and a wrong key exiting 2.
   const rows = [
     [{ code: 0 }, "swept"], [{ code: 3 }, "swept"], [{ code: 4 }, "dirty"], [{ code: 2 }, "again"], [{ code: 5 }, "unavailable"],
@@ -184,7 +184,7 @@ test("a refusal runs again, and three in a row at one head stop that folder with
 });
 
 test("refusals stop one head, not the folder: a new head is swept with the configuration unchanged", async () => {
-  // The bug (dashboard-senior-dev, on c312f5c): three transient refusals at H1 latched the folder, so a usable H2 was
+  // The bug (fx-ac000000000000000, on c312f5c): three transient refusals at H1 latched the folder, so a usable H2 was
   // never swept until someone edited the configuration or restarted aify-env.
   const s = setUp({ exits: [{ code: 2 }, { code: 2 }, { code: 2 }] });
   for (let i = 0; i < 3; i += 1) await s.runner.pass();
@@ -313,7 +313,7 @@ test("through the plugin: a watched folder's head is swept after the provider's 
 });
 
 test("a sweep client whose kill is not confirmed is said, through a later success and beside the queue client's row", async () => {
-  // The bug (comms-senior-dev, R1 on 4ae0d24): the sweep never read `unconfirmed`, so a sweep client killed at its
+  // The bug (agent-0000000389, R1 on 4ae0d24): the sweep never read `unconfirmed`, so a sweep client killed at its
   // time limit or at a stop, with its tree not confirmed ended, left no row, and the doctor's plugin-problems check
   // passed with its processes possibly still running.
   const shared = new CleanupWarnings();
@@ -336,7 +336,7 @@ test("a sweep client whose kill is not confirmed is said, through a later succes
 });
 
 test("a refusal that echoes the key back is said without it, from the watch-set read to the plugin's state", async () => {
-  // The bug (comms-senior-dev, R2 on 4ae0d24): DashboardApi put the dashboard's `error` text into its message as it
+  // The bug (agent-0000000389, R2 on 4ae0d24): DashboardApi put the dashboard's `error` text into its message as it
   // came, the sweep kept that message as a row, and the plugin's state hands rows to core health and the doctor. A
   // refusal quoting the key it was sent would carry it there.
   const { DashboardApi } = await import("../lib/plugins/aify-dashboard/dashboard-api.mjs");
@@ -355,7 +355,7 @@ test("a refusal that echoes the key back is said without it, from the watch-set 
 });
 
 test("through the plugin: a sweep kill not confirmed is still said after a yield, a stop and a rebuilt plugin", async (t) => {
-  // The bug (comms-senior-dev, R1 on 4ae0d24): the plugin's one store of kills not confirmed was handed only to the
+  // The bug (agent-0000000389, R1 on 4ae0d24): the plugin's one store of kills not confirmed was handed only to the
   // queue client, and a yielding plugin reports only that store, so a sweep's row vanished on the first yield.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-sweep-kill-")));
   const checkout = join(root, "apg");
@@ -410,7 +410,7 @@ test("through the plugin: a sweep kill not confirmed is still said after a yield
 });
 
 test("a dashboard that does not answer is waited out on any head, never a stop, and said once the wait reaches its cap", async () => {
-  // The bug (graph-tech-lead, measured against a closed port): a dashboard restart exited 1 and stopped sweeping that
+  // The bug (fx-ak0000000000, measured against a closed port): a dashboard restart exited 1 and stopped sweeping that
   // folder until aify-env restarted. Exit 5 is "no answer, or a 5xx or 429": nothing about the sweep was judged.
   const line = "UNAVAILABLE no answer: ECONNREFUSED";
   const s = setUp({ exits: Array.from({ length: 8 }, () => ({ code: 5, error: `reserving a sweep\n${line}\n` })) });
@@ -465,7 +465,7 @@ test("a bug the client says it has (exit 1) stops that head only, and a new head
 });
 
 test("only refusals in a row count: another outcome between two of them starts the count again", async () => {
-  // The bug (comms-senior-dev, on 872f4e6): the count was kept across other outcomes at one head, so 2, 4, 2, 4, 2
+  // The bug (agent-0000000389, on 872f4e6): the count was kept across other outcomes at one head, so 2, 4, 2, 4, 2
   // stopped the head with only one refusal in a row at the end.
   const s = setUp({ exits: [{ code: 2 }, { code: 4 }, { code: 2 }, { code: 5 }, { code: 2 }, { code: 2 }, { code: 2 }] });
   for (let i = 0; i < 6; i += 1) {
@@ -480,7 +480,7 @@ test("only refusals in a row count: another outcome between two of them starts t
 });
 
 test("a dashboard that answers again clears its row, even when the answer leaves nothing to sweep", async () => {
-  // The bug (comms-senior-dev, on 872f4e6): after the wait reached its cap, an answered watch-set read with nothing in
+  // The bug (agent-0000000389, on 872f4e6): after the wait reached its cap, an answered watch-set read with nothing in
   // it settled the head and started no client, so "tried again every 16 minutes" stayed up with no retry behind it.
   const down5 = { code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" };
   const s = setUp({ exits: Array.from({ length: 5 }, () => ({ ...down5 })) });
@@ -531,7 +531,7 @@ test("only an outcome that carries the dashboard's answer ends a wait for it: a 
 });
 
 test("the promise of a retry every 16 minutes stands only while a retry can still happen", async () => {
-  // The bug (dashboard-senior-dev, REVISE of 2087409, P3 1): after five exit 5s, a stop or a removed folder ended
+  // The bug (fx-ac000000000000000, REVISE of 2087409, P3 1): after five exit 5s, a stop or a removed folder ended
   // every retry, and the row still promised one every 16 minutes. The waits are kept; only the promise follows
   // whether a retry is still possible.
   const down = { code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" };
@@ -569,7 +569,7 @@ test("the promise of a retry every 16 minutes stands only while a retry can stil
 });
 
 test("a stop at one head is gone once the folder is back at a head already settled", async () => {
-  // The bug (dashboard-senior-dev, REVISE of 2087409, P3 2): settle A, stop B with exit 1, return to A. The settled
+  // The bug (fx-ac000000000000000, REVISE of 2087409, P3 2): settle A, stop B with exit 1, return to A. The settled
   // shortcut ran before the stop at B was retired, so the plugin still said p1 was stopped, with B's row.
   const s = setUp({ exits: [{}, { code: 1, error: "incomplete batch\n" }] });
   await s.runner.pass();
@@ -602,7 +602,7 @@ test("a stop at one head is gone once the folder is back at a head already settl
 });
 
 test("back at a settled head, nothing will run, so nothing is promised; a new head is tried and clears it", async () => {
-  // The bug (dashboard-senior-dev, on aed0fac): settle A, five exit 5s then exit 1 at B, back to A. The stop at B was
+  // The bug (fx-ac000000000000000, on aed0fac): settle A, five exit 5s then exit 1 at B, back to A. The stop at B was
   // retired and the kept wait for the dashboard was shown again, promising a retry, while A, already settled, is
   // never run. A new head C is the control: it runs and clears the row.
   const down = { code: 5, error: "UNAVAILABLE no answer: ECONNREFUSED\n" };

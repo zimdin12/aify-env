@@ -57,30 +57,30 @@ function store(ids, mode = "managed") {
 }
 
 const ONE_STARTABLE = {
-  agents: { "ef-tester": { sessionMode: "managed", machineId: HERE, status: "available", name: "ef-tester", runtime: "claude-code" } },
+  agents: { "fx-af0000": { sessionMode: "managed", machineId: HERE, status: "available", name: "fx-af0000", runtime: "claude-code" } },
 };
-const starterFor = (api, ids = ["ef-tester"], mode = "managed") => new AgentStarter({ api, machineId: HERE, definitions: store(ids, mode) });
+const starterFor = (api, ids = ["fx-af0000"], mode = "managed") => new AgentStarter({ api, machineId: HERE, definitions: store(ids, mode) });
 const starts = (api) => api.calls.filter((c) => c.call === "startAgent");
 
 test("POSITIVE CONTROL: a startable agent is started through the agent-level start", async () => {
   const api = fakeApi({ roster: ONE_STARTABLE });
-  const result = await starterFor(api).start("ef-tester");
-  assert.deepEqual(result, { started: true, agentId: "ef-tester", sessionId: "", problem: "" });
-  assert.deepEqual(api.calls.at(-1), { call: "startAgent", args: ["ef-tester"] });
+  const result = await starterFor(api).start("fx-af0000");
+  assert.deepEqual(result, { started: true, agentId: "fx-af0000", sessionId: "", problem: "" });
+  assert.deepEqual(api.calls.at(-1), { call: "startAgent", args: ["fx-af0000"] });
 });
 
 test("THE ROSTER IS READ AGAIN AT THE MOMENT OF ACTING, not taken from the caller's snapshot", async () => {
   // Without this, `start` would trust whatever the menu was built from and there would be no second
   // reading at all -- so an agent that came up in between gets a second worker.
   const api = fakeApi({ roster: ONE_STARTABLE });
-  await starterFor(api).start("ef-tester");
+  await starterFor(api).start("fx-af0000");
   assert.equal(api.calls[0].call, "agents", "no fresh roster was read before starting");
 });
 
 test("AN AGENT THAT CAME UP IN BETWEEN IS REFUSED by the fresh roster, and no start is sent", async () => {
-  const cameUp = { agents: { "ef-tester": { sessionMode: "managed", machineId: HERE, status: "online" } } };
+  const cameUp = { agents: { "fx-af0000": { sessionMode: "managed", machineId: HERE, status: "online" } } };
   const api = fakeApi({ roster: cameUp });
-  const result = await starterFor(api).start("ef-tester");
+  const result = await starterFor(api).start("fx-af0000");
   assert.equal(result.started, false);
   assert.match(result.problem, /live worker/);
   assert.deepEqual(starts(api), [], "a start was sent anyway");
@@ -113,15 +113,15 @@ test("THE START CARRIES NO BRIEF, because a brief becomes a message the new work
   // The starter hands `startAgent` the id and nothing else; the body that call puts on the wire is
   // pinned field by field in `aify-comms-api.test.js`.
   const api = fakeApi({ roster: ONE_STARTABLE });
-  await starterFor(api).start("ef-tester");
-  assert.deepEqual(starts(api).map((c) => c.args), [["ef-tester"]],
+  await starterFor(api).start("fx-af0000");
+  assert.deepEqual(starts(api).map((c) => c.args), [["fx-af0000"]],
     `the start carried more than the agent's id: ${JSON.stringify(starts(api))}`);
 });
 
 test("IT NEVER THROWS, from either call, because a keyboard handler is upstream", async () => {
   for (const throwsOn of ["agents", "startAgent"]) {
     const api = fakeApi({ roster: ONE_STARTABLE, throwsOn });
-    const result = await starterFor(api).start("ef-tester");
+    const result = await starterFor(api).start("fx-af0000");
     assert.equal(result.started, false, `${throwsOn} threw and was reported as started`);
     assert.ok(result.problem.length > 0, `${throwsOn} failed with no reason`);
   }
@@ -132,7 +132,7 @@ test("IT NEVER THROWS, from either call, because a keyboard handler is upstream"
 test("POSITIVE CONTROL: the list names the startable agents on this host", async () => {
   const { agents, problem } = await starterFor(fakeApi({ roster: ONE_STARTABLE })).list();
   assert.equal(problem, "");
-  assert.deepEqual(agents.map((a) => a.id), ["ef-tester"]);
+  assert.deepEqual(agents.map((a) => a.id), ["fx-af0000"]);
 });
 
 test("AN UNREACHABLE SERVICE SAYS SO, rather than looking like a host with nothing to start", async () => {
@@ -145,9 +145,9 @@ test("AN UNREACHABLE SERVICE SAYS SO, rather than looking like a host with nothi
 
 test("AN UNKNOWN MACHINE IDENTITY IS REPORTED, and starts nothing", async () => {
   const api = fakeApi({ roster: ONE_STARTABLE });
-  const starter = new AgentStarter({ api, machineId: "", definitions: store(["ef-tester"]) });
+  const starter = new AgentStarter({ api, machineId: "", definitions: store(["fx-af0000"]) });
   assert.match((await starter.list()).problem, /which machine it is/);
-  assert.equal((await starter.start("ef-tester")).started, false);
+  assert.equal((await starter.start("fx-af0000")).started, false);
   assert.deepEqual(api.calls, [], "an environment that cannot name itself still called the service");
 });
 

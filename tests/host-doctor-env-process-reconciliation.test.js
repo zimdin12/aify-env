@@ -6,7 +6,7 @@
 // that)".
 //
 // MEASURED THE SAME EVENING. aify-env owned one PTY, pid 155844, whose command line read
-// `claude-aify --aify-agent ef-manager --auto --resume ...`. The control plane's terminal row for that
+// `claude-aify --aify-agent fx-ad00000 --auto --resume ...`. The control plane's terminal row for that
 // pid said `stopped`, and all 80 most recent sessions said `stopped`. The agent read `available` with
 // a fresh `lastSeen`, because the orphan was heartbeating on its own behalf.
 //
@@ -77,9 +77,9 @@ test("the label travels when aify-env has one, and its absence is not read as 'n
   // The label is empty on every process a pre-fix bridge started. A reader treating that as "no agent"
   // would report the orphan as belonging to nobody, which is the wrong half of the truth.
   const named = reconcileEnvProcesses({
-    envProcesses: [ours(1, { label: "ef-manager" })], terminals: [], environmentId: ENV,
+    envProcesses: [ours(1, { label: "fx-ad00000" })], terminals: [], environmentId: ENV,
   });
-  assert.equal(named.unaccounted[0].label, "ef-manager");
+  assert.equal(named.unaccounted[0].label, "fx-ad00000");
   const blank = reconcileEnvProcesses({ envProcesses: [ours(1)], terminals: [], environmentId: ENV });
   assert.equal(blank.unaccounted[0].label, "");
   assert.equal(blank.unaccounted.length, 1, "a process with no label stopped being reported");
@@ -98,10 +98,10 @@ test("a live terminal whose pid nothing is running is a phantom", () => {
   // The other direction, and it costs differently: dispatches route to it and wait for a turn that
   // cannot start.
   const result = reconcileEnvProcesses({
-    envProcesses: [], terminals: [live(4242, { agentId: "sc-coder" })], environmentId: ENV,
+    envProcesses: [], terminals: [live(4242, { agentId: "agent-bd" })], environmentId: ENV,
   });
   assert.deepEqual(result.phantom, [
-    { terminalId: "term_4242", agentId: "sc-coder", pid: "4242", status: "attached" },
+    { terminalId: "term_4242", agentId: "agent-bd", pid: "4242", status: "attached" },
   ]);
 });
 
@@ -217,23 +217,23 @@ test("a TRUNCATED listing is unknown, not a pile of orphans", () => {
 });
 
 test("an orphan is named with whatever identity exists", () => {
-  // "1 orphan" sends an operator looking. "p1 (pid 155844, ef-manager)" tells them which window.
+  // "1 orphan" sends an operator looking. "p1 (pid 155844, fx-ad00000)" tells them which window.
   const verdict = envProcessVerdict({
-    result: { unaccounted: [{ id: "p1", pid: "155844", label: "ef-manager" }], phantom: [], matched: 0 },
+    result: { unaccounted: [{ id: "p1", pid: "155844", label: "fx-ad00000" }], phantom: [], matched: 0 },
     envAnswered: true,
   });
   assert.equal(verdict.ok, false);
   assert.equal(verdict.code, "unaccounted");
-  assert.match(verdict.detail, /p1 \(pid 155844, ef-manager\)/);
+  assert.match(verdict.detail, /p1 \(pid 155844, fx-ad00000\)/);
 });
 
 test("a phantom names the agent, because that is what an operator restarts", () => {
   const verdict = envProcessVerdict({
-    result: { unaccounted: [], phantom: [{ terminalId: "t1", agentId: "sc-coder", pid: "9", status: "attached" }], matched: 0 },
+    result: { unaccounted: [], phantom: [{ terminalId: "t1", agentId: "agent-bd", pid: "9", status: "attached" }], matched: 0 },
     envAnswered: true,
   });
   assert.equal(verdict.code, "phantom");
-  assert.match(verdict.detail, /sc-coder/);
+  assert.match(verdict.detail, /agent-bd/);
   assert.match(verdict.fix, /Restart/i);
 });
 

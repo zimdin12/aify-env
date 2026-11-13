@@ -1,5 +1,5 @@
 // The files tracked at a folder's HEAD, sent to aify-dashboard only when its head report asks (aify-dashboard
-// docs/DESIGN-FILE-LIST.md, with comms-tech-lead's bounds B1-B4). End to end against a real HTTP server, real
+// docs/DESIGN-FILE-LIST.md, with fx-aa0000000000's bounds B1-B4). End to end against a real HTTP server, real
 // repositories and real git for the watcher; the paging and decoding rules directly, since they are pure.
 
 import { test } from "node:test";
@@ -196,7 +196,7 @@ function touchRef(watched) {
 }
 
 test("a list sent, withheld or dropped as stale is not sent again when the folder is looked at again at the same head", { skip: onlyWindows }, async (t) => {
-  // Bug this catches (comms-senior-dev, R3 on cae36a2): the ask kept after its answer, so a look that the fingerprint
+  // Bug this catches (agent-0000000389, R3 on cae36a2): the ask kept after its answer, so a look that the fingerprint
   // forced, with HEAD unmoved and so no new head report, sent the list again from the old ask.
   const huge = Buffer.from(`${Array.from({ length: MAX_LIST_FILES + 1 }, (_, i) => `f${i}`).join("\0")}\0`);
   for (const [outcome, options, status] of [["sent", {}, 200], ["withheld", { trackedFiles: async () => huge }, 200], ["stale", {}, 409]]) {
@@ -216,7 +216,7 @@ test("a list sent, withheld or dropped as stale is not sent again when the folde
 });
 
 test("a git failure's problem line stays while its latch holds, through a re-sync, and clears once a new head is listed", { skip: onlyWindows }, async (t) => {
-  // Bug this catches (comms-senior-dev, R4 on cae36a2): forgetReported re-reports the same head, which cleared the
+  // Bug this catches (agent-0000000389, R4 on cae36a2): forgetReported re-reports the same head, which cleared the
   // problem line while the latch still kept that head unlisted, so health read clean with the list absent.
   let calls = 0;
   const s = setUp(t, { trackedFiles: async (real, ...args) => { calls += 1; if (calls === 1) throw new GitReadError("git ls-tree timed out"); return real.trackedFiles(...args); } });
@@ -240,7 +240,7 @@ test("a git failure's problem line stays while its latch holds, through a re-syn
   assert.equal(lists(dashboard.requests).length, 1);
   assert.deepEqual(watcher.state().problems, []);
 
-  // Back to the head that failed, and the dashboard asks for it (comms-senior-dev, R4 on adf5456): the latch went with
+  // Back to the head that failed, and the dashboard asks for it (agent-0000000389, R4 on adf5456): the latch went with
   // its line, so HEAD having moved means git is run for it again, never a silent skip with health reading clean.
   dashboard.answers.wanted.push(true);
   git(s.watched, "reset", "-q", "--soft", failed);
@@ -267,7 +267,7 @@ test("a page closes at the count bound or the size bound, whichever comes first,
   const exact = ["x".repeat(MAX_PAGE_BYTES - 4)];
   assert.equal(bytesOf(exact), MAX_PAGE_BYTES);
   assert.deepEqual(pagesOf([...exact, "y"]).map((page) => page.length), [1, 1]);
-  // Bytes, not characters (dashboard-senior-dev, ea19107 finding 2): three-byte characters fill a page three times as
+  // Bytes, not characters (fx-ac000000000000000, ea19107 finding 2): three-byte characters fill a page three times as
   // fast, and a page measured in characters would be refused by the dashboard whole.
   const euros = Array.from({ length: 100 }, (_, i) => `${"€".repeat(2_000)}/${i}.ts`);
   assert.ok(JSON.stringify(euros).length < MAX_PAGE_BYTES, "the fixture fits in characters, so it cannot tell bytes from characters");
@@ -284,7 +284,7 @@ test("a path that is not UTF-8 is counted, never sent under another name", () =>
 });
 
 test("a name that begins with a byte-order mark keeps it, so it stays a different file", () => {
-  // Bug this catches (comms-senior-dev, R2 on cae36a2): a decoder that strips a leading U+FEFF, which turns
+  // Bug this catches (agent-0000000389, R2 on cae36a2): a decoder that strips a leading U+FEFF, which turns
   // "<BOM>a.txt" into "a.txt" beside the real "a.txt", and the dashboard then holds one file for two.
   const bom = String.fromCharCode(0xfeff);
   const bytes = Buffer.from(`${bom}a.txt\0a.txt\0${bom}\0`, "utf8");
@@ -305,7 +305,7 @@ test("a list over the ceiling is withheld with its count, and an empty commit st
   assert.deepEqual(sent[0].withheld, { reason: "too_large", fileCount: MAX_LIST_FILES + 1 });
   assert.equal(sent[0].files, undefined, "a withheld list sent paths");
 
-  // One path longer than a whole page (comms-senior-dev, R1 on cae36a2: git 2.54 stores a 525,000-byte name) cannot be
+  // One path longer than a whole page (agent-0000000389, R1 on cae36a2: git 2.54 stores a 525,000-byte name) cannot be
   // paged, and the dashboard refuses an over-size page whole, so the list is withheld as unpageable rather than sent.
   const longName = Buffer.from(`ok.txt\0${"n".repeat(525_000)}\0`);
   const before = sent.length;
@@ -322,7 +322,7 @@ test("a list over the ceiling is withheld with its count, and an empty commit st
 });
 
 test("a list the dashboard holds to its raw-byte cap is withheld as too large, and any other refusal still throws", async () => {
-  // Bug this catches (comms-tech-lead's rule 1 of the receiver's allowance, 2026-10-18): a list refused part-way with
+  // Bug this catches (fx-aa0000000000's rule 1 of the receiver's allowance, 2026-10-18): a list refused part-way with
   // 413 list_too_large, thrown, and so tried again on every tick for ever, when it is to be recorded as withheld.
   const head = "0".repeat(40);
   const bytes = Buffer.from(`${Array.from({ length: MAX_PAGE_FILES + 1 }, (_, i) => `f${i}`).join("\0")}\0`);

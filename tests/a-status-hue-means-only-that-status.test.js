@@ -20,7 +20,7 @@ const painted = (hue, text) => `${ESC}[${SGR[hue]}m${text}`;
 const NOW = 1_790_000_000_000;
 const SNAPSHOT = {
   version: "0.7.1", build: "abc", endpoint: "http://127.0.0.1:8802", nowMs: NOW,
-  processes: [{ id: "p-1", pid: 42, label: "comms-senior-dev", lastOutputAtMs: NOW - 500, terminal: true }],
+  processes: [{ id: "p-1", pid: 42, label: "agent-0000000389", lastOutputAtMs: NOW - 500, terminal: true }],
   services: [], checks: [], history: { startedTotal: 1 }, terminals: { available: true },
 };
 const render = (view) => renderDashboard(SNAPSHOT, {
@@ -51,7 +51,7 @@ test("an agent printing output gets no status colour: printing is not working", 
   // THE OPERATOR, 2026-09-29: "i see working status (yellow dot) in aify-env for all agents". An
   // idle hermes redraws its status-bar clock every second, so amber here claimed a status nobody
   // measured. The mark says output, and wears no status's colour.
-  const row = render({ mode: "dashboard" }).split("\n").find((line) => line.includes("comms-senior-dev"));
+  const row = render({ mode: "dashboard" }).split("\n").find((line) => line.includes("agent-0000000389"));
   assert.ok(row, "CONTROL: the process row is drawn");
   assert.ok(row.includes("●"), "CONTROL: the recent-output mark is drawn");
   for (const hue of new Set(Object.values(AGENT_STATUS_HUES))) {

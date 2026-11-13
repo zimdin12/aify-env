@@ -100,9 +100,9 @@ test("the start request CARRIES the caller's environment", () => {
   const { body } = startRequestFrom({
     service: "aify-comms",
     launcher: "/usr/bin/claude-aify",
-    env: { AIFY_AGENT_ID: "sc-lead", AIFY_COMMS_URL: "http://127.0.0.1:8800" },
+    env: { AIFY_AGENT_ID: "fx-as00", AIFY_COMMS_URL: "http://127.0.0.1:8800" },
   });
-  assert.equal(body.env?.AIFY_AGENT_ID, "sc-lead",
+  assert.equal(body.env?.AIFY_AGENT_ID, "fx-as00",
     "the session's identity did not travel, so the host starts it as nobody");
   assert.equal(body.env?.AIFY_COMMS_URL, "http://127.0.0.1:8800");
 });
@@ -125,12 +125,12 @@ test("it does NOT forward what addresses the daemon itself", () => {
   // record. Those describe the HOST, not the process being started, and the daemon is already
   // running with the ones it chose.
   const env = forwardableEnv({
-    AIFY_AGENT_ID: "sc-lead",
+    AIFY_AGENT_ID: "fx-as00",
     AIFY_ENV_ENDPOINT: "http://evil:9999",
     AIFY_SERVICE_REGISTRY: "/tmp/other.json",
     AIFY_ENV_PROCESS_RECORD: "/tmp/other-record.json",
   });
-  assert.equal(env.AIFY_AGENT_ID, "sc-lead", "the identity must still travel");
+  assert.equal(env.AIFY_AGENT_ID, "fx-as00", "the identity must still travel");
   for (const name of ["AIFY_ENV_ENDPOINT", "AIFY_SERVICE_REGISTRY", "AIFY_ENV_PROCESS_RECORD"]) {
     assert.equal(env[name], undefined, `${name} addresses the daemon and must not be forwarded`);
   }

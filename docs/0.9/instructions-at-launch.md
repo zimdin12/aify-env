@@ -1,6 +1,6 @@
 # Instructions at launch (design, approved 2026-10-28)
 
-Written by aify-env's and aify-wrapper's owners together; approved by comms-tech-lead with two amendments, both
+Written by aify-env's and aify-wrapper's owners together; approved by the technical lead with two amendments, both
 folded in below: the per-launch files live in `~/.aify/sessions/<id>/`, and that folder is removed by events, not
 by a sweep.
 

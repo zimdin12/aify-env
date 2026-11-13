@@ -11,7 +11,7 @@ import { currentLifetimes, isoToEpochMicros, parseLifetimeRecord, verifyLifetime
 const LIFE = "7f3c9e2a-0000-4000-8000-000000000001";
 const OTHER = "7f3c9e2a-0000-4000-8000-000000000002";
 const WRITTEN = 1_790_950_000_500_000;  // microseconds
-const record = (over = {}) => ({ agentId: "comms-tech-lead", lifetime: LIFE, instance: "default", harness: "claude", pid: 41236,
+const record = (over = {}) => ({ agentId: "fx-aa0000000000", lifetime: LIFE, instance: "default", harness: "claude", pid: 41236,
   launcher: "C:/Users/me/.local/bin/claude-aify", writtenAtUs: WRITTEN, ...over });
 const file = (r) => `${r.agentId}.${r.lifetime}.json`;
 const probe = (over = {}) => ({ alive: true, createdAtUs: WRITTEN - 2_000_000, commandLine: "bash C:\\Users\\me\\.local\\bin\\claude-aify --resume", ...over });
@@ -29,7 +29,7 @@ test("A RECORD IS READ only when every field is what the launcher writes, and it
     assert.equal(parsed.ok, false, field);
     assert.match(parsed.problem, new RegExp(`: ${field}$`), `${field}: refused by its own check`);
   }
-  assert.match(parseLifetimeRecord(JSON.stringify(record()), `comms-tech-lead.${OTHER}.json`).problem, /name does not match/);
+  assert.match(parseLifetimeRecord(JSON.stringify(record()), `fx-aa0000000000.${OTHER}.json`).problem, /name does not match/);
   assert.match(parseLifetimeRecord("{", file(record())).problem, /not JSON/);
 });
 
@@ -95,27 +95,27 @@ test("TWO VERIFIED LIFETIMES ARE A CONFLICT, never resolved by picking; one is c
   const a = record();
   const b = record({ lifetime: OTHER, writtenAtUs: WRITTEN + 10 });
   const here = { instance: "default" };
-  const both = currentLifetimes([{ record: a, verified: "yes" }, { record: b, verified: "yes" }], here).get("comms-tech-lead");
+  const both = currentLifetimes([{ record: a, verified: "yes" }, { record: b, verified: "yes" }], here).get("fx-aa0000000000");
   assert.equal(both.current, null);
   assert.deepEqual(both.conflict, [a, b]);
-  const one = currentLifetimes([{ record: a, verified: "no" }, { record: b, verified: "yes" }], here).get("comms-tech-lead");
+  const one = currentLifetimes([{ record: a, verified: "no" }, { record: b, verified: "yes" }], here).get("fx-aa0000000000");
   assert.deepEqual([one.current, one.conflict], [b, null], "CONTROL: an ended lifetime beside a live one is no conflict");
-  const unsure = currentLifetimes([{ record: a, verified: "unknown" }], here).get("comms-tech-lead");
+  const unsure = currentLifetimes([{ record: a, verified: "unknown" }], here).get("fx-aa0000000000");
   assert.deepEqual([unsure.current, unsure.unknown], [null, [a]], "an unknown is kept, not current");
-  const twice = currentLifetimes([{ record: a, verified: "yes" }, { record: a, verified: "yes" }], here).get("comms-tech-lead");
+  const twice = currentLifetimes([{ record: a, verified: "yes" }, { record: a, verified: "yes" }], here).get("fx-aa0000000000");
   assert.deepEqual([twice.current, twice.conflict], [a, null], "one record read twice is one lifetime");
 });
 
 test("ANOTHER INSTANCE: its lifetime is never current here, and one agent verified under two instances is a conflict (C4)", () => {
   const theirs = record({ instance: "work" });
-  const elsewhere = currentLifetimes([{ record: theirs, verified: "yes" }], { instance: "default" }).get("comms-tech-lead");
+  const elsewhere = currentLifetimes([{ record: theirs, verified: "yes" }], { instance: "default" }).get("fx-aa0000000000");
   assert.deepEqual([elsewhere.current, elsewhere.conflict, elsewhere.unknown], [null, null, []]);
-  const unsureThere = currentLifetimes([{ record: theirs, verified: "unknown" }], { instance: "default" }).get("comms-tech-lead");
+  const unsureThere = currentLifetimes([{ record: theirs, verified: "unknown" }], { instance: "default" }).get("fx-aa0000000000");
   assert.deepEqual(unsureThere.unknown, [], "another instance's unknown lifetime is not this one's to retain");
   const ours = record({ lifetime: OTHER });
-  const split = currentLifetimes([{ record: theirs, verified: "yes" }, { record: ours, verified: "yes" }], { instance: "default" }).get("comms-tech-lead");
+  const split = currentLifetimes([{ record: theirs, verified: "yes" }, { record: ours, verified: "yes" }], { instance: "default" }).get("fx-aa0000000000");
   assert.deepEqual([split.current, split.conflict], [null, [theirs, ours]]);
-  assert.equal(currentLifetimes([{ record: ours, verified: "yes" }], { instance: "default" }).get("comms-tech-lead").current, ours,
+  assert.equal(currentLifetimes([{ record: ours, verified: "yes" }], { instance: "default" }).get("fx-aa0000000000").current, ours,
     "CONTROL: this instance's own lifetime is current");
   assert.throws(() => currentLifetimes([], {}), /instance/);
 });

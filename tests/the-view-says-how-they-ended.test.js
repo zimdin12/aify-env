@@ -30,10 +30,10 @@ const render = (history) =>
 
 test("a signalled death is named, and named loudly", () => {
   const out = render({ recentExits: [
-    { id: "p1", label: "sc-coder", atMs: 940_000, exitCode: null, exitSignal: "SIGKILL" },
+    { id: "p1", label: "agent-bd", atMs: 940_000, exitCode: null, exitSignal: "SIGKILL" },
   ] });
   assert.match(out, /RECENT EXITS/);
-  assert.match(out, /sc-coder/);
+  assert.match(out, /agent-bd/);
   assert.match(out, /killed by SIGKILL/);
 });
 
@@ -41,7 +41,7 @@ test("a clean exit says so, and is not mistaken for silence", () => {
   // Zero is the most common exit there is. A truthiness test would drop it and leave the panel saying
   // nothing was reported, which is a different answer.
   const out = render({ recentExits: [
-    { id: "p2", label: "sc-tester", atMs: 940_000, exitCode: 0, exitSignal: "" },
+    { id: "p2", label: "fx-au0000", atMs: 940_000, exitCode: 0, exitSignal: "" },
   ] });
   assert.match(out, /exited cleanly \(0\)/);
   assert.doesNotMatch(out, /no exit reported/);

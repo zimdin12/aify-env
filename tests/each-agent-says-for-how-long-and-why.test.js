@@ -78,8 +78,8 @@ test("THE TITLE GETS THE ROOM: a 73-character title shows at least 47 of them at
   assert.equal(title.length, 73);
   const record = { state: "working", turn: { open: true, startedAtUs: minutesAgoUs(12) } };
   const shown = (columns) => {
-    const row = rowFor(record, { columns, title, label: "comms-tech-lead-long",
-      definitions: { "comms-tech-lead-long": { harness: "claude", model: "gpt-6.1-sol" } } });
+    const row = rowFor(record, { columns, title, label: "fx-aa0000000000-long",
+      definitions: { "fx-aa0000000000-long": { harness: "claude", model: "gpt-6.1-sol" } } });
     assert.ok(width(row) <= columns, `the row is wider than ${columns}`);
     let n = 0;
     while (n < title.length && row.includes(title.slice(0, n + 1))) n += 1;

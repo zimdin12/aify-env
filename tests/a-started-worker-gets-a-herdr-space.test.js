@@ -1,7 +1,7 @@
 // A worker started inside `herdr-aify env` gets a Herdr space, and one started anywhere else does not.
 //
 // THE DEFECT THIS EXISTS FOR, reported with the feature otherwise working: the operator started
-// `comms-senior-dev` and `ef-manager` from the picker inside a dedicated instance. Both came up --
+// `agent-0000000389` and `fx-ad00000` from the picker inside a dedicated instance. Both came up --
 // "they started but i do not see new space in herdr. it should star one right ?" -- as ordinary
 // children of a daemon that merely happened to live in a pane, which is indistinguishable from
 // running outside Herdr. The spaces were the operator's entire reason for the mode: "lets that
@@ -96,7 +96,7 @@ test("A HERDR THAT IS NOT THIS INVOCATION'S IS NEVER DRIVEN", () => {
 test("THE DEFECT: a started worker gets a space, attached to the worker that is already running", async () => {
   const herdr = fakeHerdr();
   const openPane = opener({ herdr });
-  const opened = await openPane({ id: "proc-1", label: "comms-senior-dev", terminal: true });
+  const opened = await openPane({ id: "proc-1", label: "agent-0000000389", terminal: true });
   assert.equal(opened.paneId, "w2:p1", "no space was opened for a started worker");
   const { calls } = herdr;
   assert.equal(calls.length, 3, "a space, the wait for its shell, and the command typed into it");
@@ -104,7 +104,7 @@ test("THE DEFECT: a started worker gets a space, attached to the worker that is 
 
   // THE SPACE, named for the agent an operator is looking for rather than an opaque process id.
   assert.deepEqual(calls[0].argv.slice(0, 3), ["workspace", "create", "--label"]);
-  assert.equal(calls[0].argv[3], "aify-env comms-senior-dev");
+  assert.equal(calls[0].argv[3], "aify-env agent-0000000389");
   // ON THIS INSTANCE'S OWN HERDR. The wrong socket would drive the operator's ordinary Herdr.
   assert.equal(calls[0].socket, SOCKET, "the space was opened on the wrong Herdr");
 
@@ -123,7 +123,7 @@ test("THE DEFECT: a started worker gets a space, attached to the worker that is 
 test("ON A POSIX HOST THE PANE GETS A POSIX COMMAND, not the Windows one it cannot run", async () => {
   // Reported from WSL: every agent's pane showed Windows PowerShell failing to find a Linux node.
   const herdr = fakeHerdr();
-  await opener({ herdr, platform: "linux" })({ id: "proc-1", label: "comms-senior-dev", terminal: true });
+  await opener({ herdr, platform: "linux" })({ id: "proc-1", label: "agent-0000000389", terminal: true });
   const typed = herdr.calls[2].argv;
   assert.equal(typed.length, 4, "the command was not passed as one argument");
   assert.equal(typed[3], "env AIFY_ENV_ENDPOINT='http://127.0.0.1:65000' 'C:/node/node.exe' 'C:/aify-env/bin/aify-env.mjs' attach --id 'proc-1'");
@@ -157,10 +157,10 @@ test("THE CALL SITE: PluginProcesses runs the opener after the start, and surviv
   assert.deepEqual(seen.map(r => r.id), ["a"], "the start never reached the opener");
 
   // THE NAME AN OPERATOR IS LOOKING FOR. A started record carries the process id and not always the
-  // agent's name, and a space called `aify-env 68583473-ccaa-...-p1` helps nobody find `sc-tester`.
+  // agent's name, and a space called `aify-env 68583473-ccaa-...-p1` helps nobody find `fx-au0000`.
   const named = new PluginProcesses(runner, { cwdRoots: [process.cwd()], onStarted: record => { seen.push(record); } });
-  await named.start({ id: "d", label: "sc-tester" });
-  assert.equal(seen.at(-1).label, "sc-tester", "the agent's name never reached the space");
+  await named.start({ id: "d", label: "fx-au0000" });
+  assert.equal(seen.at(-1).label, "fx-au0000", "the agent's name never reached the space");
 
   // A THROWING OPENER MUST NOT BREAK A RUNNING AGENT. The worker is already up by this point.
   const hostile = new PluginProcesses(runner, { cwdRoots: [process.cwd()], onStarted: () => { throw new Error("no herdr"); } });
@@ -204,7 +204,7 @@ test("THE SECOND DEFECT: the worker's PANE closes when the worker goes, and noth
   const timers = manualTimers();
   const openPane = opener({ herdr, timers, log: m => logs.push(m), watchExit: (id, onExit) => watched.set(id, onExit) });
 
-  const opened = await openPane({ id: "proc-1", label: "sc-tester", terminal: true });
+  const opened = await openPane({ id: "proc-1", label: "fx-au0000", terminal: true });
   assert.equal(opened.paneId, "w2:p1");
   assert.deepEqual([...watched.keys()], ["proc-1"], "nothing is watching the worker, so its pane outlives it");
   assert.deepEqual(herdr.closes(), [], "the pane was closed while the worker ran");
@@ -340,7 +340,7 @@ test("A WORKER'S OWN PANE SHOWS ITS STATUS, and its launcher is told which pane 
   let started = null;
   const runner = { start: async (spec) => { started = spec; paneFile = spec.env.AIFY_HERDR_PANE_FILE; return { id: "proc-1", terminal: true }; } };
   const processes = new PluginProcesses(runner, { cwdRoots: [process.cwd()], onStarted: openPane, prepare: openPane.prepare });
-  await processes.start({ id: "term-1", label: "lc-lead", launcher: "/home/op/.local/bin/claude-aify", env: inherited });
+  await processes.start({ id: "term-1", label: "fx-al00", launcher: "/home/op/.local/bin/claude-aify", env: inherited });
 
   // THE HERDR ITSELF STAYS REACHABLE, because the state hook calls it.
   assert.equal(started.env.HERDR_SOCKET_PATH, socket);
@@ -382,7 +382,7 @@ test("A STATUS REPORT HERDR REFUSES LEAVES THE PANE OPEN, with no pane file", as
   } });
   const openPane = opener({ env: { HERDR_SOCKET_PATH: socket }, dedicatedRoot: root, herdr, platform: "linux", log: m => logs.push(m) });
   const spec = openPane.prepare({ id: "t", launcher: "/bin/claude-aify" });
-  const opened = await openPane({ id: "proc-2", label: "sc-tester", terminal: true }, spec);
+  const opened = await openPane({ id: "proc-2", label: "fx-au0000", terminal: true }, spec);
   assert.equal(opened?.paneId, "w2:p1", "a refused status report cost the worker its pane");
   assert.deepEqual(herdr.closes(), []);
   assert.equal(fs.existsSync(spec.env.AIFY_HERDR_PANE_FILE), false, "a pane with no agent was named to the launcher");

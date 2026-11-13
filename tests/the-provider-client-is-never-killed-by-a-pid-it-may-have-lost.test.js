@@ -1,6 +1,6 @@
 // A run kills its client by pid only while that pid is provably still its client.
 //
-// The bug (comms-tech-lead, on cc3999c's silent file death): a client that has exited but whose output is still held
+// The bug (fx-aa0000000000, on cc3999c's silent file death): a client that has exited but whose output is still held
 // open, by something it started, does not close. A stop or a timeout then ran `taskkill /T /F /PID <pid>` on it. Once
 // node has seen the exit it has let go of the process, so Windows may already have given that pid to another process
 // on this host: a live agent, aify-env itself, a terminal. That kill, and its /T, would land there.
@@ -58,7 +58,7 @@ test("a timeout after the client exited, its output still open, kills no pid and
 });
 
 test("where only the client itself can be killed, it is killed through its own handle, not by pid", async () => {
-  // comms-tech-lead, on cc3999c: a ChildProcess's own kill goes through node's handle and does nothing once it has
+  // fx-aa0000000000, on cc3999c: a ChildProcess's own kill goes through node's handle and does nothing once it has
   // exited; a kill by its pid does not know whether the pid is still it. The group signal is refused here, so the
   // fallback to the process itself is what runs.
   const signalled = [];
@@ -98,7 +98,7 @@ function recordingHelper(beforeHeld = () => {}) {
 }
 
 test("the Windows kill answers go only while the client's exit is unseen when its helper holds it", async () => {
-  // comms-senior-dev, REVISE of 33689cd: the exit check covered the moment of the call, and taskkill looked the pid up
+  // agent-0000000389, REVISE of 33689cd: the exit check covered the moment of the call, and taskkill looked the pid up
   // later. The decision is now read when the helper says it holds the process, and only then.
   let exited = false;
   const late = recordingHelper(() => { exited = true; });
@@ -111,7 +111,7 @@ test("the Windows kill answers go only while the client's exit is unseen when it
 });
 
 test("runChild hands the kill the client's own handle and a live view of whether it has exited", async () => {
-  // comms-senior-dev, on 33689cd: removing `{ own: child }` at the call site turned no test red. The second argument
+  // agent-0000000389, on 33689cd: removing `{ own: child }` at the call site turned no test red. The second argument
   // is recorded here, and `stillOurs` is read after the exit to show it is live, not a copy taken at the call.
   const child = fakeChild();
   const stop = new AbortController();
@@ -130,7 +130,7 @@ test("runChild hands the kill the client's own handle and a live view of whether
 });
 
 test("on POSIX the kill waits for the check phase, and a client reaped in the meantime is killed by nothing", async () => {
-  // comms-senior-dev, on 33689cd: libuv reaps every exited child before it runs any exit callback, so a stop made from
+  // agent-0000000389, on 33689cd: libuv reaps every exited child before it runs any exit callback, so a stop made from
   // an earlier child's exit can find this client reaped with `exit` not yet emitted. The kill is scheduled with
   // setImmediate and `exited` read again there; here the exit lands between the stop and that immediate.
   const r = running({ platform: "linux" });

@@ -48,8 +48,8 @@ const asDefined = (agent) => startabilityOf(agent, { machineId: HERE, definition
 test("POSITIVE CONTROL: a managed agent this host defines, with no worker, is offered", () => {
   // Every refusal below would pass against a function that returns nothing at all. This is the run
   // that proves it can say yes.
-  const rows = startableAgents(roster({ "ef-tester": { status: "available" } }), { machineId: HERE, definitions: defines("ef-tester") });
-  assert.deepEqual(rows.map((r) => r.id), ["ef-tester"]);
+  const rows = startableAgents(roster({ "fx-af0000": { status: "available" } }), { machineId: HERE, definitions: defines("fx-af0000") });
+  assert.deepEqual(rows.map((r) => r.id), ["fx-af0000"]);
   assert.match(rows[0].reason, /cold-startable/);
 });
 
@@ -180,21 +180,21 @@ test("RESIDENTS ARE REFUSED, and the refusal is counted where a view can draw it
   // A defined agent's mode is its definition's, so a resident here is one this host defines as resident.
   const roster = {
     agents: {
-      "sc-manager": { sessionMode: "resident", status: "online", machineId: "win32:host" },
-      "llama-manager": { sessionMode: "resident", status: "offline", machineId: "win32:host" },
-      "sc-tester": { sessionMode: "managed", status: "offline", machineId: "win32:host" },
-      "ef-senior-dev": { sessionMode: "managed", status: "working", machineId: "win32:host" },
+      "fx-at00000": { sessionMode: "resident", status: "online", machineId: "win32:host" },
+      "fx-am00000000": { sessionMode: "resident", status: "offline", machineId: "win32:host" },
+      "fx-au0000": { sessionMode: "managed", status: "offline", machineId: "win32:host" },
+      "fx-ae00000000": { sessionMode: "managed", status: "working", machineId: "win32:host" },
       // ANOTHER MACHINE'S AGENT IS NOT "NOT OFFERED", it is not this host's business. Counting it
       // would make every machine look like it was hiding the fleet.
       "elsewhere": { sessionMode: "resident", status: "offline", machineId: "linux:other" },
     },
   };
   const definitions = definitionsById({ definitions: [
-    reading("sc-manager", "resident"), reading("llama-manager", "resident"), reading("sc-tester"), reading("ef-senior-dev"),
+    reading("fx-at00000", "resident"), reading("fx-am00000000", "resident"), reading("fx-au0000"), reading("fx-ae00000000"),
   ] });
   const host = { machineId: "win32:host", definitions };
 
-  assert.deepEqual(startableAgents(roster, host).map((r) => r.id), ["sc-tester"]);
+  assert.deepEqual(startableAgents(roster, host).map((r) => r.id), ["fx-au0000"]);
 
   const skipped = notOffered(roster, host);
   assert.deepEqual(skipped, [

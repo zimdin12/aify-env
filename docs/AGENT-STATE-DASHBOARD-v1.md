@@ -52,5 +52,5 @@ count as "defined while quiet".
 
 Enforced in aify-dashboard by `server/src/agent-state/publication.ts` (the receiver) and read by
 `ui/src/agent-state.ts` and `ui/src/agents-board.ts`. Its `server/src/agent-state/sender-contract.test.ts` tests a
-vendored copy of this repo's publisher; tell dashboard-manager when the publisher changes, before the change reaches a
+vendored copy of this repo's publisher; tell the dashboard's maintainers when the publisher changes, before the change reaches a
 release, so it is vendored again.

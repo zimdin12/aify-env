@@ -14,11 +14,11 @@ async function fixture(t) {
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const file = path.join(home, 'agent-lifecycle.json');
   const definitions = new DefinitionStore({ dir: path.join(home, 'definitions') });
-  await definitions.set('dashboard-manager', { name: 'Fixture', role: 'manager', harness: 'hermes',
+  await definitions.set('agent-00000000000', { name: 'Fixture', role: 'manager', harness: 'hermes',
     mode: 'managed', workspace: home, model: '', effort: '', instructions: '', env: {}, herdrSpace: false },
   { installed: new Set(['hermes']) });
   const listing = await definitions.list(), definition = listing.definitions[0];
-  const request = id => ({ id, agentId: 'dashboard-manager', machineId: 'fixture-machine',
+  const request = id => ({ id, agentId: 'agent-00000000000', machineId: 'fixture-machine',
     storeId: listing.storeId, expectedIncarnation: definition.incarnation, expectedRevision: definition.revision,
     expectedLifetime: null, action: 'start', requestedBy: 'fixture' });
   const read = () => JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -57,7 +57,7 @@ test('new explicit and automatic reservations durably record their daemon owner'
   try { assert.deepEqual(f.read().records.explicit.owner, owner); }
   finally { release(); await active; }
   const g = await fixture(t);
-  const launch = { agentId: 'dashboard-manager', runtime: 'hermes', definition: {
+  const launch = { agentId: 'agent-00000000000', runtime: 'hermes', definition: {
     storeId: g.request('x').storeId, incarnation: 1, revision: 1 } };
   await g.ports(owner).admitColdStart(launch, () => ({ unknown: true }), async () => true);
   const rows = Object.values(g.read().records);

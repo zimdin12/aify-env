@@ -166,7 +166,7 @@ test("a kill that was confirmed leaves no such row (the control)", async () => {
 });
 
 test("through the plugin, an unconfirmed kill stays said while it yields to another aify-env, and after it resumes", async (t) => {
-  // The bug (comms-senior-dev, R1 on 155b6d5): the declined state returned problems: [] before reading the cleanup
+  // The bug (agent-0000000389, R1 on 155b6d5): the declined state returned problems: [] before reading the cleanup
   // warnings, so a run-then-decline dropped the row, and the doctor's plugin-problems row passed while the client's
   // tree was not confirmed ended. Its own endpoint, so the row is told apart from the one the test above leaves in this
   // process's store.

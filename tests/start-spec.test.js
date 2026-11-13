@@ -138,7 +138,7 @@ test("UNDEFINED KEEPS MEANING INHERIT, even though a toolchain may now be added"
 });
 
 test("the label is the caller's own name for the work, and nothing reads meaning into it", () => {
-  const { spec } = buildStartSpec({ ...ASK, label: "sc-lead" }, fs(GOOD_LAUNCHER));
-  assert.equal(spec.label, "sc-lead");
+  const { spec } = buildStartSpec({ ...ASK, label: "fx-as00" }, fs(GOOD_LAUNCHER));
+  assert.equal(spec.label, "fx-as00");
   assert.equal(buildStartSpec({ ...ASK, label: 7 }, fs(GOOD_LAUNCHER)).spec.label, "");
 });

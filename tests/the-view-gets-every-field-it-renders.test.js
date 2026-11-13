@@ -10,10 +10,10 @@
 //
 //     PROCESSES 4 owned
 //       ID       PID     AGENT      SERVICE     IO   UP     TITLE
-//       cf63-p1  215208  sc-lead    aify-comms  pty  2h40m  Claude Code
-//       cf63-p2  252812  sc-tester  aify-comms  pty  2h39m  Claude Code
-//       cf63-p3  195104  sc-critic  aify-comms  pty  2h39m  Claude Code
-//       cf63-p6  161124  sc-coder   aify-comms  pty  1h5m   Claude Code
+//       cf63-p1  215208  fx-as00    aify-comms  pty  2h40m  Claude Code
+//       cf63-p2  252812  fx-au0000  aify-comms  pty  2h39m  Claude Code
+//       cf63-p3  195104  fx-ar0000  aify-comms  pty  2h39m  Claude Code
+//       cf63-p6  161124  agent-bd   aify-comms  pty  1h5m   Claude Code
 //
 // SO IT WORKS BY CONSEQUENCE, NOT BY CONSTRUCTION, which is exactly the state that needs pinning. No
 // code was written for it. It came right because something else changed, and a thing that came right
@@ -60,7 +60,7 @@ const ENTRY = {
   pid: 4242,
   service: "aify-comms",
   terminal: true,
-  label: "sc-lead",
+  label: "fx-as00",
   title: "Claude Code",
   startedAtMs: Date.now() - 9_000_000,
 };
@@ -101,7 +101,7 @@ test("EVERY FIELD THE VIEW RENDERS IS SUPPLIED BY /health", async () => {
 
 test("A MANAGED AGENT IS NAMED, which is the whole ask", async () => {
   const [proc] = (await body()).processes;
-  assert.equal(proc.label, "sc-lead");
+  assert.equal(proc.label, "fx-as00");
   assert.equal(proc.service, "aify-comms");
   assert.equal(proc.terminal, true, "a PTY worker must be reported as one, or IO reads 'pipe'");
 });
@@ -133,7 +133,7 @@ test("nothing about what the agent is DOING crosses this boundary", async () => 
   const fields = fieldsTheViewRenders();
   assert.ok(!fields.includes("agentStatus"), "the view renders an agent status it must not judge");
   assert.ok(!fields.includes("unread"), "the view renders a service's domain data");
-  assert.equal(proc.label, "sc-lead");
+  assert.equal(proc.label, "fx-as00");
 });
 
 test("an empty list is empty, not absent", async () => {

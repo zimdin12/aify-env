@@ -211,7 +211,7 @@ test("THE TABLE DOES NOT OVERSHOOT, even when the fixed columns nearly fill the 
   // then ran `2 + fixed + 8` wide regardless -- measured at up to 15 columns past the margin with
   // this fleet's real agent names.
   const long = Array.from({ length: 3 }, (_, i) => ({
-    ...procs(1)[0], id: `aaaa-p${i + 1}`, label: "comms-senior-dev", title: "claude working on something",
+    ...procs(1)[0], id: `aaaa-p${i + 1}`, label: "agent-0000000389", title: "claude working on something",
   }));
   for (const columns of [55, 60, 65, 72]) {
     const lines = renderDashboard({ ...snap(3), processes: long },
@@ -237,7 +237,7 @@ test("AN ATTACHED PANE SAYS SO IN ITS HEADER", () => {
   // `console-session.mjs` has set `pane.attached` since the pane existed and nothing read it, so a
   // watched pane and one holding your keyboard were byte-identical -- and on a wide screen the pane
   // is where the eye is. A declared field with no reader changes nothing.
-  const base = { id: "p1", label: "sc-coder", status: "open", exit: null };
+  const base = { id: "p1", label: "agent-bd", status: "open", exit: null };
   const watched = paneTitle({ ...base, attached: false }, 40);
   const typing = paneTitle({ ...base, attached: true }, 40);
   assert.notEqual(watched, typing, "attached and watched panes render identically");

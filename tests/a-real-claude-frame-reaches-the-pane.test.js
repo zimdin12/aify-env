@@ -12,7 +12,7 @@
 // hand-written frames -- and that is the precise failure this project spent a night on: a green test
 // describing the screen a person sees while the code reads what a terminal sends.
 //
-// THE FIXTURE IS A LIVE CAPTURE, taken from `sc-lead` on the operator's own host while it worked.
+// THE FIXTURE IS A LIVE CAPTURE, taken from `fx-as00` on the operator's own host while it worked.
 // Seven whole SSE frames, chosen small and control-sequence-only so the file carries no work text.
 //
 // WHAT IT PINS, and neither is visible with a hand-written frame:

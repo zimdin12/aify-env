@@ -27,8 +27,8 @@ const bound = (bridgeInstanceId) => ({ sessionMode: "managed", runtimeState: { b
 
 test("a loop bound to the live bridge is the live worker, not an orphan", () => {
   const verdict = managedOrphanVerdict({
-    loops: [{ agentId: "comms-senior-dev", pid: 193348 }],
-    agents: { "comms-senior-dev": bound(LIVE) },
+    loops: [{ agentId: "agent-0000000389", pid: 193348 }],
+    agents: { "agent-0000000389": bound(LIVE) },
     liveBridgeIds: [LIVE],
   });
   assert.equal(verdict.ok, true);
@@ -37,27 +37,27 @@ test("a loop bound to the live bridge is the live worker, not an orphan", () => 
 
 test("a hermes the operator started by hand is bound to its own resident bridge, not an orphan", () => {
   // The field case, 2026-10-13: hermes-aify runs this same loop for a resident it launches, bound to that
-  // resident's bridge. Compared against the environment's bridge alone, the live pc-manager read orphaned.
+  // resident's bridge. Compared against the environment's bridge alone, the live agent-2120 read orphaned.
   const RESIDENT = "dd14480f-8705-45ca-b5f7-682c67190be8";
   const verdict = managedOrphanVerdict({
-    loops: [{ agentId: "pc-manager", pid: 27720 }],
-    agents: { "pc-manager": { sessionMode: "resident", runtimeState: { bridgeInstanceId: RESIDENT } } },
+    loops: [{ agentId: "agent-2120", pid: 27720 }],
+    agents: { "agent-2120": { sessionMode: "resident", runtimeState: { bridgeInstanceId: RESIDENT } } },
     liveBridgeIds: [LIVE, RESIDENT],
   });
   assert.equal(verdict.code, "ok");
 });
 
 test("a loop bound to a bridge that is gone is an orphan, and it is named", () => {
-  // The real shape: graph-senior-dev's `bridgeInstanceId` was a bridge instance that no longer
+  // The real shape: fx-aj00000000000's `bridgeInstanceId` was a bridge instance that no longer
   // existed, while its `lastSeen` refreshed every few seconds because the orphan was heartbeating.
   const verdict = managedOrphanVerdict({
-    loops: [{ agentId: "graph-senior-dev", pid: 185120 }],
-    agents: { "graph-senior-dev": bound(DEAD) },
+    loops: [{ agentId: "fx-aj00000000000", pid: 185120 }],
+    agents: { "fx-aj00000000000": bound(DEAD) },
     liveBridgeIds: [LIVE],
   });
   assert.equal(verdict.ok, false);
   assert.equal(verdict.code, "orphaned");
-  assert.match(verdict.detail, /graph-senior-dev/);
+  assert.match(verdict.detail, /fx-aj00000000000/);
   assert.match(verdict.detail, /185120/);
   assert.ok(verdict.fix, "an orphan the operator cannot act on is a complaint, not a check");
 });
@@ -79,10 +79,10 @@ test("the nohup parent and its node child are ONE loop, not two", () => {
   // clean host into a doubled orphan count.
   const verdict = managedOrphanVerdict({
     loops: [
-      { agentId: "graph-senior-dev", pid: 18100 },   // nohup.exe
-      { agentId: "graph-senior-dev", pid: 185120 },  // its node child
+      { agentId: "fx-aj00000000000", pid: 18100 },   // nohup.exe
+      { agentId: "fx-aj00000000000", pid: 185120 },  // its node child
     ],
-    agents: { "graph-senior-dev": bound(DEAD) },
+    agents: { "fx-aj00000000000": bound(DEAD) },
     liveBridgeIds: [LIVE],
   });
   assert.match(verdict.detail, /^1 of 1 managed delivery loop/);
@@ -98,20 +98,20 @@ test("no loops at all is clean", () => {
 test("orphans and live workers are counted apart", () => {
   const verdict = managedOrphanVerdict({
     loops: [
-      { agentId: "comms-senior-dev", pid: 1 },
-      { agentId: "graph-senior-dev", pid: 2 },
-      { agentId: "mc-senior-dev", pid: 3 },
+      { agentId: "agent-0000000389", pid: 1 },
+      { agentId: "fx-aj00000000000", pid: 2 },
+      { agentId: "fx-ao00000000", pid: 3 },
     ],
     agents: {
-      "comms-senior-dev": bound(LIVE),
-      "graph-senior-dev": bound(DEAD),
-      "mc-senior-dev": bound(DEAD),
+      "agent-0000000389": bound(LIVE),
+      "fx-aj00000000000": bound(DEAD),
+      "fx-ao00000000": bound(DEAD),
     },
     liveBridgeIds: [LIVE],
   });
   assert.equal(verdict.ok, false);
   assert.match(verdict.detail, /^2 of 3 managed delivery loop/);
-  assert.doesNotMatch(verdict.detail, /comms-senior-dev/, "the live worker is not accused");
+  assert.doesNotMatch(verdict.detail, /agent-0000000389/, "the live worker is not accused");
 });
 
 // ── no evidence is not a pass ────────────────────────────────────────────────────────────────
@@ -137,8 +137,8 @@ test("no bridge online is unknown, never clean", () => {
   // There is no id to compare against, so EVERY loop would look orphaned. Reporting them all would be
   // a confident wrong answer, which is worse than admitting there is nothing to compare to.
   const verdict = managedOrphanVerdict({
-    loops: [{ agentId: "graph-senior-dev", pid: 185120 }],
-    agents: { "graph-senior-dev": bound(DEAD) },
+    loops: [{ agentId: "fx-aj00000000000", pid: 185120 }],
+    agents: { "fx-aj00000000000": bound(DEAD) },
     liveBridgeIds: null,
   });
   assert.equal(verdict.ok, false);

@@ -88,7 +88,7 @@ test("EVERY DECLARED KEY IS IN `aify-env --help` AND IN THE README", () => {
 
 const SNAPSHOT = {
   version: "0.6.3", build: "", endpoint: "http://127.0.0.1:8802",
-  processes: [{ id: "p1", label: "sc-coder", service: "aify-comms", terminal: true, uptimeMs: 1000, title: "" }],
+  processes: [{ id: "p1", label: "agent-bd", service: "aify-comms", terminal: true, uptimeMs: 1000, title: "" }],
   services: [], checks: [], history: { startedTotal: 1 }, terminals: { available: true },
 };
 

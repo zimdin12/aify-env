@@ -43,7 +43,7 @@ test("NO EVIDENCE IS NOT QUIET: a process that has never emitted is unknown", ()
 test("a daemon too old to report the field is unknown, not quiet", () => {
   // The upgrade path. Every process row from a pre-2026-09-06 daemon looks exactly like this, and
   // reporting a whole host as silent would be worse than reporting nothing.
-  assert.equal(activityOf({ id: "p1", pid: 4, label: "sc-lead" }, NOW), UNKNOWN);
+  assert.equal(activityOf({ id: "p1", pid: 4, label: "fx-as00" }, NOW), UNKNOWN);
 });
 
 test("a stamp from the FUTURE is unknown rather than working", () => {

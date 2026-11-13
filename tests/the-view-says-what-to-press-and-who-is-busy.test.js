@@ -30,7 +30,7 @@ const SNAPSHOT = {
   terminals: { available: true, reason: "" },
   services: [],
   processes: [
-    { id: "aaaa-p1", pid: 11, label: "sc-lead", service: "aify-comms", terminal: true, uptimeMs: 60_000 },
+    { id: "aaaa-p1", pid: 11, label: "fx-as00", service: "aify-comms", terminal: true, uptimeMs: 60_000 },
   ],
   unknown: [],
   traffic: { requests: 1, bytesOut: 2 },
@@ -49,7 +49,7 @@ const rowFor = (label, overrides = {}, options = {}) =>
 test("POSITIVE CONTROL: the process table renders at all", () => {
   // Every hint assertion below is "this text is/is not on screen". A renderer producing nothing would
   // satisfy all the NEGATIVE ones perfectly and report green.
-  assert.match(render(), /sc-lead/);
+  assert.match(render(), /fx-as00/);
   assert.match(render(), /PROCESSES/);
 });
 
@@ -116,14 +116,14 @@ test("no hint when nothing is running, because there is nothing to move through"
 // ── the activity mark ───────────────────────────────────────────────────────────────────────────
 
 test("a lane that just emitted is marked as producing", () => {
-  const row = rowFor("sc-lead", {
+  const row = rowFor("fx-as00", {
     processes: [{ ...SNAPSHOT.processes[0], lastOutputAtMs: NOW - 500 }],
   });
   assert.match(row, /●/, "a working lane carries no mark");
 });
 
 test("a lane that has gone silent is marked differently", () => {
-  const row = rowFor("sc-lead", {
+  const row = rowFor("fx-as00", {
     processes: [{ ...SNAPSHOT.processes[0], lastOutputAtMs: NOW - WORKING_SILENCE_MS - 1000 }],
   });
   assert.match(row, /○/, "a quiet lane carries no mark");
@@ -135,17 +135,17 @@ test("NO EVIDENCE RENDERS AS NOTHING, not as quiet", () => {
   // whole host as silent would be a claim nothing measured. Verified against the operator's own
   // fleet on 2026-09-06: four lanes silent 13 minutes read ○ and one at 0.1s read ●, so the two
   // marks are reachable -- which is what makes this absence meaningful rather than a broken render.
-  const row = rowFor("sc-lead");
+  const row = rowFor("fx-as00");
   assert.doesNotMatch(row, /●|○/, "a process with no activity stamp was given a verdict");
 });
 
 test("the mark does not displace the columns that were already there", () => {
   // The activity column is new and leading. A row that lost its pid, agent or title to it would be a
   // worse view than the one before the feature.
-  const row = rowFor("sc-lead", {
+  const row = rowFor("fx-as00", {
     processes: [{ ...SNAPSHOT.processes[0], title: "Claude Code", lastOutputAtMs: NOW - 100 }],
   }, { layout: EXTENDED });
-  for (const cell of ["aaaa-p1", "11", "sc-lead", "aify-comms", "pty", "Claude Code"]) {
+  for (const cell of ["aaaa-p1", "11", "fx-as00", "aify-comms", "pty", "Claude Code"]) {
     assert.ok(row.includes(cell), `the row lost ${cell}`);
   }
 });

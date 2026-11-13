@@ -1,7 +1,7 @@
 // An idle hermes prompt with background subagents, processes or /bg tasks reports `shell`, the same
 // cyan state an idle Claude with a background shell reads, and nothing else does.
 //
-// The idle screen is comms-senior-dev's live console of 2026-09-28 (status bar and prompt, no dock).
+// The idle screen is agent-0000000389's live console of 2026-09-28 (status bar and prompt, no dock).
 // The dock header is the operator's screenshot of the same day, `▾ 4 live agents · +1 more · Ctrl+T
 // expand · Ctrl+R collapse`, taken mid-turn with `Ctrl+C to interrupt…` in the prompt. The other dock
 // lines are the strings hermes' ui-tui renders (components/agentsPanel.tsx, appLayout.tsx).
@@ -13,14 +13,14 @@ import { BACKGROUND_WORK_RULE, withBackgroundShell } from "../lib/plugins/aify-c
 import { evaluateScreen, manifestForRuntime, screenText } from "../lib/plugins/aify-comms/screen-rules.mjs";
 
 const hermes = manifestForRuntime("hermes");
-const IDLE_TITLE = "✓ aify-comms-senior-dev";
-const WORKING_TITLE = "⏳ aify-comms-senior-dev";
+const IDLE_TITLE = "✓ aify-agent-0000000389";
+const WORKING_TITLE = "⏳ aify-agent-0000000389";
 const TRANSCRIPT = [
   "   ├─ ● Read File(\"operator_authz.py\") (4.4s)",
   "   └─ ● Skill Manage (0.3s)",
   " ┊  I sent and delivery-verified APPROVE for the c1cd1ee4 source/tag candidate through aify-comms.",
 ];
-const STATUS_BAR = " ─ ready │ gpt 6 sol high │ 153.4k/272k │ [██████░░░░] 56% │ 3h 17m │ ✓ 2h 14m │ cmp 2 │ ◎ 95% ─  aify-comms-senior-dev #3";
+const STATUS_BAR = " ─ ready │ gpt 6 sol high │ 153.4k/272k │ [██████░░░░] 56% │ 3h 17m │ ✓ 2h 14m │ cmp 2 │ ◎ 95% ─  aify-agent-0000000389 #3";
 const screenWith = (dock = [], { above = TRANSCRIPT, prompt = " ❯  " } = {}) => screenText([...above, "", ...dock, "", STATUS_BAR, prompt]);
 const judge = (screen, title = IDLE_TITLE) => withBackgroundShell(hermes.id, evaluateScreen(hermes, { screen, title }), screen);
 
@@ -69,7 +69,7 @@ test("the transcript talking about background work is not the dock", () => {
   assert.equal(judge(screenWith([], { above: farAbove })).state, "idle");
 });
 
-// REVIEW 2026-09-28 (comms-senior-dev, REVISE of a441dab): a transcript line QUOTING the dock, glyph
+// REVIEW 2026-09-28 (agent-0000000389, REVISE of a441dab): a transcript line QUOTING the dock, glyph
 // and all, sat in the last 30 rows and read as shell. These are its three counterexamples verbatim,
 // beside the transcript's real shapes: `┊` answer lines, `├─` tool lines, four-space continuations.
 test("a dock line quoted in the transcript near the prompt is not the dock", () => {

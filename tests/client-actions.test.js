@@ -133,11 +133,11 @@ function answering({ status = 200, body = {}, throws = false, notJson = false } 
 }
 
 test("POSITIVE CONTROL: the startable list is read from the daemon", async () => {
-  const f = answering({ body: { agents: [{ id: "ef-tester", status: "available" }], problem: "" } });
+  const f = answering({ body: { agents: [{ id: "fx-af0000", status: "available" }], problem: "" } });
   const answer = await listStartableAgents({ endpoint: "http://127.0.0.1:8802/", fetchImpl: f.impl });
   // `service` TRAVELS WITH THE ANSWER so the view can say who it is waiting on without the host
   // knowing any service's name. Empty here because this fake body declared none.
-  assert.deepEqual(answer, { agents: [{ id: "ef-tester", status: "available" }], skipped: [], problem: "", service: "" });
+  assert.deepEqual(answer, { agents: [{ id: "fx-af0000", status: "available" }], skipped: [], problem: "", service: "" });
   assert.equal(f.calls[0].url, "http://127.0.0.1:8802/agents/startable");
   assert.equal(f.calls[0].redirect, "manual");
 });
@@ -160,11 +160,11 @@ test("AN UNREACHABLE DAEMON IS NOT AN EMPTY LIST", async () => {
 });
 
 test("POSITIVE CONTROL: starting an agent posts to its own route", async () => {
-  const f = answering({ body: { started: true, agentId: "ef-tester", sessionId: "s1", problem: "" } });
-  const answer = await startKnownAgent("ef-tester", { endpoint: "http://x", fetchImpl: f.impl });
+  const f = answering({ body: { started: true, agentId: "fx-af0000", sessionId: "s1", problem: "" } });
+  const answer = await startKnownAgent("fx-af0000", { endpoint: "http://x", fetchImpl: f.impl });
   assert.deepEqual(answer, { started: true, problem: "" });
   assert.deepEqual([f.calls[0].method, f.calls[0].url, f.calls[0].redirect],
-    ["POST", "http://x/agents/ef-tester/start", "manual"]);
+    ["POST", "http://x/agents/fx-af0000/start", "manual"]);
 });
 
 test("NO BRIEF TRAVELS FROM THE CLIENT EITHER", async () => {

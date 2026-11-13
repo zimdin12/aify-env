@@ -88,7 +88,7 @@ test("THE LINES say each decision, every value to be written, and what was not r
 test("THE ROSTER, read as records: this machine only, harness from runtime, aify-comms' names mapped", () => {
   const roster = { agents: {
     lead: { machineId: "WIN32:Host", runtime: "claude-code", name: "Lead", role: "coder", sessionMode: "managed", cwd: "C:/w",
-      model: "opus", instructions: "be brief", herdrSpace: false, runtimeConfig: { effort: "high" }, sessionHandle: "s-lead" },
+      model: "opus", instructions: "be brief", herdrSpace: false, runtimeConfig: { effort: "high" }, sessionHandle: "fx-aq0" },
     thinker: { machineId: "win32:host", runtime: "codex", sessionMode: "resident", runtimeConfig: { thinking: "xhigh" } },
     elsewhere: { machineId: "win32:other", runtime: "codex" },
     nowhere: { runtime: "codex" },
@@ -97,7 +97,7 @@ test("THE ROSTER, read as records: this machine only, harness from runtime, aify
   assert.deepEqual(records.map((r) => r.id), ["lead", "thinker"]);
   assert.deepEqual(records[0], { id: "lead", unreported: ["env"], agent: { name: "Lead", role: "coder", harness: "claude",
     mode: "managed", workspace: "C:/w", model: "opus", effort: "high", instructions: "be brief", env: {}, herdrSpace: false },
-    sessionHandle: "s-lead" });
+    sessionHandle: "fx-aq0" });
   assert.equal(records[1].agent.effort, "xhigh", "thinking when there is no effort, as the service's launch reads it");
   assert.deepEqual(records[1].unreported, ["name", "role", "workspace", "model", "instructions", "env", "herdrSpace"],
     "every field the row does not carry is said, not assumed");

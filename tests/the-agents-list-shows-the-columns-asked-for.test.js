@@ -5,7 +5,7 @@
 // where a restart preserves it. Which reading of the two drops was meant is asked on the dashboard
 // (01M602WYZHBKGGD2SFA766V9MT); the default here is the reading stated there.
 //
-// AND THE FILE THE OPERATOR WROTE IS NEVER LOST TO A KEY (comms-tech-lead's review): a hand-edited ~/.aify/tui.json
+// AND THE FILE THE OPERATOR WROTE IS NEVER LOST TO A KEY (fx-aa0000000000's review): a hand-edited ~/.aify/tui.json
 // that cannot be used survives a `v` press byte for byte.
 
 import { test } from "node:test";

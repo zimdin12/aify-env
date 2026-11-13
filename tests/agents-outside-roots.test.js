@@ -1,5 +1,5 @@
 // A managed agent whose workspace is outside the folder aify-env was started in cannot be started by it, and nothing said
-// so until a spawn was refused (2026-10-13: started in C:\Docker\aify-comms, dashboard-manager at C:/Docker/aify-dashboard
+// so until a spawn was refused (2026-10-13: started in C:\Docker\aify-comms, fx-ab000000000000 at C:/Docker/aify-dashboard
 // and nearly every other managed agent refused). The startup warning and the `agents-outside-roots` doctor row both
 // come from `definitionsOutsideRoots`.
 
@@ -14,14 +14,14 @@ import { handleRequest } from "../lib/protocol.mjs";
 const ROOTS = ["C:\\Docker\\aify-comms"];
 const managed = (id, workspace) => ({ id, agent: { mode: "managed", workspace } });
 const DEFINITIONS = [
-  managed("dashboard-manager", "C:/Docker/aify-dashboard"),
+  managed("fx-ab000000000000", "C:/Docker/aify-dashboard"),
   managed("gov-tui", "c:/docker/AIFY-COMMS/tui"),
-  { id: "pc-manager", agent: { mode: "resident", workspace: "C:\\Docker" } },
+  { id: "agent-2120", agent: { mode: "resident", workspace: "C:\\Docker" } },
 ];
 
 test("A MANAGED AGENT OUTSIDE THE ROOTS is named; one inside (any case, on Windows) and a resident are not", () => {
   assert.deepEqual(definitionsOutsideRoots(DEFINITIONS, ROOTS, { windows: true }),
-    [{ id: "dashboard-manager", workspace: "C:/Docker/aify-dashboard" }]);
+    [{ id: "fx-ab000000000000", workspace: "C:/Docker/aify-dashboard" }]);
 });
 
 test("OFF WINDOWS, case is a different folder", () => {
@@ -32,7 +32,7 @@ test("OFF WINDOWS, case is a different folder", () => {
 
 test("THE STARTUP WARNING names the agent, its workspace, the roots and the fix, and is silent when none are outside", () => {
   const warning = outsideRootsWarning(DEFINITIONS, ROOTS, { windows: true });
-  assert.match(warning, /dashboard-manager \(C:\/Docker\/aify-dashboard\)/);
+  assert.match(warning, /fx-ab000000000000 \(C:\/Docker\/aify-dashboard\)/);
   assert.match(warning, /C:\\Docker\\aify-comms/);
   assert.ok(warning.includes('`aify-env roots add "C:/Docker/aify-dashboard"`, or a folder above it'), warning);
   assert.doesNotMatch(warning, /start it again/, "the warning still sends the operator to restart aify-env");
@@ -43,7 +43,7 @@ test("THE DOCTOR ROW fails naming them, passes when none, and is unanswered with
   const listed = { definitions: DEFINITIONS };
   const failing = agentsOutsideRootsCheck({ answered: true, roots: ROOTS, listed, windows: true });
   assert.equal(failing.state, STATE.FAILED);
-  assert.match(failing.detail, /dashboard-manager/);
+  assert.match(failing.detail, /fx-ab000000000000/);
   assert.ok(failing.fix.includes('`aify-env roots add "C:/Docker/aify-dashboard"`'), failing.fix);
   const two = agentsOutsideRootsCheck({ answered: true, roots: ROOTS, windows: true,
     listed: { definitions: [managed("a", "D:/Games/one"), managed("b", "E:/two")] } });

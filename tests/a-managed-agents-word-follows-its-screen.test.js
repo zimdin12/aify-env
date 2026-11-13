@@ -1,4 +1,4 @@
-// A managed agent's word follows what its terminal's screen shows (comms-tech-lead's review, 2026-10-28).
+// A managed agent's word follows what its terminal's screen shows (fx-aa0000000000's review, 2026-10-28).
 //
 // THE GAP. The comms plugin has watched every carried terminal's screen since 0.9.8 and told aify-comms what it saw,
 // but readAgentStates never handed that to the state host, so a claude idle at its prompt with a background shell, or

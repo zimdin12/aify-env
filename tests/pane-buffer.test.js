@@ -239,11 +239,11 @@ test("AN UNSOUND SCREEN IS NOT DRAWN, and the pane says what it is waiting for",
   const buffer = new PaneBuffer();
   buffer.append(`${ESC}[2;1Hpainted`);
   const screen = { rows: ["MISLEADING"], problem: "waiting for the first full repaint" };
-  const view = buffer.view({ height: 6, width: 60, screen, agent: "sc-coder" });
+  const view = buffer.view({ height: 6, width: 60, screen, agent: "agent-bd" });
 
   assert.ok(!view.join(" ").includes("MISLEADING"), "an untrusted screen was drawn anyway");
   assert.match(view[0], /waiting for the first full repaint/);
-  assert.match(view.join(" "), /aify-env attach sc-coder/, "a wait with no way round it is a dead end");
+  assert.match(view.join(" "), /aify-env attach agent-bd/, "a wait with no way round it is a dead end");
 });
 
 test("it distinguishes 'nothing painted yet' from 'a partial screen'", () => {
@@ -265,10 +265,10 @@ test("WITH NO SCREEN AT ALL the pane says exactly what it always said", () => {
   // have changed a byte -- so this compares against the notice rather than describing it.
   const buffer = new PaneBuffer();
   buffer.append(`${ESC}[2;1Hpainted`);
-  const view = buffer.view({ height: 6, width: 60, agent: "sc-coder" });
+  const view = buffer.view({ height: 6, width: 60, agent: "agent-bd" });
   assert.deepEqual(view, [
     "live TUI — this pane cannot draw it",
-    "run: aify-env attach sc-coder",
+    "run: aify-env attach agent-bd",
   ]);
 });
 

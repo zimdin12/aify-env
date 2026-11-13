@@ -1,6 +1,6 @@
 // The view shows each agent's harness, model and effort from its definition, and reading them changes nothing (0.9.9).
 //
-// THE CONDITION ON THE READ (comms-tech-lead, 2026-10-28): every DefinitionStore call takes the lock, recovers,
+// THE CONDITION ON THE READ (fx-aa0000000000, 2026-10-28): every DefinitionStore call takes the lock, recovers,
 // adopts hand edits and makes its folders. A view refreshing every few seconds doing that is one more writer racing
 // the operator's edits. So the view reads through readOnlySummary(): no folder, no lock, no adoption, no write, and
 // only a file whose bytes the ledger adopted.

@@ -33,12 +33,12 @@ import { workspaceWithinRoots } from "../lib/plugins/aify-comms/claim.mjs";
 const ROOTS = ["C:/work"];
 const LAUNCH = {
   terminalId: "term-1",
-  agentId: "sc-lead",
+  agentId: "fx-as00",
   runtime: "claude-code",
-  command: "claude-aify --aify-agent sc-lead",
-  argv: ["claude-aify", "--aify-agent", "sc-lead"],
+  command: "claude-aify --aify-agent fx-as00",
+  argv: ["claude-aify", "--aify-agent", "fx-as00"],
   cwd: "C:/work",
-  env: { AIFY_AGENT_ID: "sc-lead", AIFY_AGENT_ROLE: "tester", AIFY_SESSION_MODE: "managed" },
+  env: { AIFY_AGENT_ID: "fx-as00", AIFY_AGENT_ROLE: "tester", AIFY_SESSION_MODE: "managed" },
 };
 
 function fakeApi({ controls = [], launch = LAUNCH, claimThrows = null, launchThrows = null } = {}) {
@@ -153,7 +153,7 @@ test("a start control RUNS what the service asked for, with its argv", async () 
   assert.equal(result.outcome, "started");
   const spec = processes.calls.starts[0];
   assert.equal(spec.launcher, "C:/bin/claude-aify");
-  assert.deepEqual(spec.args, ["--aify-agent", "sc-lead"]);
+  assert.deepEqual(spec.args, ["--aify-agent", "fx-as00"]);
   assert.equal(spec.cwd, "C:/work");
   assert.equal(spec.id, "term-1");
 });
@@ -446,7 +446,7 @@ test("an empty queue is IDLE, which is the usual case and must be cheap", async 
 // MEASURED 2026-09-03. Fourteen workers ran perfectly on this host and the service received not one
 // byte from any of them, so its reconciler correctly called each terminal a dead ghost, marked it
 // stopped, and issued a NEW start control — which this host obeyed, starting a second process
-// beside the first. Two `sc-lead`s, two `sc-coder`s. The agent ids were unique throughout; what
+// beside the first. Two `fx-as00`s, two `agent-bd`s. The agent ids were unique throughout; what
 // duplicated was the PROCESS, because starting one and then saying nothing about it is
 // indistinguishable from never starting it.
 
@@ -664,7 +664,7 @@ test("a failed liveness report does not stop the pass", async () => {
 
 // ── one agent, one worker ───────────────────────────────────────────────────────────────────────
 //
-// MEASURED TWICE on 2026-09-03: two `sc-lead`s, two `sc-coder`s, and the operator asked where the
+// MEASURED TWICE on 2026-09-03: two `fx-as00`s, two `agent-bd`s, and the operator asked where the
 // uniqueness check was. There wasn't one. The service asked for the second and was RIGHT to — it
 // believed the first was dead, and replacing a dead worker is what it should do. What was missing is
 // that this host already held a live process for that agent and started another anyway.
@@ -673,7 +673,7 @@ test("a failed liveness report does not stop the pass", async () => {
 
 // ── adopt, when the service has GIVEN UP on the terminal the worker is under ────────────────────
 //
-// THE DEADLOCK THIS ENDS, measured on the operator's fleet 2026-09-03. `sc-coder` was a running
+// THE DEADLOCK THIS ENDS, measured on the operator's fleet 2026-09-03. `agent-bd` was a running
 // claude worker whose terminal the service had written off. Its own output could never restore that
 // terminal -- ended does not go back to active, by design -- so the agent was unreachable; and every
 // restart asked this host for a second worker, which it correctly refused, so the agent was also
@@ -862,7 +862,7 @@ test("the refusal NAMES the live terminal, so the caller can act on it", async (
     withinRoots: workspaceWithinRoots, buildSpec, resolveCandidates: resolveTo("C:/bin/claude-aify"),
     baseEnv: {},
   });
-  assert.match(api.reports[0].error, /already running a worker for "sc-lead" on terminal term-1/);
+  assert.match(api.reports[0].error, /already running a worker for "fx-as00" on terminal term-1/);
   assert.match(api.reports[0].error, /Stop it explicitly and ask again/);
 });
 
@@ -909,7 +909,7 @@ test("a DIFFERENT agent's worker is never refused or touched", async () => {
   await run({ handles: book, processes });
   processes.calls.stops.length = 0;
 
-  const api = fakeApi({ launch: { ...LAUNCH, terminalId: "term-2", agentId: "sc-coder" } });
+  const api = fakeApi({ launch: { ...LAUNCH, terminalId: "term-2", agentId: "agent-bd" } });
   const other = await runOneControl({
     control: control({ id: "ctl-2", terminalId: "term-2" }),
     api, processes, handles: book, cwdRoots: ROOTS, windows: true,
@@ -1078,7 +1078,7 @@ test("an answer with NO terminal at all changes nothing", async () => {
 
 test("A WORKER THAT IS STILL PRODUCING IS NEVER STOPPED, whatever the service says", async () => {
   // THE MOST IMPORTANT ASSERTION IN THIS FILE, and it is here because the rule above nearly cost the
-  // operator an agent. Measured 2026-09-03: `sc-coder`'s terminal read `failed` at 06:47:45 while
+  // operator an agent. Measured 2026-09-03: `agent-bd`'s terminal read `failed` at 06:47:45 while
   // that same second carried a claude session mid-task -- a live worker the control plane had
   // written off. The end-status rule alone would have stopped it on the next pass.
   //

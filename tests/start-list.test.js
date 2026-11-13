@@ -262,11 +262,11 @@ console.log("start-list.test.js: all assertions passed");
 
 test("THE REFUSALS ARE DRAWN UNDER THE OFFERS, so the rule is visible rather than asserted", () => {
   const text = drawn({
-    agents: [{ id: "sc-tester", name: "sc-tester", status: "offline", runtime: "claude-code" }],
+    agents: [{ id: "fx-au0000", name: "fx-au0000", status: "offline", runtime: "claude-code" }],
     at: 0, problem: "", asked: true,
     skipped: [{ count: 12, why: "resident sessions are the operator's to launch" }],
   });
-  assert.match(text, /sc-tester/);
+  assert.match(text, /fx-au0000/);
   assert.match(text, /12 not offered — resident sessions are the operator's to launch/);
 });
 

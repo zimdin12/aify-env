@@ -23,7 +23,7 @@ const DASH = ["aify-env 0.6.0", "endpoint http://127.0.0.1:8802", "2 processes"]
 /** A stand-in follower: `lines()` is the only thing the composer asks of one. */
 const fakePane = (lines, extra = {}) => ({
   id: "abc-p1",
-  label: "graph-senior-dev",
+  label: "fx-aj00000000000",
   status: STREAMING,
   exit: null,
   lines: ({ height, width: w }) => lines.slice(-height).map((l) => l.slice(0, w)),
@@ -48,7 +48,7 @@ test("an unknown state gets a blank rather than a wrong mark", () => {
 // -- paneTitle -----------------------------------------------------------------------------------
 
 test("the title names the process, so a pane is never anonymous", () => {
-  assert.match(paneTitle(fakePane([]), 40), /graph-senior-dev/);
+  assert.match(paneTitle(fakePane([]), 40), /fx-aj00000000000/);
 });
 
 test("an unlabelled process falls back to its id, then to a visible placeholder", () => {
@@ -84,7 +84,7 @@ test("with a pane every row carries both columns", () => {
     dashboardLines: DASH, pane: fakePane(["hello", "world"]), columns: 120, rows: 10,
   });
   assert.ok(out.length >= DASH.length);
-  assert.ok(out.some((l) => l.includes("aify-env 0.6.0") && l.includes("graph-senior-dev")),
+  assert.ok(out.some((l) => l.includes("aify-env 0.6.0") && l.includes("fx-aj00000000000")),
     "the header row shows the dashboard and the pane title together");
 });
 
@@ -145,7 +145,7 @@ test("a pane with nothing to show still renders its title", () => {
   const out = composeConsole({
     dashboardLines: DASH, pane: fakePane([], { status: GONE }), columns: 120, rows: 8,
   });
-  assert.ok(out.some((l) => l.includes("graph-senior-dev")), "an empty pane lost its title");
+  assert.ok(out.some((l) => l.includes("fx-aj00000000000")), "an empty pane lost its title");
 });
 
 test("a pane object with no lines() is survived rather than thrown on", () => {
@@ -167,23 +167,23 @@ test("THE TITLE SAYS WHEN THE PANE IS SHOWING ONLY PART OF THE SCREEN", () => {
   // side of every row is missing. An operator reading a truncated line needs to know the LINE is
   // truncated rather than that the agent stopped mid-word -- which is the exact misreading the old
   // line-buffer pane produced, and the thing this whole feature exists to end.
-  const title = paneTitle({ id: "p1", label: "sc-coder", screenCols: 132 }, 60);
+  const title = paneTitle({ id: "p1", label: "agent-bd", screenCols: 132 }, 60);
   assert.match(title, /132 cols, cropped/);
 });
 
 test("NEGATIVE CONTROL: a screen that FITS gains no furniture", () => {
   // The ordinary case must stay quiet, or the note becomes noise nobody reads -- and then it is not
   // there when it matters.
-  assert.ok(!paneTitle({ id: "p1", label: "sc-coder", screenCols: 40 }, 60).includes("cropped"));
-  assert.ok(!paneTitle({ id: "p1", label: "sc-coder", screenCols: 60 }, 60).includes("cropped"),
+  assert.ok(!paneTitle({ id: "p1", label: "agent-bd", screenCols: 40 }, 60).includes("cropped"));
+  assert.ok(!paneTitle({ id: "p1", label: "agent-bd", screenCols: 60 }, 60).includes("cropped"),
     "an exact fit was called cropped");
 });
 
 test("AN UNKNOWN WIDTH CLAIMS NOTHING, rather than assuming 80", () => {
   // 0 is what an older daemon and a piped process report. Inventing a width would let the title
   // announce a crop that may not exist, or hide one that does.
-  assert.ok(!paneTitle({ id: "p1", label: "sc-coder", screenCols: 0 }, 60).includes("cropped"));
-  assert.ok(!paneTitle({ id: "p1", label: "sc-coder" }, 60).includes("cropped"));
+  assert.ok(!paneTitle({ id: "p1", label: "agent-bd", screenCols: 0 }, 60).includes("cropped"));
+  assert.ok(!paneTitle({ id: "p1", label: "agent-bd" }, 60).includes("cropped"));
 });
 
 
@@ -258,7 +258,7 @@ console.log("console-view.test.js: all assertions passed");
 // fragment. And the warning that says the screen may be WRONG outranks the note that says it is
 // merely PARTIAL, so the crop note is dropped first.
 
-const PARTIAL = { status: "running", label: "sc-coder-gpt", screenCols: 132, screenUnicode: "6" };
+const PARTIAL = { status: "running", label: "agent-bd-gpt", screenCols: 132, screenUnicode: "6" };
 
 test("THE UNICODE WARNING SURVIVES EVERY WIDTH A PANE IS DRAWN AT, whole or not at all", () => {
   // 40 columns is the pane's real width in an 80-column terminal, which is the documented minimum.
@@ -294,16 +294,16 @@ test("THE CROP NOTE IS DROPPED BEFORE THE WARNING IS, because they say different
 
 test("THE AGENT IS STILL NAMED, so the header does not become a warning with no subject", () => {
   for (const width of [30, 40, 60, 120]) {
-    assert.match(paneTitle(PARTIAL, width), /sc-coder/, `at ${width} columns the label disappeared`);
+    assert.match(paneTitle(PARTIAL, width), /agent-bd/, `at ${width} columns the label disappeared`);
   }
 });
 
 test("NEGATIVE CONTROL: a healthy pane gains no furniture", () => {
   // Every assertion above is about text being PRESENT. A title that always appended a warning would
   // satisfy them and put a permanent caveat on every pane on the host.
-  const healthy = { status: "running", label: "sc-coder-gpt", screenCols: 40, screenUnicode: "11" };
+  const healthy = { status: "running", label: "agent-bd-gpt", screenCols: 40, screenUnicode: "11" };
   const title = paneTitle(healthy, 60);
   assert.doesNotMatch(title, /unicode/);
   assert.doesNotMatch(title, /cropped/);
-  assert.match(title, /sc-coder-gpt/);
+  assert.match(title, /agent-bd-gpt/);
 });

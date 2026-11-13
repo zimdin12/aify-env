@@ -91,7 +91,7 @@ test("THE OPERATOR'S CASE reaches the report, end to end", async () => {
     skip: s.skip,
     fetchJson: async (url) => {
       assert.match(url, /\/processes$/, "the check asked aify-env for something other than its processes");
-      return { processes: [{ id: "p1", pid: 155844, service: "aify-comms", label: "ef-manager" }] };
+      return { processes: [{ id: "p1", pid: 155844, service: "aify-comms", label: "fx-ad00000" }] };
     },
     endpoint: ENDPOINT,
     machineId: "win32:host",
@@ -99,7 +99,7 @@ test("THE OPERATOR'S CASE reaches the report, end to end", async () => {
   assert.equal(s.added[0].ok, false);
   assert.equal(s.added[0].code, "unaccounted");
   assert.match(s.added[0].detail, /155844/);
-  assert.match(s.added[0].detail, /ef-manager/);
+  assert.match(s.added[0].detail, /fx-ad00000/);
 });
 
 test("it asks the aify-env the doctor found serving", async () => {
@@ -162,7 +162,7 @@ test("a phantom on OUR environment is reported", async () => {
   const s = sink();
   await checkEnvProcesses({
     get: serviceWith([
-      { id: "t1", agentId: "sc-coder", status: "attached", processId: "777",
+      { id: "t1", agentId: "agent-bd", status: "attached", processId: "777",
         environmentId: "windows:host:default" },
     ]),
     add: s.add, skip: s.skip,
@@ -171,7 +171,7 @@ test("a phantom on OUR environment is reported", async () => {
   });
   assert.equal(s.added[0].ok, false);
   assert.equal(s.added[0].code, "phantom");
-  assert.match(s.added[0].detail, /sc-coder/);
+  assert.match(s.added[0].detail, /agent-bd/);
 });
 
 test("a clean host passes", async () => {

@@ -84,7 +84,7 @@ test("a list whose entries are ALL in an unknown shape keeps them in place throu
   // Was in the table above and moved aside. A list parses, so its rows can be kept as they are; what a
   // newer writer recorded stays where the next version can read it, and this version still trusts none.
   const file = box();
-  const unknown = '{"process": 4242, "name": "sc-architect"}';
+  const unknown = '{"process": 4242, "name": "source-agent"}';
   fs.writeFileSync(file, `[${unknown}]`);
   assert.deepEqual(readOwned(file), [], "premise: the unknown row is not read as a process");
 

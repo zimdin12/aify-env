@@ -21,8 +21,8 @@ import { KeyActions } from "../lib/dashboard/key-actions.mjs";
 import { USAGE } from "../lib/usage.mjs";
 
 const NOW_MS = 1_000_000_000;
-const RUNNING = ["dashboard-manager", "dashboard-senior-dev", "env-senior-dev", "golf-manager", "golf-senior-dev", "pc-manager",
-  "wrapper-senior-dev"];
+const RUNNING = ["fx-ab000000000000", "fx-ac000000000000000", "fx-ag000000000", "fx-ah0000000", "fx-ai0000000000", "agent-2120",
+  "fx-aw0000000000000"];
 const STOPPED = Array.from({ length: 20 }, (_, i) => `stopped-${String(i).padStart(2, "0")}`);
 const SNAPSHOT = {
   version: "0.9.10-dev", endpoint: "http://127.0.0.1:64108", nowMs: NOW_MS, terminals: { available: true },
@@ -61,7 +61,7 @@ test("HIS SCREEN: at 129x40 the frame keeps HEALTH's FAIL rows and TRAFFIC whole
   const more = Number(lines.map((line) => line.match(/^\s+\+(\d+) more/)?.[1]).find(Boolean) ?? 0);
   assert.ok(shown >= 10, `ROSTER showed ${shown} of 20 with room on screen`);
   assert.equal(shown + more, 20, `ROSTER shows ${shown} and counts ${more} more: not the 20`);
-  assert.ok(lines.some((line) => line.includes("wrapper-senior-dev")), "a running agent lost its row");
+  assert.ok(lines.some((line) => line.includes("fx-aw0000000000000")), "a running agent lost its row");
   // THE BLANK LINES WENT FIRST: a stopped agent's row is worth more than a gap, a pane's own opening one included.
   assert.ok(more > 0, "CONTROL: ROSTER gave rows up");
   assert.deepEqual(lines.filter((line) => line.trim() === "").length, 0, "a blank line was kept while ROSTER gave rows up");

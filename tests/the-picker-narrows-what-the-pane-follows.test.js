@@ -3,7 +3,7 @@
 //
 // `keys.mjs` knows only an index and a count -- it has no idea what a process is, which is what keeps
 // the key layer free of any service's concepts. `ConsoleSession` is where the query becomes a
-// narrowed list, so the seam between "the operator typed sc-c" and "the pane is streaming sc-coder"
+// narrowed list, so the seam between "the operator typed zq-c" and "the pane is streaming zq-comet"
 // lives here and nowhere else.
 //
 // THE WORST WAY FOR THIS TO BE WRONG is one agent's NAME over another agent's OUTPUT. Typing narrows
@@ -39,10 +39,10 @@ function session(rows) {
 }
 
 const FLEET = [
-  { id: "p1", label: "sc-lead", title: "Claude Code" },
-  { id: "p2", label: "sc-coder", title: "Claude Code" },
-  { id: "p3", label: "sc-critic", title: "Claude Code" },
-  { id: "p4", label: "mc-manager", title: "hermes" },
+  { id: "p1", label: "zq-alpha", title: "Claude Code" },
+  { id: "p2", label: "zq-comet", title: "Claude Code" },
+  { id: "p3", label: "zq-cricket", title: "Claude Code" },
+  { id: "p4", label: "mx-delta", title: "hermes" },
 ];
 
 const type = (s, text) => { for (const ch of text) s.handleInput(ch); };
@@ -58,8 +58,8 @@ test("POSITIVE CONTROL: with no query every process is visible", () => {
 test("typing in the picker narrows the list", () => {
   const { s } = session(FLEET);
   s.handleInput("g");
-  type(s, "sc-c");
-  assert.deepEqual(s.visible().map((row) => row.label), ["sc-coder", "sc-critic"]);
+  type(s, "zq-c");
+  assert.deepEqual(s.visible().map((row) => row.label), ["zq-comet", "zq-cricket"]);
 });
 
 test("THE PANE FOLLOWS THE FILTER, not the old index", () => {
@@ -69,8 +69,8 @@ test("THE PANE FOLLOWS THE FILTER, not the old index", () => {
   const { s, built } = session(FLEET);
   assert.equal(built.at(-1), "p1");
   s.handleInput("g");
-  type(s, "sc-crit");
-  assert.equal(s.selected.label, "sc-critic");
+  type(s, "zq-cri");
+  assert.equal(s.selected.label, "zq-cricket");
   assert.equal(built.at(-1), "p3", "the pane is still streaming the process that used to be first");
 });
 
@@ -79,19 +79,19 @@ test("the match reads label, title and id — everything on screen", () => {
   const byTitle = session(FLEET);
   byTitle.s.handleInput("g");
   type(byTitle.s, "hermes");
-  assert.deepEqual(byTitle.s.visible().map((r) => r.label), ["mc-manager"]);
+  assert.deepEqual(byTitle.s.visible().map((r) => r.label), ["mx-delta"]);
 
   const byId = session(FLEET);
   byId.s.handleInput("g");
   type(byId.s, "p4");
-  assert.deepEqual(byId.s.visible().map((r) => r.label), ["mc-manager"]);
+  assert.deepEqual(byId.s.visible().map((r) => r.label), ["mx-delta"]);
 });
 
 test("matching is case-insensitive, because nobody types an agent id in caps", () => {
   const { s } = session(FLEET);
   s.handleInput("g");
-  type(s, "SC-LEAD");
-  assert.deepEqual(s.visible().map((r) => r.label), ["sc-lead"]);
+  type(s, "ZQ-ALPHA");
+  assert.deepEqual(s.visible().map((r) => r.label), ["zq-alpha"]);
 });
 
 test("a query matching NOTHING selects nothing, and the pane lets go", () => {
@@ -108,11 +108,11 @@ test("a query matching NOTHING selects nothing, and the pane lets go", () => {
 test("accepting keeps the chosen process and restores the whole list", () => {
   const { s, built } = session(FLEET);
   s.handleInput("g");
-  type(s, "critic");
+  type(s, "cricket");
   s.handleInput(ENTER);
   assert.equal(s.focus.mode, "dashboard");
   assert.equal(s.visible().length, 4, "the filter outlived its own picker");
-  assert.equal(s.selected.label, "sc-critic", "the chosen agent was lost on the way out");
+  assert.equal(s.selected.label, "zq-cricket", "the chosen agent was lost on the way out");
   assert.equal(built.at(-1), "p3");
 });
 
@@ -121,21 +121,21 @@ test("Ctrl+] abandons the search and goes back to where it started", () => {
   // mind", and landing somewhere new is the one thing it must not do.
   const { s, built } = session(FLEET);
   s.handleInput("2");
-  assert.equal(s.selected.label, "sc-coder");
+  assert.equal(s.selected.label, "zq-comet");
   s.handleInput("g");
-  type(s, "critic");
-  assert.equal(s.selected.label, "sc-critic", "the filter did not take");
+  type(s, "cricket");
+  assert.equal(s.selected.label, "zq-cricket", "the filter did not take");
   s.handleInput(DETACH);
   assert.equal(s.focus.mode, "dashboard");
   assert.equal(s.visible().length, 4);
-  assert.equal(s.selected.label, "sc-coder", "cancelling the picker moved the selection");
+  assert.equal(s.selected.label, "zq-comet", "cancelling the picker moved the selection");
   assert.equal(built.at(-1), "p2", "the pane did not follow the selection back");
 });
 
 test("a digit jumps within the WHOLE list when no picker is open", () => {
   const { s, built } = session(FLEET);
   s.handleInput("3");
-  assert.equal(s.selected.label, "sc-critic");
+  assert.equal(s.selected.label, "zq-cricket");
   assert.equal(built.at(-1), "p3");
 });
 
@@ -145,10 +145,10 @@ test("a process exiting under a filter clamps the selection into the narrowed li
   // the cursor past the end of what is shown and point the pane at something invisible.
   const { s } = session(FLEET);
   s.handleInput("g");
-  type(s, "sc-c");
-  s.handleInput(String.fromCharCode(27) + "[B");   // down: sc-critic, index 1 of 2
-  assert.equal(s.selected.label, "sc-critic");
+  type(s, "zq-c");
+  s.handleInput(String.fromCharCode(27) + "[B");   // down: zq-cricket, index 1 of 2
+  assert.equal(s.selected.label, "zq-cricket");
   s.syncProcesses(FLEET.filter((row) => row.id !== "p3"));
   assert.equal(s.visible().length, 1);
-  assert.equal(s.selected.label, "sc-coder", "the selection sat past the end of the narrowed list");
+  assert.equal(s.selected.label, "zq-comet", "the selection sat past the end of the narrowed list");
 });

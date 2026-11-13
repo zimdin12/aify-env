@@ -8,7 +8,7 @@ import { createHandleBook, runOneControl } from "../lib/plugins/aify-comms/termi
 import { workspaceWithinRoots } from "../lib/workspace-roots.mjs";
 import { automaticStartAdmission } from "../lib/plugins/aify-comms/automatic-start-admission.mjs";
 
-const WORK = "D:/Games/terraria-manager";
+const WORK = "D:/Games/fx-av00000000000";
 const defer = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 /** Roots a test changes while something waits: the supplier is asked, never copied. */

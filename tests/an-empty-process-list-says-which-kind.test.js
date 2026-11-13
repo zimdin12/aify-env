@@ -124,11 +124,11 @@ test("a snapshot with no history at all still renders", () => {
 test("none of this appears when something IS running", () => {
   const text = panel({
     processes: [{ id: "p1", pid: 42, service: "aify-comms", terminal: true, uptimeMs: 60_000,
-                  label: "sc-coder", title: "working" }],
+                  label: "agent-bd", title: "working" }],
     history: { startedTotal: 9, lastExitAtMs: 1_000 },
     nowMs: 2_000,
   });
-  assert.match(text, /sc-coder/);
+  assert.match(text, /agent-bd/);
   assert.doesNotMatch(text, /idle/, "a busy environment claimed to be idle");
   assert.doesNotMatch(text, /started since/);
 });

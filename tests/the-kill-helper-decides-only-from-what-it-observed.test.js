@@ -1,5 +1,5 @@
 // The Windows kill helper, run through its own Run with every Win32 call scripted: only a read that succeeded may lead
-// to "ended" or to "not ours", and one that failed is a stated problem (comms-senior-dev, on 05dc655).
+// to "ended" or to "not ours", and one that failed is a stated problem (agent-0000000389, on 05dc655).
 //
 // The helper's own C# (HELPER_SOURCE, the string the kill compiles) is compiled here with a fake IHeldWin beside it, and
 // Run is called with that fake: no process is opened or ended. Each case says what Run printed, what it exited with, and

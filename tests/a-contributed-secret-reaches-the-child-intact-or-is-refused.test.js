@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A contributed secret reaches the child exactly as fetched, or the start is refused before any child exists
-// (comms-senior-dev's R1 on f219ae1). The host's start path removes or rewrites some names after admission: Runner
+// (agent-0000000389's R1 on f219ae1). The host's start path removes or rewrites some names after admission: Runner
 // drops the inherited pane identity (runner.mjs `withoutPaneIdentity`), and on Windows a bash launcher's PATH gets the
 // toolchain prefixed (shell-toolchain.mjs `withToolchainOnPath`). A secret under one of those names would start a worker
 // without the value its definition requires.

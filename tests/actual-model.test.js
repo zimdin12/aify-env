@@ -55,7 +55,7 @@ test("A HANDLE THAT IS NOT A SESSION ID reads nothing, so it cannot reach a file
 });
 
 test("A CLAUDE SESSION STARTED ELSEWHERE than the workspace it registered from is found by its own id", () => {
-  // OBSERVED 2026-10-12: llama-manager registered from C:/Docker/aify-llamacpp, its transcript is under the router's folder.
+  // OBSERVED 2026-10-12: fx-am00000000 registered from C:/Docker/aify-llamacpp, its transcript is under the router's folder.
   const config = fs.mkdtempSync(path.join(os.tmpdir(), "actual-claude-elsewhere-"));
   const folder = path.join(config, "projects", claudeProjectSlug("C:/Docker/aify-llamacpp-router"));
   fs.mkdirSync(folder, { recursive: true });

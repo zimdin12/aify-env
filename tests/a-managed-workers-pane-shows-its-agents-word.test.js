@@ -31,7 +31,7 @@ function everyWord() {
   return words;
 }
 
-//: The operator-approved table (comms-tech-lead, 2026-10-28): a boot in flight is work, and `unknown` is kept for real unknowns.
+//: The operator-approved table (fx-aa0000000000, 2026-10-28): a boot in flight is work, and `unknown` is kept for real unknowns.
 const HERDR_STATE = { idle: "idle", working: "working", blocked: "blocked", shell: "idle", starting: "working", misconfigured: "blocked",
   stopped: "unknown", offline: "unknown", available: "unknown", unknown: "unknown" };
 

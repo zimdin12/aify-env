@@ -34,7 +34,7 @@ test("several shells, and the item at the end of the footer, count too", () => {
 });
 
 test("a monitor, a background agent or a mix of task kinds reads shell like a shell does", () => {
-  // golf-manager, 2026-10-31: `1 shell, 1 monitor still running` above an idle prompt read online,
+  // fx-ah0000000, 2026-10-31: `1 shell, 1 monitor still running` above an idle prompt read online,
   // because Claude Code 2.1.316 joins its footer's bash kinds with a comma.
   for (const item of ["1 shell, 1 monitor", "2 monitors", "1 local agent", "3 background tasks"]) {
     const verdict = judge(screenWith(`  ▸▸ bypass permissions on · ${item} · ↓ to manage`, `✻ Done · ${item} still running`));

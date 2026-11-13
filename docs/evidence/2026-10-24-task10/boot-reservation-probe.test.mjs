@@ -12,11 +12,11 @@ async function fixture(t) {
   const home = fs.mkdtempSync(path.join(process.env.TMPDIR, 'task10-reservation-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const definitions = new DefinitionStore({ dir: path.join(home, 'definitions') });
-  await definitions.set('dashboard-manager', { name: 'Fixture', role: 'manager', harness: 'hermes',
+  await definitions.set('agent-00000000000', { name: 'Fixture', role: 'manager', harness: 'hermes',
     mode: 'managed', workspace: home, model: '', effort: '', instructions: '', env: {}, herdrSpace: false },
   { installed: new Set(['hermes']) });
   const listing = await definitions.list(), definition = listing.definitions[0];
-  const request = id => ({ id, agentId: 'dashboard-manager', machineId: 'fixture-machine',
+  const request = id => ({ id, agentId: 'agent-00000000000', machineId: 'fixture-machine',
     storeId: listing.storeId, expectedIncarnation: definition.incarnation, expectedRevision: definition.revision,
     expectedLifetime: null, action: 'start', requestedBy: 'fixture' });
   let current = null, effects = 0;

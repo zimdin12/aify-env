@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Start a program HERE and attach this terminal to it, in one step.
 //
-//   aify-env run --service aify-comms --launcher /path/to/claude-aify --label sc-lead -- --resume abc
+//   aify-env run --service aify-comms --launcher /path/to/claude-aify --label agent-1 -- --resume abc
 //
 // WHAT IT IS FOR. A launcher that wants its session to outlive the terminal that started it: the
 // process becomes this environment's, so closing the window leaves it running and anyone can attach

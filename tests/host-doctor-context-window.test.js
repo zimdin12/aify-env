@@ -89,11 +89,11 @@ test("a zero or absent window is unreadable, not a division", () => {
 const at = (agentId, ratio) => ({ agentId, usage: { ratio } });
 
 test("a full window FAILS and names the agents", () => {
-  const verdict = contextWindowVerdict([at("comms-senior-dev", 1.02), at("graph-senior-dev", 0.5)]);
+  const verdict = contextWindowVerdict([at("agent-0000000389", 1.02), at("fx-aj00000000000", 0.5)]);
   assert.equal(verdict.ok, false);
   assert.equal(verdict.code, "exhausted");
-  assert.match(verdict.detail, /comms-senior-dev 102%/);
-  assert.doesNotMatch(verdict.detail, /graph-senior-dev/, "a healthy agent was named as exhausted");
+  assert.match(verdict.detail, /agent-0000000389 102%/);
+  assert.doesNotMatch(verdict.detail, /fx-aj00000000000/, "a healthy agent was named as exhausted");
 });
 
 test("the fix says a Reset DISCARDS history, because that is a decision and not a repair", () => {
@@ -104,13 +104,13 @@ test("the fix says a Reset DISCARDS history, because that is a decision and not 
 test("NEAR full fails too, so the operator can choose the moment", () => {
   // The alternative is being told at 100%, when the agent is already unable to answer and the choice
   // is gone.
-  const verdict = contextWindowVerdict([at("graph-senior-dev", 0.91)]);
+  const verdict = contextWindowVerdict([at("fx-aj00000000000", 0.91)]);
   assert.equal(verdict.ok, false);
   assert.equal(verdict.code, "near-full");
 });
 
 test("the calibration point: 0.91 is NEAR, and it is the reading of an agent that still worked", () => {
-  // ANTI-ARBITRARY THRESHOLD. graph-senior-dev sat at 0.91 and produced the fleet's most recent
+  // ANTI-ARBITRARY THRESHOLD. fx-aj00000000000 sat at 0.91 and produced the fleet's most recent
   // output while two agents at 1.02 and 1.19 produced nothing for hours. So the boundary sits below
   // every observed failure and above the one observed success -- and if that ordering is ever
   // inverted, this test says so.

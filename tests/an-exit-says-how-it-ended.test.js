@@ -65,14 +65,14 @@ async function waitForOutput(runner, id, pattern, timeoutMs = 10000) {
 
 test("a clean exit is remembered as code 0, with the agent that owned it", async () => {
   const runner = new Runner({ openTerminal: null });
-  const handle = await runner.start(spec("process.exit(0)", "sc-coder"));
+  const handle = await runner.start(spec("process.exit(0)", "agent-bd"));
   await handle.exited;
   await new Promise((r) => setTimeout(r, 30));
 
   const exit = lastExit(runner);
   assert.equal(exit.exitCode, 0, "a clean exit was not recorded as zero");
   assert.equal(exit.exitSignal, "");
-  assert.equal(exit.label, "sc-coder", "the exit cannot be attributed to an agent");
+  assert.equal(exit.label, "agent-bd", "the exit cannot be attributed to an agent");
   assert.equal(exit.id, handle.id);
   assert.equal(exit.pid, handle.pid);
 });
@@ -106,13 +106,13 @@ test("a STOP records no code, because nobody watched it end", () => {
   // `release` and `stop` do not observe an exit. Recording a zero for them would make a reaper's
   // tidy-up indistinguishable from a process that finished its work.
   const registry = new ProcessRegistry();
-  const entry = registry.add({ service: "aify-comms", pid: 4242, label: "sc-tester" });
+  const entry = registry.add({ service: "aify-comms", pid: 4242, label: "fx-au0000" });
   registry.remove(entry.id, { atMs: 1000 });
 
   const exit = registry.history.recentExits.at(-1);
   assert.equal(exit.exitCode, null, "a stop invented an exit code");
   assert.equal(exit.exitSignal, "");
-  assert.equal(exit.label, "sc-tester");
+  assert.equal(exit.label, "fx-au0000");
   assert.equal(exit.atMs, 1000);
 });
 
@@ -248,7 +248,7 @@ test("the panel says WHO removed it, not just that nothing was reported", async 
     endpoint: "", version: "0.6.0", services: [], processes: [], unknown: [],
     traffic: { requests: 0, bytesOut: 0 }, nowMs: 1000,
     history: { startedTotal: 1, lastExitAtMs: 900, recentExits: [
-      { id: "p1", label: "sc-coder", atMs: 900, exitCode: null, exitSignal: "", reason },
+      { id: "p1", label: "agent-bd", atMs: 900, exitCode: null, exitSignal: "", reason },
     ] },
   }, { columns: 120, color: false }).join("\n");
 

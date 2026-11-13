@@ -36,8 +36,8 @@ test("a process learns a name it did not have at spawn", () => {
   const entry = registry.add({ service: "aify-comms", pid: 1, terminal: true });
   assert.equal(entry.label, "", "a spawn with no label must not invent one");
 
-  assert.equal(registry.setLabel(entry.id, "sc-architect"), true);
-  assert.equal(registry.get(entry.id).label, "sc-architect");
+  assert.equal(registry.setLabel(entry.id, "source-agent"), true);
+  assert.equal(registry.get(entry.id).label, "source-agent");
 });
 
 test("relabelling an id the registry never had is a no-op that SAYS so", () => {
@@ -78,9 +78,9 @@ test("a non-string label is stored as empty rather than coerced", () => {
 
 test("POST /processes/:id/label relabels and returns 204", async () => {
   const runner = stubRunner();
-  const response = await post("/processes/p2/label", { label: "sc-coder" }, { runner, readFile: () => "" });
+  const response = await post("/processes/p2/label", { label: "agent-bd" }, { runner, readFile: () => "" });
   assert.equal(response.status, 204);
-  assert.deepEqual(runner.calls, [["p2", "sc-coder"]]);
+  assert.deepEqual(runner.calls, [["p2", "agent-bd"]]);
 });
 
 test("an empty label is allowed: it is how a caller says 'I no longer know'", async () => {

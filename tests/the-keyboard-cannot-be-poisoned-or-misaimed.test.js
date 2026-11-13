@@ -35,9 +35,9 @@ const session = (rows) => {
 const type = (s, text) => { for (const ch of text) s.handleInput(ch); };
 
 const FLEET = [
-  { id: "p1", label: "sc-lead" },
-  { id: "p2", label: "sc-coder" },
-  { id: "p3", label: "sc-critic" },
+  { id: "p1", label: "fx-as00" },
+  { id: "p2", label: "agent-bd" },
+  { id: "p3", label: "fx-ar0000" },
 ];
 
 // ── A3: the digit test was lexicographic ────────────────────────────────────────────────────────
@@ -135,12 +135,12 @@ test("ACCEPTING A SEARCH THAT MATCHES NOTHING DOES NOT MOVE THE SELECTION", () =
   // press Enter again, and you are attached to a process you never chose.
   const { s } = session(FLEET);
   s.handleInput("2");
-  assert.equal(s.selected.label, "sc-coder");
+  assert.equal(s.selected.label, "agent-bd");
   s.handleInput("g");
   type(s, "zzzz");
   assert.equal(s.visible().length, 0);
   s.handleInput(ENTER);
-  assert.equal(s.selected.label, "sc-coder", "an empty search moved the operator to another agent");
+  assert.equal(s.selected.label, "agent-bd", "an empty search moved the operator to another agent");
 });
 
 test("and attaching after that empty search reaches the agent they were on", () => {

@@ -149,7 +149,7 @@ test("a claimed request REGISTERS a warm agent and starts NOTHING", async () => 
   const api = fakeApi({
     requests: [{
       id: "req-1",
-      agentId: "sc-lead",
+      agentId: "fx-as00",
       workspace: "C:/Users/Administrator/sand_castle",
     }],
   });
@@ -554,7 +554,7 @@ test("BEFORE START THE CAPABILITY SAYS THE PLUGIN IS NOT RUNNING, rather than th
   const listed = await plugin.capabilities.agents.list();
   assert.deepEqual(listed.agents, []);
   assert.match(listed.problem, /not running/);
-  const started = await plugin.capabilities.agents.start("ef-tester");
+  const started = await plugin.capabilities.agents.start("fx-af0000");
   assert.equal(started.started, false);
   assert.match(started.problem, /not running/);
 });
@@ -573,15 +573,15 @@ test("AFTER START IT REACHES THE REAL SERVICE CALLS, not a stub that answers pol
     ...fakeApi(),
     async agents() {
       asked.push("agents");
-      return { agents: { "ef-tester": { sessionMode: "managed", machineId: "win32:box", status: "available" } } };
+      return { agents: { "fx-af0000": { sessionMode: "managed", machineId: "win32:box", status: "available" } } };
     },
   };
-  const { plugin } = makePlugin(api, { machineId: "win32:box", definitions: definesAgents("ef-tester") });
+  const { plugin } = makePlugin(api, { machineId: "win32:box", definitions: definesAgents("fx-af0000") });
   const { host } = makeHost();
   await plugin.start(host);
   const listed = await plugin.capabilities.agents.list();
   assert.deepEqual(asked, ["agents"], "the capability did not ask the service anything");
-  assert.deepEqual(listed.agents.map((a) => a.id), ["ef-tester"]);
+  assert.deepEqual(listed.agents.map((a) => a.id), ["fx-af0000"]);
   await plugin.stop();
 });
 

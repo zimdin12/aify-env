@@ -59,7 +59,7 @@ function fakeProcesses({ startThrows = null, started = { id: "proc-1", pid: 4242
 
 const REQUEST = {
   id: "req-1",
-  agentId: "sc-lead",
+  agentId: "fx-as00",
   workspace: "C:/Users/Administrator/sand_castle",
   launcher: "claude-aify",
   args: ["--managed"],
@@ -112,7 +112,7 @@ test("a workspace with a . or .. segment is refused, never resolved: textually i
     await t.test(workspace, () => assert.equal(workspaceWithinRoots(workspace, roots, { windows }), false, `${workspace} passed as inside ${roots}`));
   }
   await t.test("CONTROL: plain subfolders, and names that only start with dots, are inside", () => {
-    assert.equal(workspaceWithinRoots("D:/Games/terraria-manager", ["D:/Games"], { windows: true }), true);
+    assert.equal(workspaceWithinRoots("D:/Games/fx-av00000000000", ["D:/Games"], { windows: true }), true);
     assert.equal(workspaceWithinRoots("D:/Games/..hidden/x", ["D:/Games"], { windows: true }), true);
     assert.equal(workspaceWithinRoots("/home/bob/.config", ["/home/bob"], { windows: false }), true);
   });
@@ -278,7 +278,7 @@ test("THE CLAIM NAMES THE MACHINE, because the service writes it onto the agent 
   // took claiming over on 2026-09-03 was empty -- 79 rows -- because this call passed none. The
   // service writes that value to `agents.machine_id` when the spawn reaches `running`, so a blank
   // ERASES the machine an agent belongs to. A worker that comes up re-registers and puts it back,
-  // which is why only agents whose spawns failed stayed blank; `mp-manager` was one, and it
+  // which is why only agents whose spawns failed stayed blank; `fx-ap00000` was one, and it
   // disappeared from the start menu, which offers only agents on this machine.
   const bodies = [];
   const api = {

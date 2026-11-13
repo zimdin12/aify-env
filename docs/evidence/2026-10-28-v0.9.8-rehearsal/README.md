@@ -1,7 +1,7 @@
 # v0.9.8 candidate: the work-PC rehearsal against it, before the tag (2026-10-28)
 
 The operator's live aify-env is 0.9.4, so his next restart jumps several releases at once, on the daemon that owns his
-whole fleet. comms-tech-lead asked for the closest stand-in that touches nothing of his: the
+whole fleet. The technical lead asked for the closest stand-in that touches nothing of his: the
 [work-PC rehearsal](../2026-10-28-work-pc-rehearsal/README.md), run again with the candidate in place of GitHub's
 main.
 
@@ -38,7 +38,7 @@ view.
 
 ## Run 2: the rebased release commit, 7e37e47
 
-Main moved under the release commit (0efe317: 29 exports un-exported, tests, one comment). comms-tech-lead asked
+Main moved under the release commit (0efe317: 29 exports un-exported, tests, one comment). The technical lead asked
 for this run before the tag because static linking cannot clear a lookup by name at runtime. Static linking is
 the check that all 211 lib modules still link. A lookup by name at runtime is a plugin loader or an `import()`
 reaching an export by its name.

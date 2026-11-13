@@ -94,7 +94,7 @@ test("THE REAL LAUNCH GUARD refuses D:/ work, admits it once the root is added, 
   const { file } = fixtureHome(t);
   const roots = new LaunchRoots({ startFolder: `C:${B}`, file, windows: true });
   // The request names its own wider roots, as a service's `cwdRoots` would: the guard must not read them.
-  const launch = { cwd: "D:/Games/terraria-manager", argv: [], cwdRoots: ["D:/"], launchRoots: ["D:/"] };
+  const launch = { cwd: "D:/Games/fx-av00000000000", argv: [], cwdRoots: ["D:/"], launchRoots: ["D:/"] };
   const guard = () => prepareTerminalLaunch({ launch, terminalId: "t1", cwdRoots: roots.current(), windows: true,
     withinRoots: workspaceWithinRoots, buildSpec: () => null, resolveCandidates: () => [] });
   assert.equal(guard().rootRefusal, true, "work outside the start folder was let through by the request's own roots");
@@ -108,7 +108,7 @@ test("THE REAL LAUNCH GUARD refuses a service's cwd that climbs out of a root wi
   const guard = (cwd) => prepareTerminalLaunch({ launch: { cwd, argv: [] }, terminalId: "t1", cwdRoots: ["D:/Games"], windows: true,
     withinRoots: workspaceWithinRoots, buildSpec: () => null, resolveCandidates: () => [] });
   assert.equal(guard("D:/Games/../Elsewhere").rootRefusal, true, "a .. cwd reached the spawn as if inside D:/Games");
-  const control = guard("D:/Games/terraria-manager");
+  const control = guard("D:/Games/fx-av00000000000");
   assert.equal(control.rootRefusal, undefined, "CONTROL: a plain subfolder was refused");
   assert.match(control.detail, /carries no argv/, "CONTROL: the next check after the root check answered");
 });

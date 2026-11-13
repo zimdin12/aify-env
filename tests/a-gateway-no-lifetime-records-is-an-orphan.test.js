@@ -15,7 +15,7 @@ test('A GATEWAY is `hermes dashboard --port P` with P in the agent range, and no
   assert.equal(gatewayPort(`hermes dashboard --port ${PORT_BASE + PORT_SPAN}`), null, 'one past the range');
   assert.equal(gatewayPort('hermes dashboard --port 9119'), 9119, 'CONTROL: inside the range');
   assert.equal(gatewayPort('hermes dashboard --port 8000'), null, "an operator's own dashboard below the range");
-  assert.equal(gatewayPort('node hermes-managed-host.js run pc-manager --port 9341'), null, 'no dashboard');
+  assert.equal(gatewayPort('node hermes-managed-host.js run agent-2120 --port 9341'), null, 'no dashboard');
   assert.equal(gatewayPort('python -m http.server dashboard --port 9341'), null, 'no hermes');
 });
 

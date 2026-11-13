@@ -1,4 +1,4 @@
-// Which process `aify-env attach sc-lead` means, and what it does when the answer is not one.
+// Which process `aify-env attach fx-as00` means, and what it does when the answer is not one.
 //
 // THE HEADLINE THIS SERVES. v0.6.2's first item is hosting a resident's PTY here so a closed terminal
 // stops killing an agent, and so the same terminal can be watched from somewhere else. Both need a
@@ -23,12 +23,12 @@ import assert from "node:assert/strict";
 
 import { resolveAttachTarget } from "../lib/attach-target.mjs";
 
-const LEAD = { id: "inst-p1", label: "sc-lead", pid: 1 };
-const TESTER = { id: "inst-p2", label: "sc-tester", pid: 2 };
+const LEAD = { id: "inst-p1", label: "fx-as00", pid: 1 };
+const TESTER = { id: "inst-p2", label: "fx-au0000", pid: 2 };
 const RUNNING = [LEAD, TESTER];
 
 test("an agent name resolves to its process", () => {
-  assert.deepEqual(resolveAttachTarget(RUNNING, "sc-lead"), { id: "inst-p1" });
+  assert.deepEqual(resolveAttachTarget(RUNNING, "fx-as00"), { id: "inst-p1" });
 });
 
 test("an id resolves too, because that is what a script would pass", () => {
@@ -46,8 +46,8 @@ test("A DUPLICATE LABEL IS REFUSED AND THE IDS ARE NAMED", () => {
   // THE ONE THAT MATTERS. Picking either would send the operator's keystrokes into a session they
   // did not choose. Refusing is useless without the ids, though -- a refusal a person cannot act on
   // is a stall, which is why the fix line carries them.
-  const twins = [LEAD, { id: "inst-p7", label: "sc-lead", pid: 7 }];
-  const answer = resolveAttachTarget(twins, "sc-lead");
+  const twins = [LEAD, { id: "inst-p7", label: "fx-as00", pid: 7 }];
+  const answer = resolveAttachTarget(twins, "fx-as00");
   assert.ok(answer.error, "an ambiguous name was resolved to one process");
   assert.match(answer.error, /2 processes/);
   assert.match(answer.fix, /inst-p1/);
@@ -55,43 +55,43 @@ test("A DUPLICATE LABEL IS REFUSED AND THE IDS ARE NAMED", () => {
 });
 
 test("case does not decide it", () => {
-  // Agent ids are lowercase by convention and an operator typing `SC-Lead` means the same lane.
-  assert.deepEqual(resolveAttachTarget(RUNNING, "SC-LEAD"), { id: "inst-p1" });
+  // Agent ids are lowercase by convention and an operator typing `Fx-as00` means the same lane.
+  assert.deepEqual(resolveAttachTarget(RUNNING, "FX-AS00"), { id: "inst-p1" });
 });
 
 test("an unknown name NAMES WHAT IS RUNNING", () => {
   // The likeliest reason to get this wrong is a typo or a stale memory of what is up, and both are
   // answered by the list. A bare "not found" makes the operator run a second command.
-  const answer = resolveAttachTarget(RUNNING, "sc-nobody");
-  assert.match(answer.error, /sc-nobody/);
-  assert.match(answer.error, /sc-lead/);
-  assert.match(answer.error, /sc-tester/);
+  const answer = resolveAttachTarget(RUNNING, "absent-id");
+  assert.match(answer.error, /absent-id/);
+  assert.match(answer.error, /fx-as00/);
+  assert.match(answer.error, /fx-au0000/);
 });
 
 test("NO NAME AT ALL is answered with the candidates, not with usage", () => {
   // Someone who does not know what is running is most of the reason to reach for this command.
   const answer = resolveAttachTarget(RUNNING, "");
-  assert.match(answer.error, /sc-lead, sc-tester/);
+  assert.match(answer.error, /fx-as00, fx-au0000/);
 });
 
 test("an empty host says so rather than listing nothing", () => {
   // "Running: " with nothing after it reads as a broken tool. Two different facts, two sentences.
   assert.match(resolveAttachTarget([], "").error, /running nothing/);
-  assert.match(resolveAttachTarget([], "sc-lead").error, /running nothing/);
+  assert.match(resolveAttachTarget([], "fx-as00").error, /running nothing/);
 });
 
 test("junk in the list cannot become a target", () => {
   // NEGATIVE CONTROLS. A malformed process entry must not resolve, or a garbled listing hands the
   // keyboard to something with no id at all.
-  for (const junk of [undefined, null, "sc-lead", 3, {}, { id: "" }, { label: "sc-lead" }]) {
-    const answer = resolveAttachTarget([junk], "sc-lead");
+  for (const junk of [undefined, null, "fx-as00", 3, {}, { id: "" }, { label: "fx-as00" }]) {
+    const answer = resolveAttachTarget([junk], "fx-as00");
     assert.ok(answer.error, `${JSON.stringify(junk)} resolved to a target`);
   }
 });
 
 test("a list that is not a list is refused, not iterated", () => {
   for (const junk of [undefined, null, "two", 3, {}]) {
-    assert.ok(resolveAttachTarget(junk, "sc-lead").error);
+    assert.ok(resolveAttachTarget(junk, "fx-as00").error);
   }
 });
 

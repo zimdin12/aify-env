@@ -201,7 +201,7 @@ test("commits dated before the head they follow are still a range forward from i
 });
 
 test("a refused range is retried from the cursor the dashboard gave, without reading the history again", { skip: onlyWindows }, async (t) => {
-  // The bug: git log on every retry (comms-tech-lead's condition: once per head move), or a retry from the
+  // The bug: git log on every retry (fx-aa0000000000's condition: once per head move), or a retry from the
   // stale cursor, which the dashboard refuses for ever.
   const s = await setUp(t);
   await s.watcher.tick();
@@ -388,7 +388,7 @@ test("a head report answered without the accepted head fails closed: no commits,
 });
 
 test("through the plugin: a folder resumed after a yield is reported again, and the dashboard's coverage is brought back to it", { skip: onlyWindows }, async (t) => {
-  // The bug (comms-senior-dev, R2 on 155b6d5, inherited from main): the watcher kept the folder's last report through a
+  // The bug (agent-0000000389, R2 on 155b6d5, inherited from main): the watcher kept the folder's last report through a
   // yield. Another reporter moved the dashboard to B meanwhile; this checkout was still at A with the same fingerprint,
   // so the quiet-tick shortcut held for ever and the dashboard said B. The other reporter's write is modelled as its
   // accepted API history, not run.

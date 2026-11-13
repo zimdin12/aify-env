@@ -177,8 +177,8 @@ test("R8: THE NOTICE NAMES THE COMMAND THAT WORKS, and promises nothing Enter do
   // that admits it cannot draw.
   const b = new PaneBuffer();
   b.append(`${ESC}[2J${ESC}[Hpainted`);
-  const named = b.view({ height: 4, width: 60, agent: "sc-coder" }).join(" ");
-  assert.match(named, /aify-env attach sc-coder/, "the notice does not name the exact command");
+  const named = b.view({ height: 4, width: 60, agent: "agent-bd" }).join(" ");
+  assert.match(named, /aify-env attach agent-bd/, "the notice does not name the exact command");
   assert.doesNotMatch(named, /press Enter/i,
     "the notice still promises that Enter restores the display, which it does not");
 

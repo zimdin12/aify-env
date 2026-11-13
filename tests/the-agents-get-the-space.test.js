@@ -37,7 +37,7 @@ const snapshot = (n) => ({
   traffic: { requests: 1234, bytesOut: 56789 },
 });
 
-function frame(n, { rows = 24, outcome = "starting sc-manager…", selected = 0 } = {}) {
+function frame(n, { rows = 24, outcome = "starting fx-at00000…", selected = 0 } = {}) {
   return renderDashboard(snapshot(n), {
     columns: 100, rows, color: false, keys: { enabled: true, canQuit: true },
     view: { rows: agents(n), selected, mode: "dashboard", query: "", paneHidden: true, outcome },
@@ -51,7 +51,7 @@ test("at 100x24 with 12 agents, every agent row, the outcome and the hint are on
   for (let i = 0; i < 12; i += 1) {
     assert.match(text, new RegExp(`agent-${String(i).padStart(2, "0")}`), `agent ${i} is off screen:\n${text}`);
   }
-  assert.match(text, /starting sc-manager…/, "the outcome line was dropped");
+  assert.match(text, /starting fx-at00000…/, "the outcome line was dropped");
   assert.match(text, /s start/, "the hint line was dropped");
 });
 
@@ -74,7 +74,7 @@ test("the outcome line survives any amount of fitting", () => {
   for (const [n, rows] of [[30, 24], [60, 16], [5, 12]]) {
     const lines = frame(n, { rows, selected: n - 1 });
     assert.ok(lines.length <= rows, `${lines.length} lines for ${rows} rows`);
-    assert.match(lines.join("\n"), /starting sc-manager…/, `dropped at ${n} agents on ${rows} rows`);
+    assert.match(lines.join("\n"), /starting fx-at00000…/, `dropped at ${n} agents on ${rows} rows`);
   }
 });
 

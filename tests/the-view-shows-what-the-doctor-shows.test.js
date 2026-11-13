@@ -36,7 +36,7 @@ const HEALTHY = {
   status: "healthy",
   version: "0.6.0",
   build: "abc",
-  processes: [{ id: "p1", pid: 7, service: "aify-comms", terminal: true, label: "sc-lead", startedAtMs: Date.now() }],
+  processes: [{ id: "p1", pid: 7, service: "aify-comms", terminal: true, label: "fx-as00", startedAtMs: Date.now() }],
   unknown: [],
   terminals: { available: true, reason: "" },
   // A claiming plugin, because a host with none legitimately FAILS the claiming check -- spawns

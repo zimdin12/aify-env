@@ -194,7 +194,7 @@ test("dashboard control: a key withheld from the dashboard is reported FAILED", 
   pty.refuseResize = true;
   log.length = 0;
   const handles = createHandleBook();
-  handles.remember("term-1", id, "sc-lead");
+  handles.remember("term-1", id, "fx-as00");
   const reports = [];
   const result = await runOneControl({
     handles,
@@ -217,9 +217,9 @@ test("viewerOfControl: the dashboard's surfaces are one viewer, every other requ
     assert.equal(viewerOfControl({ requestedBy }), DASHBOARD_VIEWER, requestedBy);
   }
   // Bare `dashboard` is what a chat message, a Compact and a defaulted input carry: none is a screen.
-  // `dashboard-manager` is a live agent's id, and `dashboard-console` the old surface name: an agent id
+  // `fx-ab000000000000` is a live agent's id, and `dashboard-console` the old surface name: an agent id
   // can take that shape, so neither may be the viewer (review of 0.7.6).
-  for (const requestedBy of ["dashboard", "dashboard-manager", "dashboard-console", "console-prompt", "sc-lead",
+  for (const requestedBy of ["dashboard", "fx-ab000000000000", "dashboard-console", "console-prompt", "fx-as00",
     "dashboardx", "", undefined]) {
     assert.equal(viewerOfControl({ requestedBy }), "", String(requestedBy));
   }
@@ -228,7 +228,7 @@ test("viewerOfControl: the dashboard's surfaces are one viewer, every other requ
 test("an auto-answer through the real control path types without resizing the pane's terminal", async () => {
   const { runner, id, log } = await watchedTerminal();
   const handles = createHandleBook();
-  handles.remember("term-1", id, "sc-lead");
+  handles.remember("term-1", id, "fx-as00");
   const processes = new PluginProcesses(runner);
   const api = { async reportControl() {} };
   const send = (over) => runOneControl({ handles, api, processes, control: { id: "c", terminalId: "term-1", ...over } });
@@ -237,11 +237,11 @@ test("an auto-answer through the real control path types without resizing the pa
   runner.resize(id, 157, 40, "attach:pane");
   log.length = 0;
   await send({ action: "input", body: "1", requestedBy: "console-prompt" });
-  await send({ action: "input", body: "x", requestedBy: "sc-lead" });
+  await send({ action: "input", body: "x", requestedBy: "fx-as00" });
   // A chat message or a Compact from the dashboard (review of 0.7.6, ST1).
   await send({ action: "input", body: "m", requestedBy: "dashboard" });
   // An agent whose id starts `dashboard-` typing into a console (review of 0.7.6).
-  await send({ action: "input", body: "a", requestedBy: "dashboard-manager" });
+  await send({ action: "input", body: "a", requestedBy: "fx-ab000000000000" });
   assert.deepEqual(log, ["write 1", "write x", "write m", "write a"], "an automated key resized the terminal to the dashboard's size");
 
   await send({ action: "input", body: "d", requestedBy: "dashboard:console" });
@@ -253,5 +253,5 @@ test("DASHBOARD_SURFACE_PREFIX is a namespace no agent id can enter, and every s
   const agentId = /^[A-Za-z0-9._-]+$/;
   assert.equal(agentId.test(`${DASHBOARD_SURFACE_PREFIX}x`), false, "an agent could be named into the dashboard's namespace");
   assert.equal(viewerOfControl({ requestedBy: `${DASHBOARD_SURFACE_PREFIX}console-2` }), DASHBOARD_VIEWER);
-  assert.equal(viewerOfControl({ requestedBy: "dashboard-manager" }), "", "CONTROL: an agent named like the dashboard is not it");
+  assert.equal(viewerOfControl({ requestedBy: "fx-ab000000000000" }), "", "CONTROL: an agent named like the dashboard is not it");
 });

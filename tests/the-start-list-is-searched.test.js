@@ -53,7 +53,7 @@ test("the search survives a redraw, with and without processes", () => {
 });
 
 test("both lists match a search the same way", () => {
-  assert.ok(matchesQuery(["sc-Manager", "claude-code"], " MAN "));
+  assert.ok(matchesQuery(["Mango-Cart", "claude-code"], " MAN "));
   assert.ok(matchesQuery(["anything"], ""), "an empty search matches everything");
   assert.ok(!matchesQuery(["alpha"], "br"), "CONTROL: a non-match is refused");
   const session = new ConsoleSession({ endpoint: "http://127.0.0.2:1", makeFollower: () => ({ start() {}, stop() {} }) });
@@ -69,7 +69,7 @@ function sessionWithAgents() {
   session.noteStartable([
     { id: "alpha", name: "alpha", status: "available" },
     { id: "bravo", name: "bravo", status: "stopped" },
-    { id: "sc-manager", name: "sc-manager", status: "offline" },
+    { id: "mango-cart", name: "mango-cart", status: "offline" },
   ]);
   return session;
 }
@@ -79,7 +79,7 @@ test("Enter starts the agent under the cursor in the FILTERED list", () => {
   for (const ch of "man") session.handleInput(ch);
   assert.equal(session.focus.startCount, 1, "the count Enter reads is the filtered count");
   const [chosen] = [session.handleInput(ENTER)];
-  assert.equal(chosen.startAgent?.id, "sc-manager", `started ${chosen.startAgent?.id}`);
+  assert.equal(chosen.startAgent?.id, "mango-cart", `started ${chosen.startAgent?.id}`);
 });
 
 test("a search that matches nothing starts nothing", () => {
@@ -130,8 +130,8 @@ test("typedText keeps what precedes an escape and drops control characters", () 
 });
 
 test("a row is searched on what it shows: name, id, status and runtime", () => {
-  const agent = { id: "sc-mgr", name: "sc-manager", status: "stopped", runtime: "codex" };
-  for (const query of ["manager", "sc-mgr", "stopped", "codex"]) {
+  const agent = { id: "row-id", name: "mango-cart", status: "stopped", runtime: "codex" };
+  for (const query of ["mango", "row-id", "stopped", "codex"]) {
     assert.ok(matchesQuery(startRowTexts(agent), query), `${query} did not match`);
   }
   assert.ok(!matchesQuery(startRowTexts(agent), "claude"), "CONTROL: a field it does not show matched");

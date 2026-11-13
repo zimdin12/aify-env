@@ -91,7 +91,7 @@ async function environmentWithWork(box, port) {
   const created = await fetch(`http://127.0.0.1:${port}/processes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ service: "test", launcher, args: [], cwd: box.dir, label: "sc-architect" }),
+    body: JSON.stringify({ service: "test", launcher, args: [], cwd: box.dir, label: "source-agent" }),
     signal: AbortSignal.timeout(20000),
   });
   assert.equal(created.status, 201, `could not start a process: ${created.status}`);
@@ -119,7 +119,7 @@ test("an idle environment is not in the way", () => {
 });
 
 test("running processes are what a takeover would cost", () => {
-  const running = [{ pid: 10, service: "aify-comms", label: "sc-architect" }];
+  const running = [{ pid: 10, service: "aify-comms", label: "source-agent" }];
   assert.deepEqual(workLostToSupersession(running), running);
 });
 
@@ -152,7 +152,7 @@ test("a second start REFUSES while the first is running agents, and touches noth
     const code = await new Promise((resolve) => second.on("exit", resolve));
 
     assert.equal(code, 69, "a refusal must not look like a successful start");
-    assert.match(said, /sc-architect/, "the refusal does not say WHICH agent is in the way");
+    assert.match(said, /source-agent/, "the refusal does not say WHICH agent is in the way");
     assert.match(said, /--force/, "the refusal does not say how to proceed anyway");
     assert.match(said, /aify-env tui/, "the refusal does not offer the way to look without disturbing");
     // `start()` pipes, so this IS the piped refusal: a reader with no view keeps the pointer and is told of no view.

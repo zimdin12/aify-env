@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The review of P1 at 3aa5df7 (comms-senior-dev, 2026-10-01): one regression per finding, each watched
+// The review of P1 at 3aa5df7 (agent-0000000389, 2026-10-01): one regression per finding, each watched
 // RED against that commit before its repair. R8 (the one-writer gate) is in
 // agent-definitions-have-one-writer.test.js; the canonical-order gap is a shared-fixture vector.
 

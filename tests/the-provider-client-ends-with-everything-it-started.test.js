@@ -43,7 +43,7 @@ const alive = (pid) => {
 };
 /**
  * A kill that only records what it was asked to kill. A probe whose subject is not the kill takes this, so its own
- * timer firing could never reach a real taskkill (comms-senior-dev, safety addendum on cc3999c).
+ * timer firing could never reach a real taskkill (agent-0000000389, safety addendum on cc3999c).
  */
 function recordingKill() {
   const asked = [];
@@ -71,7 +71,7 @@ const SELF_EXIT_MS = 20_000;
  * ends as one group.
  *
  * ⛔ Nothing here kills a fixture process by pid. A cleanup that killed `pids.grandchild` ran after the test had
- * confirmed that pid gone, when Windows may already have given it to any process on this host (comms-tech-lead, on
+ * confirmed that pid gone, when Windows may already have given it to any process on this host (fx-aa0000000000, on
  * cc3999c: a file of this suite died with exit 1 and nothing said, which is how such a kill ends a process). Instead
  * both processes end themselves: at once when the test writes `done` (its cleanup, `finish()`), or at SELF_EXIT_MS,
  * when each first writes its own `expired` marker. A process the kill ended can write no marker, so the tests assert
