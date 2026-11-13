@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline/promises";
+import { ReadStream } from "node:tty";
 
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
@@ -103,7 +104,7 @@ async function askTerminal(question, { windows }) {
   if (!process.stdout.isTTY) return null;
   let input, output;
   try {
-    input = fs.createReadStream(null, { fd: fs.openSync(windows ? "CONIN$" : "/dev/tty", "r") });
+    input = new ReadStream(fs.openSync(windows ? "CONIN$" : "/dev/tty", "r"));
     output = fs.createWriteStream(null, { fd: fs.openSync(windows ? "CONOUT$" : "/dev/tty", "w") });
   } catch {
     input?.destroy();

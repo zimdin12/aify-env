@@ -107,7 +107,9 @@ const a=process.argv.slice(2),r=a[a.indexOf('--registry')+1],o=a[a.indexOf('--re
   const answers = path.join(f.home, 'answers'), terminalOut = path.join(f.home, 'terminal-out');
   fs.writeFileSync(answers, 'yes\n');
   const preload = path.join(f.home, 'controlled-terminal.mjs');
-  fs.writeFileSync(preload, `import fs from 'node:fs';import {syncBuiltinESMExports} from 'node:module';
+  // This regular-file fixture proves consent order, not native tty lifetime. Keep its input adapter explicit.
+  fs.writeFileSync(preload, `import fs from 'node:fs';import tty from 'node:tty';import {syncBuiltinESMExports} from 'node:module';
+if(process.argv[1].endsWith('aify-env-install.mjs'))tty.ReadStream=class extends fs.ReadStream{constructor(fd){super(null,{fd})}};
 if(process.argv[1].endsWith('aify-env-install.mjs')) {const open=fs.openSync;fs.openSync=function(file,...rest){if(file==='CONIN$'||file==='/dev/tty'&&rest[0]==='r')return open(${JSON.stringify(answers)},'r');if(file==='CONOUT$'||file==='/dev/tty'&&rest[0]==='w')return open(${JSON.stringify(terminalOut)},'a');return open(file,...rest)};Object.defineProperty(process.stdout,'isTTY',{value:true});syncBuiltinESMExports();}\n`);
   const result = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, path.join(ROOT, 'bin/aify-env-install.mjs'),
