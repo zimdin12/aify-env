@@ -32,6 +32,7 @@ with tempfile.TemporaryDirectory(prefix="install-terminal-", dir="/tmp") as temp
         "channel-install.mjs": "export function channelPolicyReadiness(){return {state:'ready'}};",
         "package-install.mjs": "export function installedCommit(){throw Error('unexpected package query')};export function binFiles(){throw Error('unexpected bins')};export function npmTool(){throw Error('unexpected npm')};export function npmCliBeside(){throw Error('unexpected npm path')};",
         "connect-args.mjs": "export function parseConnectArgs(){return {problem:''}};",
+        "connect-report.mjs": "export function connectRecord(){return {pending:[]}};",
         "artifact-catalogue.json": '{"approved":[]}',
     }
     write(wrapper / "package.json", '{"type":"module"}')

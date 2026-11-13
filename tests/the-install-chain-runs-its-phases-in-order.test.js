@@ -102,17 +102,18 @@ test("an installed aify-wrapper that lacks what the chain needs is a reported re
 // as one missing the file (an undefined validateSpec escaped approvedInstaller's catch as a crash).
 const WRAPPER_EXPORTS = {
   "connect-http.mjs": ["fetchSpec"],
+  "connect-report.mjs": ["connectRecord"],
   "service-spec.mjs": ["validateSpec", "tupleDigest"],
   "path-lookup.mjs": ["resolveOnPath"],
   "channel-install.mjs": ["channelPolicyReadiness"],
   "package-install.mjs": ["installedCommit", "binFiles", "npmTool", "npmCliBeside"],
 };
-function fakeWrapper({ skipFile = "", skipExport = "", catalogue = { approved: ["d1"] }, reportFile = true } = {}) {
+function fakeWrapper({ skipFile = "", skipExport = "", catalogue = { approved: ["d1"] }, reportFile = true, pendingRecord = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "chain-wrapper-"));
   fs.mkdirSync(path.join(root, "lib"));
   for (const [file, names] of Object.entries(WRAPPER_EXPORTS)) {
     if (file === skipFile) continue;
-    const body = names.filter((n) => n !== skipExport).map((n) => `export function ${n}() { return "${n}"; }`).join("\n");
+    const body = names.filter((n) => n !== skipExport).map((n) => `export function ${n}() { return ${n === "connectRecord" ? pendingRecord ? "{pending:[]}" : "{}" : JSON.stringify(n)}; }`).join("\n");
     fs.writeFileSync(path.join(root, "lib", file), `${body}\n`);
   }
   fs.writeFileSync(path.join(root, "lib", "artifact-catalogue.json"), JSON.stringify(catalogue));
@@ -124,8 +125,11 @@ function fakeWrapper({ skipFile = "", skipExport = "", catalogue = { approved: [
 test("a wrapper module is usable only with the functions and catalogue the chain calls, each checked", async () => {
   const usable = await wrapperModules(fakeWrapper());
   assert.equal(usable.problem, undefined, "CONTROL: a wrapper with every export loads");
-  for (const [name, fn] of Object.entries(usable)) if (name !== "catalogue") assert.equal(fn(), name, `${name} is not the wrapper's own`);
+  for (const [name, fn] of Object.entries(usable)) if (!["catalogue", "connectRecord"].includes(name)) assert.equal(fn(), name, `${name} is not the wrapper's own`);
+  assert.deepEqual(usable.connectRecord(), { pending: [] });
   assert.deepEqual(usable.catalogue, ["d1"]);
+  const oldRecord = await wrapperModules(fakeWrapper({ pendingRecord: false }));
+  assert.match(oldRecord.problem ?? "", /record omits pending entries/, "an installed old producer must not silently hide pending entries");
   const noFile = await wrapperModules(fakeWrapper({ skipFile: "package-install.mjs" }));
   assert.match(noFile.problem, /lacks lib\/package-install\.mjs/);
   assert.match(noFile.problem, /npm install -g .*aify-wrapper.*git pull/s);
@@ -490,10 +494,10 @@ test("the receipt is connect's record of this run, written to a fresh private fi
     return { status: 0 };
   };
   const real = { result: "committed", service: "aify-dashboard", installed: [{ id: "dashboard-bridge", at: "/p/a", reused: false }] };
-  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record(JSON.stringify(real)) }), { status: 0, installed: { "dashboard-bridge": "/p/a" } });
+  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record(JSON.stringify(real)) }), { status: 0, installed: { "dashboard-bridge": "/p/a" }, pending: [] });
   assert.equal(fs.existsSync(path.dirname(file)), false, "the private directory is removed");
-  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record(undefined) }), { status: 0, installed: {} }, "no record is nothing installed");
-  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record("{not json") }), { status: 0, installed: {} }, "an unreadable record is nothing installed");
+  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record(undefined) }), { status: 0, installed: {}, pending: [] }, "no record is nothing installed");
+  assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record("{not json") }), { status: 0, installed: {}, pending: [] }, "an unreadable record is nothing installed");
   const odd = { ...real, installed: [{ id: "x", at: 7 }, "y", { id: "dashboard-bridge", at: "/p/a" }] };
   assert.deepEqual(connectRecorded("node", ["connect.mjs"], { env: {}, run: record(JSON.stringify(odd)) }).installed, { "dashboard-bridge": "/p/a" }, "only well-formed rows count");
   // A legal artifact id can be `__proto__`: it stays this run's own key, and the receipt keeps its ordinary prototype.

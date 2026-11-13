@@ -15,7 +15,7 @@
     "VERSION",
     "README.md"
   ],
-  "aifyWrapper": "github:zimdin12/aify-wrapper#c09fd03cb17d076acd8cd9c20ad5517efbea09d0",
+  "aifyWrapper": "github:zimdin12/aify-wrapper#8c7d8f43c92d21440e582368240e4bd9bb79dfcd",
   "scripts": {
     "test": "node tests/run-in-a-temp-root.mjs"
   },
