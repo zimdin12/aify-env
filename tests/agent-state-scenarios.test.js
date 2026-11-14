@@ -11,7 +11,7 @@ const rules = () => {
 };
 test('ordered scenario references resolve to the sole real capture set and typed outcomes', () => {
   assert.equal(new Set(data.cases.map(c => c.id)).size, data.cases.length);
-  assert.ok(data.cases.length >= 8 && data.cases.length <= 9);
+  assert.ok(data.cases.length >= 8 && data.cases.length <= 11);
   for (const [index, name] of Object.entries(data.bindings)) assert.equal(bodies[+index]?.name, name, `capture ${index}`);
   for (const scenario of data.cases) {
     assert.ok(scenario.steps.some(step => step.read), `${scenario.id}: no expected outcome`);
@@ -38,4 +38,19 @@ test('live-conflict scenario uses genuinely captured competing keys, not a mutat
   assert.ok(right.generation > left.generation, 'newer generation alone must not win across keys');
   const a = left.agents.find(r => r.agentId === 'alpha'), b = right.agents.find(r => r.agentId === 'alpha');
   assert.notEqual(a.lifetime, b.lifetime); assert.notEqual(a.state, b.state);
+});
+const row = (index, id) => bodies[index]?.body.agents?.find(r => r.agentId === id);
+test('same-word disagreement uses real differing non-null lifetimes, not a state mismatch', () => {
+  const scenario = data.cases.find(c => c.id === 'same-word-different-lifetimes'); assert.ok(scenario);
+  const [a, b] = scenario.steps.filter(s => Object.hasOwn(s, 'accept')).slice(-2).map(s => row(s.accept, 'alpha'));
+  assert.ok(a?.lifetime && b?.lifetime); assert.equal(a.state, b.state); assert.notEqual(a.lifetime, b.lifetime);
+  assert.deepEqual(scenario.steps.filter(s => s.read).map(s => s.expect), [{ state: 'unknown', conflict: true }]);
+});
+test('null identity scenarios isolate null/null and null/non-null at the same word', () => {
+  const scenario = data.cases.find(c => c.id === 'null-is-not-identity'); assert.ok(scenario);
+  const accepts = scenario.steps.filter(s => Object.hasOwn(s, 'accept'));
+  const [a, b, c] = accepts.map(s => row(s.accept, 'invalid')); assert.ok(a && b && c);
+  assert.equal(a.lifetime, null); assert.equal(b.lifetime, null); assert.notEqual(c.lifetime, null);
+  assert.equal(a.state, b.state); assert.equal(b.state, c.state);
+  assert.deepEqual(scenario.steps.filter(s => s.read).map(s => s.expect), [{ state: 'unknown', conflict: true }, { state: 'unknown', conflict: true }]);
 });

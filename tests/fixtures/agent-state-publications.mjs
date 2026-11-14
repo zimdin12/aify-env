@@ -120,8 +120,17 @@ export async function captureAgentStatePublications() {
   const metadata = new PublicationCapture('metadata', 'managed', { build: 'invalid build', reportEveryMs: 500 });
   try { await metadata.capture('omitted-invalid-metadata'); fixtures.push(...metadata.posts); }
   finally { metadata.close(); }
-  const peer = new PublicationCapture('peer', 'managed', { generation: 8 });
-  try { peer.start(4); peer.turn('turn-start', token(4)); await peer.capture('live'); fixtures.push(...peer.posts); }
+  const peer = new PublicationCapture('peer', 'all', { generation: 8 });
+  try {
+    peer.start(4); peer.turn('turn-start', token(4)); await peer.capture('live');
+    const record = { agentId: 'invalid', lifetime: token(5), instance: 'peer', harness: 'codex', pid: 4105,
+      launcher: 'C:/fixture/codex-aify', writtenAtUs: BASE_MS * 1000 - 1000 };
+    fs.mkdirSync(path.join(peer.home, 'residents'));
+    fs.writeFileSync(path.join(peer.home, 'residents', `invalid.${token(5)}.json`), JSON.stringify(record));
+    peer.answer = { alive: true, createdAtUs: record.writtenAtUs - 1000, commandLine: 'bash C:/fixture/codex-aify' };
+    await peer.capture('invalid-live'); // a verified resident with no observed turn, also carrying an invalid definition
+    fixtures.push(...peer.posts);
+  }
   finally { peer.close(); }
   return fixtures;
 }
