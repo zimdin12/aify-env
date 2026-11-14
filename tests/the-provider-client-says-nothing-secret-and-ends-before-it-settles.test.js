@@ -183,26 +183,7 @@ test("a Windows tree kill that fails rejects, with its reason, and one that succ
   await assert.rejects(killTree(4242, { platform: "win32", stillOurs, held: () => { throw new Error("no helper"); } }), /no helper/);
 });
 
-test("a signal that could not be sent rejects; a process already gone does not", async () => {
-  // The same defect where there is no taskkill: every failure to signal was read as "already gone".
-  const refusing = () => { throw Object.assign(new Error("kill EPERM"), { code: "EPERM" }); };
-  await assert.rejects(killTree(4242, { platform: "linux", signalProcess: refusing }), /EPERM/);
-  const gone = () => { throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" }); };
-  await killTree(4242, { platform: "linux", signalProcess: gone });
-  const sent = [];
-  await killTree(4242, { platform: "linux", signalProcess: (target) => { if (target < 0) gone(); sent.push(target); } });
-  assert.deepEqual(sent, [4242], "no group: the process itself");
-  // The bug (review of a84ed99, S1-F1): the group's failure was caught and forgotten, so a group that could not be
-  // signalled read as a tree ended once the process itself was. The process is still signalled, as best it can be.
-  for (const root of [() => {}, gone]) {
-    const tried = [];
-    const groupRefused = (target) => { tried.push(target); if (target < 0) refusing(); root(); };
-    await assert.rejects(killTree(4242, { platform: "linux", signalProcess: groupRefused }), /EPERM/);
-    assert.deepEqual(tried, [-4242, 4242], "the process itself is still signalled");
-  }
-  // And no group, with the process itself refusing: its own failure.
-  await assert.rejects(killTree(4242, { platform: "linux", signalProcess: (target) => (target < 0 ? gone() : refusing()) }), /EPERM/);
-});
+// POSIX signal/refusal coverage belongs to posix-process-group.test.js. PID-only cleanup is no longer an API.
 
 /** Run `body` with setTimeout and clearTimeout replaced by a list of jobs it fires by hand. */
 async function withHandTimers(body) {

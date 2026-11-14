@@ -267,7 +267,7 @@ test("a stop during a run records nothing", async () => {
   assert.deepEqual(s.runner.state(), { runs: 0, stopped: [], problems: [] });
 });
 
-test("through the plugin: a watched folder's head is swept after the provider's pass, and stop ends the loop", async (t) => {
+test("through the plugin: sweeps progress during a held poll, and yield/stop cancel the poll", async (t) => {
   // The bugs: the sweeper never wired into the plugin, handed a folder whose head the watcher never reported, or run
   // under aify-env's reporter name.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-sweep-")));
@@ -281,10 +281,14 @@ test("through the plugin: a watched folder's head is swept after the provider's 
   execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "p"], { cwd: proj });
   const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: proj, encoding: "utf8" }).trim();
   const endpoint = "http://127.0.0.1:9";
-  const fetch = async (url) => {
+  let polls = 0, aborts = 0, other = false;
+  const fetch = async (url, options) => {
     const at = String(url);
     if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", name: "n", root: { fsNamespace: "windows", path: proj } }] });
-    if (at.endsWith("/host/h/provider/pending")) return Response.json({ hostKey: "h", projects: [] });
+    if (at.endsWith('/provider/pending?waitSeconds=25')) {
+      polls++;
+      return new Promise((_, reject) => options.signal.addEventListener('abort', () => { aborts++; reject(Error('stopped')); }, { once: true }));
+    }
     if (at.endsWith("/host/h/projects/p1/watch-set")) return Response.json({ watchRevision: "r1", items: [{ watchId: "w1" }] });
     if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: head, cursorRevision: 1 });
     return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
@@ -292,6 +296,7 @@ test("through the plugin: a watched folder's head is swept after the provider's 
   const runs = [];
   const runChild = async (args) => { runs.push(args); return { code: 0, signal: null, timedOut: false, stopped: false, error: "" }; };
   const plugin = createDashboardPlugin({
+    servedElsewhere: async () => other,
     name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
     watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
@@ -299,8 +304,10 @@ test("through the plugin: a watched folder's head is swept after the provider's 
   t.after(() => plugin.stop());
   await plugin.start({ credential: async () => KEY });
   await waitFor(() => runs.length >= 1);
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  await plugin.stop();
+  assert.equal(polls, 1, 'the provider poll is still held while the sweep completes');
+  other = true; await waitFor(() => aborts === 1); assert.equal(aborts, 1, 'yield cancels the held poll');
+  other = false; await waitFor(() => polls === 2); assert.equal(polls, 2, 'resume opens one replacement poll');
+  await plugin.stop(); assert.equal(aborts, 2, 'stop cancels its held poll too');
   assert.equal(runs.length, 1, `swept ${runs.length} times: once for its one head`);
   assert.equal(runs[0].script, join(checkout, SWEEP_SCRIPT));
   assert.equal(runs[0].cwd, realpathSync.native(proj));

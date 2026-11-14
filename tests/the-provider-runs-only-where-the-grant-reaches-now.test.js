@@ -17,6 +17,7 @@ import { HeadWatcher } from "../lib/plugins/aify-dashboard/head-watcher.mjs";
 import { ProviderRunner } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
 import { watchRootsFrom } from "../lib/watch-roots.mjs";
 
+import { providerApi, scriptedRun } from './fixtures/provider-host.mjs';
 const onlyWindows = process.platform !== "win32" && "junctions are Windows-only";
 const slashed = (path) => path.replace(/\\/g, "/");
 const rootsOf = (...paths) => watchRootsFrom(JSON.stringify({ watchRoots: paths }), "win32").roots;
@@ -40,7 +41,7 @@ function scene(listed, grant) {
   });
   const runs = [];
   const runner = new ProviderRunner({
-    api: { providerPending: async (hostKey) => ({ hostKey, projects: [{ projectId: "p1", queued: 1 }] }) },
+    api: providerApi(() => [{ projectId: 'p1', queued: 1 }]),
     credential: async () => "k".repeat(32),
     folders: () => watcher.watched(),
     watchRoots: async () => ({ roots: now.roots, problems: [] }),
@@ -51,7 +52,7 @@ function scene(listed, grant) {
     reporter: "r",
     parentEnv: {},
     nodePath: "C:/node.exe",
-    run: async (args) => { runs.push(args.cwd); return OK; },
+    run: scriptedRun(async (args) => { runs.push(args.cwd); return OK; }),
   });
   return { watcher, runner, runs, now, problems: () => runner.state().problems.join("\n") };
 }

@@ -77,7 +77,7 @@ test("a question about the other aify-env that throws is no answer, so this inst
   await plugin.start(host);
   await settle();
   await plugin.stop();
-  assert.equal(recorded.calls.length, 1);
+  assert.equal(recorded.calls.filter(url => String(url).endsWith('/watch-list')).length, 1);
 });
 
 test("an aify-env that offers no watchRoots grants nothing, and the state says so", async () => {
@@ -86,7 +86,7 @@ test("an aify-env that offers no watchRoots grants nothing, and the state says s
   await plugin.start(host);
   await settle();
   await plugin.stop();
-  assert.equal(recorded.calls.length, 1, "the list is still fetched");
+  assert.equal(recorded.calls.filter(url => String(url).endsWith('/watch-list')).length, 1, "the list is still fetched");
   assert.match(plugin.state().problems.join("\n"), /offers no watchRoots setting/);
   assert.equal(plugin.state().phase, "stopped");
 });

@@ -9,13 +9,14 @@ import { createDashboardPlugin } from '../lib/plugins/aify-dashboard/index.mjs';
 import { SCRIPT } from '../lib/plugins/aify-dashboard/provider-runner.mjs';
 import { grantedRoots, watchRootsFrom } from '../lib/watch-roots.mjs';
 import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
+import { providerFetch, scriptedRun } from './fixtures/provider-host.mjs';
 new ProcessEffectTripwire();
 
 test('the provider serves its watch grant without consulting core launch grants or PluginProcesses', { timeout: 5000 }, async t => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'provider-launch-exemption-')));
   const folder = path.join(root, 'project'), gitDir = path.join(folder, '.git'), checkout = path.join(root, 'provider');
   fs.mkdirSync(path.join(gitDir, 'objects'), { recursive: true });
-  fs.mkdirSync(path.join(checkout, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(checkout, 'bin'), { recursive: true });
   const head = 'a'.repeat(40);
   fs.writeFileSync(path.join(gitDir, 'HEAD'), head + '\n');
   fs.writeFileSync(path.join(gitDir, 'config'), '[core]\nrepositoryformatversion = 0\n');
@@ -31,14 +32,14 @@ test('the provider serves its watch grant without consulting core launch grants 
     config: () => ({ config: { providerCheckout: checkout }, problem: '' }),
   }, {
     git: { gitDirs: async () => ({ toplevel: folder, gitDir, commonDir: gitDir }), head: async () => head },
-    fetch: async url => {
+    fetch: providerFetch(async url => {
       const at = String(url);
       if (at.endsWith('/watch-list')) return Response.json({ hostKey: 'fixture', projects: [{ projectId: 'p1', name: 'Fixture project', root: { fsNamespace: platform, path: folder } }] });
       if (at.endsWith('/provider/pending')) return Response.json({ hostKey: 'fixture', projects: [{ projectId: 'p1', queued: 1 }] });
       if (at.endsWith('/reports/head')) return Response.json({ ok: true, ackedHead: head, cursorRevision: 1 });
       return Response.json({ error: 'fixture route absent' }, { status: 404 });
-    },
-    runChild: async value => { runs.push(value); sawRun(); return { code: 0, signal: null, timedOut: false, stopped: false, error: '' }; },
+    }),
+    runChild: scriptedRun(async value => { runs.push(value); sawRun(); return { code: 0, signal: null, timedOut: false, stopped: false, error: '' }; }),
     tickMs: 60000, runEveryMs: 10,
   });
   t.after(async () => { await plugin.stop(); fs.rmSync(root, { recursive: true, force: true }); });

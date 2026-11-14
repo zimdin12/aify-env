@@ -27,7 +27,7 @@ test("checkoutOf: each missing piece is named against CONFIG_KEY, and a checkout
   assert.match(checkoutOf({ providerCheckout: "relative" }).problem, /must be an absolute folder/);
   const root = process.platform === "win32" ? "C:/p" : "/p";
   assert.match(checkoutOf({ providerCheckout: root }, has()).problem, /does not exist/);
-  assert.match(checkoutOf({ providerCheckout: root }, has(root)).problem, /has no scripts\/serve-provider-requests\.mjs/);
+  assert.match(checkoutOf({ providerCheckout: root }, has(root)).problem, /has no bin\/apg\.js/);
   const script = `${root}/${SCRIPT.replaceAll("\\", "/")}`;
   assert.equal(checkoutOf({ providerCheckout: root }, has(root, script)).script.replaceAll("\\", "/"), script);
 });

@@ -14,6 +14,7 @@ import { childEnv } from "../lib/plugins/aify-dashboard/provider-child.mjs";
 import { outcomeOf, ProviderRunner, SCRIPT } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
 
+import { providerApi, providerFetch, scriptedRun } from './fixtures/provider-host.mjs';
 const KEY = "dashboard-key-sentinel-7f3a";
 const CHECKOUT = "C:/checkout";
 const EXISTING = new Set([CHECKOUT, join(CHECKOUT, SCRIPT), "C:/empty"]);
@@ -43,7 +44,8 @@ function setUp(overrides = {}) {
     ...overrides,
   };
   s.runner = new ProviderRunner({
-    api: { providerPending: async (hostKey) => (s.answer === undefined ? { hostKey, projects: s.pending } : s.answer) },
+    api: { ...providerApi(() => s.pending), providerPending: async (hostKey) => (s.answer === undefined ? { hostKey, projects: s.pending } : s.answer) },
+    now: () => s.now ?? 0,
     credential: async () => s.key,
     folders: () => s.folders,
     watchRoots: async () => ({ roots: s.roots, problems: [] }),
@@ -57,13 +59,15 @@ function setUp(overrides = {}) {
     parentEnv: { PATH: "C:/bin", SystemRoot: "C:/Windows", SECRET_SENTINEL: "s3cret", AIFY_COMMS_KEY: "comms-key" },
     nodePath: "C:/node/node.exe",
     exists: (path) => EXISTING.has(path),
-    run: async (args) => {
+    run: scriptedRun(async (args) => {
       s.runs.push(args);
       const next = s.exits.shift() ?? {};
       next.during?.(s);
       return { code: 0, signal: null, timedOut: false, stopped: false, error: "", ...next };
-    },
+    }),
   });
+  const pass = s.runner.pass.bind(s.runner);
+  s.runner.pass = options => { s.now = (s.now ?? 0) + 60_000; return pass(options); };
   s.problems = () => s.runner.state().problems.join("\n");
   return s;
 }
@@ -85,7 +89,7 @@ test("a checkout that is not granted exactly starts nothing, and says why", asyn
     [{ providerCheckout: "relative/checkout" }, /must be an absolute folder/],
     [{ providerCheckout: 5 }, /must be an absolute folder, not 5/],
     [{ providerCheckout: "C:/missing" }, /names C:\/missing, which does not exist/],
-    [{ providerCheckout: "C:/empty" }, /C:\/empty has no scripts\/serve-provider-requests\.mjs/],
+    [{ providerCheckout: "C:/empty" }, /C:\/empty has no bin\/apg\.js/],
   ];
   for (const [config, why] of rows) {
     const s = setUp({ config });
@@ -156,14 +160,10 @@ test("the client is handed its configuration, and nothing else from aify-env's e
   const s = setUp();
   await s.runner.pass();
   const env = s.runs[0].env;
-  assert.deepEqual(Object.keys(env).sort(), [
-    "APG_DASHBOARD_HOST", "APG_DASHBOARD_KEY", "APG_DASHBOARD_PROJECT", "APG_DASHBOARD_REPORTER", "APG_DASHBOARD_URL",
-    "GIT_OPTIONAL_LOCKS", "GIT_TERMINAL_PROMPT", "PATH", "SystemRoot",
-  ]);
-  assert.deepEqual(
-    [env.APG_DASHBOARD_URL, env.APG_DASHBOARD_KEY, env.APG_DASHBOARD_PROJECT, env.APG_DASHBOARD_HOST, env.APG_DASHBOARD_REPORTER],
-    ["http://127.0.0.1:9", KEY, "p1", "h", "aify-env:win32:h:r"],
-  );
+  assert.deepEqual(Object.keys(env).sort(), ["GIT_OPTIONAL_LOCKS", "GIT_TERMINAL_PROMPT", "PATH", "SystemRoot"]);
+  assert.ok(!JSON.stringify(env).includes(KEY), 'the dashboard credential stays in env');
+  assert.deepEqual(s.runs[0].args, ['provide']);
+  assert.equal(s.runs[0].request.repoRoot, 'C:/w/p1');
   assert.ok(!JSON.stringify(env).includes("s3cret") && !JSON.stringify(env).includes("comms-key"));
   // Windows answers PATH and Path alike; the child gets one of them, not two that Windows treats as one.
   assert.deepEqual(Object.keys(childEnv({ PATH: "a", Path: "a", SystemRoot: "r", SYSTEMROOT: "r" }, {})).sort(),
@@ -174,7 +174,7 @@ test("exit codes mean what was agreed: 0 and 3 run again, 2 and anything else st
   // The bug: an exit the client does not use, or death by a signal, read as success or as "try again".
   const rows = [
     [{ code: 0 }, "ok"], [{ code: 3 }, "retry"], [{ code: 2 }, "configuration"], [{ code: 1 }, "bug"],
-    [{ code: 4 }, "bug"], [{ code: 255 }, "bug"], [{ code: null, signal: "SIGKILL" }, "bug"], [{ code: null, timedOut: true }, "retry"],
+    [{ code: 4 }, "bug"], [{ code: 255 }, "bug"], [{ code: null, signal: "SIGKILL" }, "bug"], [{ code: null, timedOut: true }, "retry"], [{ code: 0, protocolError: true }, 'bug'],
   ];
   for (const [result, outcome] of rows) assert.equal(outcomeOf({ timedOut: false, ...result }), outcome, JSON.stringify(result));
 });
@@ -184,11 +184,11 @@ test("a project stopped by exit 2 or a bug stays stopped until its configuration
   // that nothing the operator does can lift short of a restart.
   const s = setUp({ exits: [{ code: 2, error: "APG_DASHBOARD_PROJECT is not a project" }] });
   await s.runner.pass();
-  assert.match(s.problems(), /project p1: the provider client stopped with exit 2 \(its configuration\).*\(APG_DASHBOARD_PROJECT is not a project\)/);
+  assert.match(s.problems(), /provider for http:\/\/127\.0\.0\.1:9: the provider client stopped with exit 2 \(its configuration\).*\(APG_DASHBOARD_PROJECT is not a project\)/);
   await s.runner.pass();
   assert.equal(s.runs.length, 1, "not started again under the same configuration");
   assert.match(s.problems(), /exit 2 \(its configuration\)/, "and still says why");
-  assert.deepEqual(s.runner.state().stopped, ["p1"]);
+  assert.deepEqual(s.runner.state().stopped, ["http://127.0.0.1:9"]);
   s.config = { providerCheckout: CHECKOUT, edited: true };
   await s.runner.pass();
   assert.equal(s.runs.length, 2, "an edited section lifts the stop");
@@ -217,7 +217,7 @@ test("a run past its time counts as a retry, and says so once it repeats", async
   await s.runner.pass();
   assert.deepEqual(s.runner.state().problems, [], "once is not yet a pattern");
   await s.runner.pass();
-  assert.match(s.problems(), /project p1: the provider client ran past its time 2 times in a row and was stopped/);
+  assert.match(s.problems(), /provider for http:\/\/127\.0\.0\.1:9: the provider client ran past its time 2 times in a row and was stopped/);
   await s.runner.pass();
   assert.equal(s.runs.length, 3, "and it is still run");
   assert.deepEqual(s.runner.state().problems, [], "a run that ends clears it");
@@ -275,7 +275,7 @@ test("through the plugin: a folder whose repository is outside the grant is neve
   execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "outside"], { cwd: outside });
   symlinkSync(outside, join(grant, "junction"), "junction");
   const checkout = join(root, "apg");
-  mkdirSync(join(checkout, "scripts"), { recursive: true });
+  mkdirSync(join(checkout, "bin"), { recursive: true });
   writeFileSync(join(checkout, SCRIPT), "process.exit(0);\n");
   const listed = join(grant, "junction").replace(/\\/g, "/");
   const endpoint = "http://127.0.0.1:9";
@@ -291,7 +291,7 @@ test("through the plugin: a folder whose repository is outside the grant is neve
     name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
     watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [grant] }), "win32"), [], "win32"),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
-  }, { fetch, runChild: async (args) => { runs.push(args); return { code: 0, signal: null, timedOut: false, stopped: false, error: "" }; }, runEveryMs: 25, tickMs: 60_000 });
+  }, { fetch: providerFetch(fetch), runChild: scriptedRun(async (args) => { runs.push(args); return { code: 0, signal: null, timedOut: false, stopped: false, error: "" }; }), runEveryMs: 25, tickMs: 60_000 });
   t.after(() => plugin.stop());
   await plugin.start({ credential: async () => KEY });
   // Until both rows are up, or a run gives the defect away: the watcher's look and the provider's pass race.
@@ -408,7 +408,7 @@ test("through the plugin: while another aify-env serves the host it runs no clie
   // it keeps the folders it last judged, so the runner went on starting clients and two hosts claimed one queue.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-provider-yield-")));
   const checkout = join(root, "apg");
-  mkdirSync(join(checkout, "scripts"), { recursive: true });
+  mkdirSync(join(checkout, "bin"), { recursive: true });
   writeFileSync(join(checkout, SCRIPT), "process.exit(0);\n");
   const proj = join(root, "proj").replace(/\\/g, "/");
   mkdirSync(proj);
@@ -431,7 +431,7 @@ test("through the plugin: while another aify-env serves the host it runs no clie
     servedElsewhere: async () => other,
     watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
-  }, { fetch, runChild, runEveryMs: 25, tickMs: 25 });
+  }, { fetch: providerFetch(fetch), runChild: scriptedRun(runChild), runEveryMs: 25, tickMs: 25 });
   t.after(() => plugin.stop());
   await plugin.start({ credential: async () => KEY });
   await waitFor(() => runs.length >= 1);
@@ -456,7 +456,7 @@ test("through the plugin: it serves the watched folder once a minute, and stop e
   // The bugs: the runner never wired into the plugin, wired to another endpoint or host, or a timer left after stop.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-provider-")));
   const checkout = join(root, "apg");
-  mkdirSync(join(checkout, "scripts"), { recursive: true });
+  mkdirSync(join(checkout, "bin"), { recursive: true });
   writeFileSync(join(checkout, SCRIPT), "process.exit(0);\n");
   const proj = join(root, "proj").replace(/\\/g, "/");
   mkdirSync(proj);
@@ -478,7 +478,7 @@ test("through the plugin: it serves the watched folder once a minute, and stop e
     name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
     watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
-  }, { fetch, runChild, runEveryMs: 25, tickMs: 60_000 });
+  }, { fetch: providerFetch(fetch), runChild: scriptedRun(runChild), runEveryMs: 25, tickMs: 60_000 });
   t.after(() => plugin.stop());
   await plugin.start({ credential: async () => KEY });
   await waitFor(() => runs.length >= 2);
@@ -486,10 +486,8 @@ test("through the plugin: it serves the watched folder once a minute, and stop e
   assert.ok(runs.length >= 2, `ran ${runs.length} times`);
   assert.equal(runs[0].cwd, realpathSync.native(proj), "the real folder the look judged");
   assert.equal(runs[0].script, join(checkout, SCRIPT));
-  assert.equal(runs[0].env.APG_DASHBOARD_URL, endpoint);
-  assert.equal(runs[0].env.APG_DASHBOARD_HOST, "h");
-  assert.equal(runs[0].env.APG_DASHBOARD_PROJECT, "p1");
-  assert.match(runs[0].env.APG_DASHBOARD_REPORTER, /^aify-env:win32:h:[0-9a-f-]{36}$/);
+  assert.equal(runs[0].request.repoRoot, realpathSync.native(proj));
+  assert.ok(!Object.keys(runs[0].env).some(name => name.startsWith('APG_DASHBOARD_')));
   assert.equal(plugin.state().provider.runs, runs.length);
   const after = runs.length;
   await new Promise((resolve) => setTimeout(resolve, 100));
