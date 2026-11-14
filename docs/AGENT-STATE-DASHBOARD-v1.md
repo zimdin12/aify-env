@@ -63,7 +63,7 @@ publication numbers and the current record fields; snapshots include empty `remo
 schema for agent definitions. Definition, registry and service-spec schemas are outside this change.
 
 [agent-state/publications.json](agent-state/publications.json) is the one fixture/example set for env, comms and the
-dashboard. Each entry is `{name, body}`; send or validate `body`, not the wrapper. All27 bodies were captured from
+dashboard. Each entry is `{name, body}`; send or validate `body`, not the wrapper. All28 bodies were captured from
 `AgentStateSender`'s serialized POST at an injected transport, using real `AgentStateHost`, `readAgentStates` and
 `AgentStatePublisher`. Definition listings, OS answers, lifecycle facts, clock and transport are fixture inputs.
 No daemon, child process, real credentials or network request is involved. Names and paths are neutral fixture data.
@@ -84,6 +84,35 @@ This structural schema does not implement transport byte/depth limits, duplicate
 agent/lifetime uniqueness or publication ordering/claim rules. Receivers retain those guards; JSON Schema acceptance
 alone must not be reported as complete ingest admission. The compatibility envelope above remains useful for the
 older dashboard reader, whose record handling is looser than the current producer schema.
+
+## Receiver projection policy
+
+This is the shared projection rule, before any service-specific delivery, usage or UI-label overlay. Its one staleness multiple is:
+
+```receiver-policy
+{"staleAfterIntervals": 3}
+```
+
+- A publisher key is `(machineId, instance)`. Accepted contact means a valid publication actually applied by the receiver,
+  not a duplicate, stale/refused body or an attempted send. For each non-retired key, contact is fresh only while its
+  nonnegative receipt age is strictly below `staleAfterIntervals *` its own valid announced `reportEveryMs`.
+  At or beyond that boundary it proves silence. Missing/invalid contact or cadence, and future/invalid clocks, prove neither.
+- Contact alone does not make data fresh: the current data must also be complete and readable, not lost or unavailable.
+  An accepted `unavailable` report renews contact without freshening old rows. Restored/saved data never becomes fresh
+  merely by loading it; its saved valid contact pair can still prove silence.
+- A key yields for an agent only on proven silence and only when a fresh, readable peer on the same machine lists that
+  same agent. Yield does not delete or retire the key, and an accepted renewed report can participate again.
+- Two live publishers that disagree about an agent remain conflict/unknown. Newer receipt time, generation or build
+  from another key never overrides a still-live conflicting report. Complete-snapshot absence or matching lifetime
+  removals withdraw only that key's row, not proof of a global offline/stopped word.
+
+[agent-state/scenarios.json](agent-state/scenarios.json) supplies nine short independent ordered scenarios with expected
+canonical env states, not a second receiver implementation. It references the sole captured corpus by zero-based index;
+`bindings` pins each index to its capture name. `atMs` is relative to `origin`, cases start with empty state, and each
+`accept` applies that indexed body unchanged. `restore` loads saved rows/cursors/contact pairs without changing their
+recorded acceptance times. A `read` names an agent and its expected state/conflict or known/absent definition fact.
+Consumers execute these expectations in their own receiver tests; env checks reference, shape and boundary consistency.
+The extra contact-versus-data case is kept separate so another unknown holder cannot mask that distinction.
 
 ## The dashboard's side
 

@@ -120,5 +120,8 @@ export async function captureAgentStatePublications() {
   const metadata = new PublicationCapture('metadata', 'managed', { build: 'invalid build', reportEveryMs: 500 });
   try { await metadata.capture('omitted-invalid-metadata'); fixtures.push(...metadata.posts); }
   finally { metadata.close(); }
+  const peer = new PublicationCapture('peer', 'managed', { generation: 8 });
+  try { peer.start(4); peer.turn('turn-start', token(4)); await peer.capture('live'); fixtures.push(...peer.posts); }
+  finally { peer.close(); }
   return fixtures;
 }

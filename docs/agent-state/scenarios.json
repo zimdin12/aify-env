@@ -1,0 +1,52 @@
+{
+  "publications": "publications.json",
+  "origin": "2026-11-01T00:00:00Z",
+  "bindings": {"0":"managed/cold","1":"managed/idle","2":"managed/definition-unknown","12":"managed/unavailable-stops","17":"managed/replacement","18":"managed/ended","19":"managed/cold-row-withdrawal","22":"residents/identity-unknown","26":"metadata/omitted-invalid-metadata","27":"peer/live"},
+  "cases": [
+    {"id":"stopped","steps":[
+      {"accept":0,"atMs":0},
+      {"read":"quiet","atMs":1,"expect":{"state":"stopped","definition":"valid"}}
+    ]},
+    {"id":"none-versus-unknown-definition","steps":[
+      {"accept":22,"atMs":0},
+      {"read":"resident","atMs":1,"expect":{"state":"unknown","definition":"none"}},
+      {"accept":2,"atMs":2},
+      {"read":"alpha","atMs":3,"expect":{"state":"unknown","definitionAbsent":true}}
+    ]},
+    {"id":"lifetime-and-row-removal","steps":[
+      {"accept":0,"atMs":0},{"accept":1,"atMs":0},{"accept":17,"atMs":1},
+      {"read":"alpha","atMs":2,"expect":{"state":"idle","definition":"valid"}},
+      {"accept":18,"atMs":3},
+      {"read":"alpha","atMs":4,"expect":{"state":"available","definition":"valid"}},
+      {"accept":19,"atMs":5},
+      {"read":"alpha","atMs":6,"expect":{"state":"unknown","rowAbsent":true}}
+    ]},
+    {"id":"two-live-publishers","steps":[
+      {"accept":0,"atMs":0},{"accept":1,"atMs":0},{"accept":27,"atMs":1},
+      {"read":"alpha","atMs":2,"expect":{"state":"unknown","conflict":true}}
+    ]},
+    {"id":"silence-just-inside","steps":[
+      {"accept":0,"atMs":0},{"accept":1,"atMs":0},{"accept":27,"atMs":179000},
+      {"read":"alpha","atMs":179999,"expect":{"state":"unknown","conflict":true}}
+    ]},
+    {"id":"silence-at-and-outside","steps":[
+      {"accept":0,"atMs":0},{"accept":1,"atMs":0},{"accept":27,"atMs":179000},
+      {"read":"alpha","atMs":180000,"expect":{"state":"working"}},
+      {"read":"alpha","atMs":180001,"expect":{"state":"working"}}
+    ]},
+    {"id":"restored-is-not-fresh","steps":[
+      {"accept":0,"atMs":0},{"accept":1,"atMs":0},{"restore":true,"atMs":1},
+      {"read":"alpha","atMs":2,"expect":{"state":"unknown"}},
+      {"accept":27,"atMs":179000},
+      {"read":"alpha","atMs":180001,"expect":{"state":"working"}}
+    ]},
+    {"id":"invalid-contact-cannot-yield","steps":[
+      {"accept":26,"atMs":0},{"accept":27,"atMs":179000},
+      {"read":"alpha","atMs":180001,"expect":{"state":"unknown"}}
+    ]},
+    {"id":"accepted-contact-is-not-data","steps":[
+      {"accept":0,"atMs":0},{"accept":1,"atMs":0},{"accept":12,"atMs":179000},
+      {"read":"alpha","atMs":180001,"expect":{"state":"unknown"}}
+    ]}
+  ]
+}
