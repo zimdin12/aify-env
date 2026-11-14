@@ -54,7 +54,7 @@ function execute(bash, script, env, args = [], input = '') {
   });
 }
 
-const HOOK_DEFAULTS = '\nAIFY_HERDR_WORKING=""\n';
+const HOOK_DEFAULTS = '\n. "@@WRAPPER_DIR@@/bin/aify-tool-hook-json.sh"';
 const HOOK_END = '\n# THE TURN-START RUNNER';
 function hookSettingsRegion(source) {
   const begin = source.indexOf(HOOK_DEFAULTS);
@@ -219,7 +219,7 @@ const options = { skip: SKIP, timeout: 240_000 };
 for (const marker of [HOOK_DEFAULTS, '\nAIFY_HOOK_SETTINGS="$(mktemp', HOOK_END]) {
   test(`hook-settings extraction refuses a missing ${marker.trim().split(' ')[0]} boundary`, { skip: SKIP }, () => {
     const source = fs.readFileSync(path.join(WRAPPER, 'wrappers/claude-aify.sh.in'), 'utf8');
-    assert.ok(hookSettingsRegion(source).startsWith('AIFY_HERDR_WORKING=""'));
+    assert.ok(hookSettingsRegion(source).startsWith(HOOK_DEFAULTS.trimStart()));
     assert.equal(source.split(marker).length, 2, 'the maintained boundary is unique');
     assert.throws(() => hookSettingsRegion(source.replace(marker, '\n# fixture removed boundary')), /maintained hook defaults\/settings boundaries required/);
   });

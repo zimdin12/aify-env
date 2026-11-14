@@ -46,8 +46,13 @@ Required: `agentId` (a non-empty string) and `lifetime` (a non-empty string, or 
 
 State words with a tone of their own: `starting`, `shell` and `idle` are ok; `available` is idle; `working`, `blocked`
 and `unknown` warn; `misconfigured` is an error; `offline` and `stopped` are off. Any other word is shown with the
-warn tone, not refused. `stateCause` is shown verbatim under the state; `startable`, `operator-stop` and `config` also
-count as "defined while quiet".
+warn tone, not refused. `stateCause` is display evidence, not a definition fact.
+
+`record.definition`, when known, is exactly `valid`, `invalid`, `unavailable` or `none`, projected from the facts used
+by state derivation. Invalid and unavailable still describe a definition; none is known absence. Missing means an
+older sender or an unknown fact, never implicit none. Present null is forbidden. Do not infer it from state/cause or
+`launch.definition`, which remains only the launch reference and can be null for quiet defined agents.
+Feature-detect this optional fact; the wire's `build` identity is not a Git SHA. Delete/lifecycle authorization remains separate.
 
 ## Machine-readable producer contract
 
@@ -58,7 +63,7 @@ publication numbers and the current record fields; snapshots include empty `remo
 schema for agent definitions. Definition, registry and service-spec schemas are outside this change.
 
 [agent-state/publications.json](agent-state/publications.json) is the one fixture/example set for env, comms and the
-dashboard. Each entry is `{name, body}`; send or validate `body`, not the wrapper. All26 bodies were captured from
+dashboard. Each entry is `{name, body}`; send or validate `body`, not the wrapper. All27 bodies were captured from
 `AgentStateSender`'s serialized POST at an injected transport, using real `AgentStateHost`, `readAgentStates` and
 `AgentStatePublisher`. Definition listings, OS answers, lifecycle facts, clock and transport are fixture inputs.
 No daemon, child process, real credentials or network request is involved. Names and paths are neutral fixture data.

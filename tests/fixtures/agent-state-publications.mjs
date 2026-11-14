@@ -31,6 +31,7 @@ class PublicationCapture {
       incarnationId: token(900), build: 'fixture-build', ...identity }, stateHost: this.host,
       definitions: { list: () => {
         if (this.fault === 'definitions') throw Error('fixture definition failure');
+        if (this.fault === 'definition-unknown') return null;
         return { storeId: 'fixture-store', definitions: this.definitions };
       } },
       observedHarnesses: () => { if (this.fault === 'launchers') throw Error('fixture launcher failure'); return new Set(['codex']); },
@@ -80,6 +81,7 @@ export async function captureAgentStatePublications() {
   try {
     await f.capture('cold');
     f.start(1); await f.capture('idle');
+    f.fault = 'definition-unknown'; await f.capture('definition-unknown'); f.fault = '';
     f.turn('turn-start'); await f.capture('working');
     f.turn('blocked'); await f.capture('blocked');
     f.turn('unblocked'); await f.capture('unblocked');

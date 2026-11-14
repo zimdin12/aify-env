@@ -108,6 +108,7 @@
         "lifetime": {"$ref": "#/definitions/nullableText"},
         "state": {"$ref": "#/definitions/state"},
         "stateCause": {"$ref": "#/definitions/text"},
+        "definition": {"type": "string", "enum": ["valid", "invalid", "unavailable", "none"]},
         "busy": {"type": "boolean"},
         "process": {"$ref": "#/definitions/process"},
         "launch": {"$ref": "#/definitions/launch"},
