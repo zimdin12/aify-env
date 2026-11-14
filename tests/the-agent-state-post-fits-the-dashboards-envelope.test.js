@@ -1,15 +1,13 @@
 // The agent-state POST fits the dashboard's envelope (docs/AGENT-STATE-DASHBOARD-v1.md, agreed 2026-10-28).
 //
 // THE DASHBOARD REFUSES A WHOLE PUSH for one top-level field it does not list. On 2026-10-20 aify-env added `build` and
-// no agent state was applied there for 17 hours. So the lists are read from the doc, not repeated here, and every
-// body is a real one from the publisher: a field added to it fails this test until the doc, and the dashboard, move.
+// no agent state was applied there for 17 hours. So the lists are read from the doc, not repeated here, and bodies
+// come from the shared sender capture. Fresh regeneration is pinned by agent-state-schema.test.js.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-
-import { AgentStatePublisher } from "../lib/agent-state-publisher.mjs";
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const DOC = fs.readFileSync(path.join(HERE, "..", "docs", "AGENT-STATE-DASHBOARD-v1.md"), "utf8");
@@ -34,50 +32,16 @@ function envelopeFromDoc(text) {
 }
 
 const ENVELOPE = envelopeFromDoc(DOC);
-const NOW_MS = 1_793_156_000_000;
-
-const record = (agentId, lifetime, over = {}) => ({
-  agentId, lifetime, state: "working", stateCause: "turn-open", busy: true, name: agentId, role: "coder",
-  process: { state: "running", verified: true, pid: 4242 },
-  launch: { cwd: "C:/work", definition: { revision: 1 } },
-  turn: { open: true, startedAtUs: (NOW_MS - 60_000) * 1000, lastEventAtUs: NOW_MS * 1000, awaitingInput: false },
-  ...over,
-});
-
-const publisher = (over = {}) => new AgentStatePublisher({
-  machineId: "machine-1", instance: "default", generation: 7, incarnationId: "inc-1",
-  build: "0.9.7-dev+a87775e", reportEveryMs: 60_000, nowMs: () => NOW_MS, ...over,
-});
-
-/**
- * One body of every kind the publisher makes: with build and cadence, without them, and given a build and a cadence the
- * dashboard would refuse, which the publisher must leave out rather than send.
- */
-function everyBody() {
-  const bodies = [];
-  for (const options of [{}, { build: null, reportEveryMs: null }, { build: "has a space", reportEveryMs: 500 }]) {
-    const p = publisher(options);
-    const first = p.snapshot({ complete: true, agents: [record("alpha", "life-1"), record("beta", null, { state: "stopped" })],
-      inputs: { screens: "27" } });
-    bodies.push(first.body);
-    // A new lifetime for alpha: alpha is changed under life-2 and life-1 is removed.
-    const next = p.changes({ complete: true, agents: [record("alpha", "life-2"), record("beta", null, { state: "stopped" })] }, first.view);
-    bodies.push(next.body);
-    // Only a state word moves: a changes body that removes nothing still carries `removed`, empty.
-    bodies.push(p.changes({ complete: true, agents: [record("alpha", "life-2", { state: "idle" }), record("beta", null, { state: "stopped" })] },
-      next.view).body);
-    bodies.push(p.snapshot({ complete: false, reason: "observation-incomplete", inputs: {} }).body);
-    bodies.push(p.retire().body);
-  }
-  return bodies;
-}
+// The same captured bodies downstream consumers read; fresh sender regeneration is checked in agent-state-schema.test.js.
+const CAPTURED = JSON.parse(fs.readFileSync(path.join(HERE, "..", "docs", "agent-state", "publications.json"), "utf8"));
+const everyBody = () => CAPTURED.map(({ body }) => structuredClone(body));
 
 const depth = (value) => (value && typeof value === "object" ? 1 + Math.max(0, ...Object.values(value).map(depth)) : 0);
 
 test("POSITIVE CONTROL: the doc's block names all four kinds, and the publisher makes each of them", () => {
   assert.deepEqual(Object.keys(ENVELOPE).sort(), ["changes", "retired", "snapshot", "unavailable"]);
   assert.deepEqual([...new Set(everyBody().map((body) => body.kind))].sort(), ["changes", "retired", "snapshot", "unavailable"]);
-  const changes = everyBody().find((body) => body.kind === "changes");
+  const changes = everyBody().find((body) => body.kind === "changes" && body.removed.length > 0);
   assert.equal(changes.removed.length, 1, "the changes body removes nothing, so the removal rule below is untested");
 });
 
@@ -110,7 +74,7 @@ test("every value is within the dashboard's bounds", () => {
     if (body.kind === "snapshot") assert.equal(body.complete, true, `${where}: complete`);
     if (body.kind === "changes") assert.ok(Array.isArray(body.removed), `${where}: removed`);
     if (body.kind === "unavailable") assert.ok(typeof body.reason === "string" && body.reason, `${where}: reason`);
-    if (body.kind === "retired") assert.ok(["shutdown", "operator-attested"].includes(body.reason), `${where}: reason`);
+    if (body.kind === "retired") assert.equal(body.reason, "shutdown", `${where}: operator-attested is not an admitted retirement`);
   }
 });
 

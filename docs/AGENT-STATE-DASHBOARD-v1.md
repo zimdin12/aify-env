@@ -2,8 +2,9 @@
 
 aify-env POSTs every agent-state publication to each destination it reports to; aify-dashboard is one. This is what
 the dashboard admits, agreed with its owner on 2026-10-28, and the test that holds aify-env to it:
-`tests/the-agent-state-post-fits-the-dashboards-envelope.test.js`, which builds real bodies with
-`lib/agent-state-publisher.mjs` and checks them against the block below.
+`tests/the-agent-state-post-fits-the-dashboards-envelope.test.js`, which checks the shared sender-captured bodies
+against the historical compatibility block below. `tests/agent-state-schema.test.js` regenerates those bodies through
+the actual host, reader, publisher and sender transport, and validates the current producer schema.
 
 ## The envelope is strict; records are not
 
@@ -34,7 +35,7 @@ retired: reason
 - `snapshot.complete`: true. aify-env sends `removed: []` on every snapshot.
 - `changes.removed`: an array, always present.
 - `unavailable.reason`: a non-empty string.
-- `retired.reason`: `shutdown` or `operator-attested`. aify-env produces only `shutdown`.
+- `retired.reason`: `shutdown` only. `operator-attested` is refused, not a supported alternative.
 - At most 64 levels of nesting.
 - A lifetime may not be both changed and removed in one push.
 
@@ -47,6 +48,37 @@ State words with a tone of their own: `starting`, `shell` and `idle` are ok; `av
 and `unknown` warn; `misconfigured` is an error; `offline` and `stopped` are off. Any other word is shown with the
 warn tone, not refused. `stateCause` is shown verbatim under the state; `startable`, `operator-stop` and `config` also
 count as "defined while quiet".
+
+## Machine-readable producer contract
+
+The current sender contract is [agent-state/schema.json](agent-state/schema.json), JSON Schema draft-07. It describes
+what env emits now, not every legacy body a receiver might still accept. In particular it requires `inputs`, positive
+publication numbers and the current record fields; snapshots include empty `removed`. Retirement admits only
+`shutdown`, with no cadence or rows. The nested `launch.definition` type describes its existing reference tag, not a
+schema for agent definitions. Definition, registry and service-spec schemas are outside this change.
+
+[agent-state/publications.json](agent-state/publications.json) is the one fixture/example set for env, comms and the
+dashboard. Each entry is `{name, body}`; send or validate `body`, not the wrapper. All26 bodies were captured from
+`AgentStateSender`'s serialized POST at an injected transport, using real `AgentStateHost`, `readAgentStates` and
+`AgentStatePublisher`. Definition listings, OS answers, lifecycle facts, clock and transport are fixture inputs.
+No daemon, child process, real credentials or network request is involved. Names and paths are neutral fixture data.
+The current host does not emit an intermediate starting row; the enum retains that real derivation state without
+inventing a captured example for it.
+
+The set covers all four publication kinds, managed and resident rows, null identities, closed/open/future-aged turns,
+lifetime replacement/removal, empty snapshots, unavailable inputs and omitted invalid metadata. Screen causes are
+nonempty strings, not a closed enum: the real host emits a sighting's rule, for example `folder-trust`.
+
+Run `npm test -- tests/agent-state-schema.test.js tests/the-agent-state-post-fits-the-dashboards-envelope.test.js` in
+the normal private test environment. `AIFY_UPDATE_AGENT_STATE_FIXTURES=1` on that run regenerates the same example
+file through the sender, rather than hand-editing bodies. Ordinary runs require identical regenerated values.
+The validator is dev-only npm `jsonschema`1.5.0, pinned in package.json and package-lock.json; runtime adds nothing.
+Its schema identifier uses a reserved `.invalid` HTTPS URI only to resolve local JSON pointers, with no remote fetch.
+
+This structural schema does not implement transport byte/depth limits, duplicate JSON-key detection, cross-row
+agent/lifetime uniqueness or publication ordering/claim rules. Receivers retain those guards; JSON Schema acceptance
+alone must not be reported as complete ingest admission. The compatibility envelope above remains useful for the
+older dashboard reader, whose record handling is looser than the current producer schema.
 
 ## The dashboard's side
 

@@ -12,6 +12,7 @@
     "bin/",
     "docs/*.md",
     "docs/0.9/",
+    "docs/agent-state/",
     "VERSION",
     "README.md"
   ],
@@ -25,6 +26,9 @@
     "@xterm/addon-unicode11": "0.8.0",
     "@xterm/addon-serialize": "0.13.0",
     "koffi": "3.3.3"
+  },
+  "devDependencies": {
+    "jsonschema": "1.5.0"
   },
   "exports": {
     "./package.json": "./package.json",
