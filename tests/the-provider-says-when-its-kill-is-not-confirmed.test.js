@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
 import { CleanupWarnings, ProviderRunner, SCRIPT } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
@@ -21,7 +21,8 @@ import { STATE } from "../lib/health.mjs";
 
 import { providerApi, providerFetch, scriptedRun } from './fixtures/provider-host.mjs';
 const KEY = "dashboard-key-sentinel-7f3a";
-const CHECKOUT = "C:/checkout";
+// The checkout is a host path, judged by this host's isAbsolute; the project folder keeps its declared win32 form.
+const CHECKOUT = resolve("/checkout");
 const UNCONFIRMED = "the client's process tree was not confirmed ended within 10 s";
 
 /**
