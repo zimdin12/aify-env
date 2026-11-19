@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
+import { HeadWatcher } from "../lib/plugins/aify-dashboard/head-watcher.mjs";
 import { CleanupWarnings, ProviderRunner, SCRIPT } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
 import { pluginProblemsCheck } from "../lib/plugin-problems-check.mjs";
@@ -110,6 +111,24 @@ test("a project id under two dashboards is two rows, each naming its dashboard, 
   assert.ok(shared.rows().some((row) => row.includes("from-a-again")) && !shared.rows().some((row) => row.includes("from-a:")));
 });
 
+// On Windows keep the real watcher path. Elsewhere supply its judged folder at the watcher/runner boundary:
+// the dashboard has no native POSIX watch namespace. The runner still checks the real folder against its grant.
+function watchedProject(t, root, projectId) {
+  const platform = process.platform;
+  const folder = join(root, "proj");
+  mkdirSync(folder);
+  const real = realpathSync.native(folder);
+  const watchRoots = async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), platform), [], platform);
+  if (platform !== "win32") {
+    t.mock.method(HeadWatcher.prototype, "watched", () => [{ projectId, path: real, real, platform, head: "" }]);
+    return { watchRoots, projects: [] };
+  }
+  for (const args of [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "p"]]) execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", ...args], { cwd: folder });
+  return { watchRoots, projects: [{ projectId, name: "n", root: { fsNamespace: "windows", path: real.split(String.fromCharCode(92)).join("/") } }] };
+}
+
+const waitFor = async (done) => { const until = Date.now() + 30_000; while (!done() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10)); };
+
 test("through the plugin, the row outlives its stop and start, and a plugin rebuilt in the same process", async (t) => {
   // The bug (review of a84ed99, F3's lifetime): each start builds a new runner, and a registry change builds a new
   // plugin, so rows a runner owned were gone long before aify-env restarted. This uses the plugin's own store, which
@@ -118,29 +137,25 @@ test("through the plugin, the row outlives its stop and start, and a plugin rebu
   const checkout = join(root, "apg");
   mkdirSync(join(checkout, "bin"), { recursive: true });
   writeFileSync(join(checkout, SCRIPT), "process.exit(0);\n");
-  const proj = join(root, "proj").replace(/\\/g, "/");
-  mkdirSync(proj);
-  // A real repository: a folder is served only once a look has judged where git reads it from.
-  for (const args of [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "p"]]) execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", ...args], { cwd: proj });
+  const { watchRoots, projects } = watchedProject(t, root, "p1");
   const endpoint = "http://127.0.0.1:9";
   const fetch = async (url) => {
     const at = String(url);
-    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", name: "n", root: { fsNamespace: "windows", path: proj } }] });
+    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects });
     if (at.endsWith("/host/h/provider/pending")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", queued: 1 }] });
     if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: "", cursorRevision: 1 });
     return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
   };
   const results = [{ code: null, signal: null, timedOut: true, stopped: false, error: UNCONFIRMED, unconfirmed: UNCONFIRMED }];
-  let runs = 0;
-  const runChild = async () => { runs += 1; return results.shift() ?? { code: 0, signal: null, timedOut: false, stopped: false, error: "", unconfirmed: "" }; };
+  const runChild = async () => results.shift() ?? { code: 0, signal: null, timedOut: false, stopped: false, error: "", unconfirmed: "" };
+  const hasAnswered = (plugin) => plugin.state().provider?.runs > 0;
   const build = () => createDashboardPlugin({
-    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
-    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: `${process.platform}:h`,
+    watchRoots,
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
   }, { fetch: providerFetch(fetch), runChild: scriptedRun(runChild), runEveryMs: 25, tickMs: 60_000 });
   const host = { credential: async () => KEY };
   const rows = (plugin) => plugin.state().problems.filter((row) => row.includes("not confirmed ended"));
-  const waitFor = async (done) => { const until = Date.now() + 30_000; while (!done() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10)); };
 
   const first = build();
   t.after(() => first.stop());
@@ -151,14 +166,16 @@ test("through the plugin, the row outlives its stop and start, and a plugin rebu
   assert.equal(rows(first).length, 1, "stopped");
   await first.start(host);
   assert.equal(rows(first).length, 1, "started again, with a new runner");
-  await waitFor(() => runs >= 3);
-  assert.equal(rows(first).length, 1, "and after runs that ended well");
+  await waitFor(() => hasAnswered(first));
+  assert.ok(hasAnswered(first), "the restarted plugin posted a successful answer");
+  assert.equal(rows(first).length, 1, "and after a run that ended well");
   await first.stop();
   const second = build();
   t.after(() => second.stop());
   assert.equal(rows(second).length, 1, "a plugin rebuilt in the same process, not yet started");
   await second.start(host);
-  await waitFor(() => runs >= 4);
+  await waitFor(() => hasAnswered(second));
+  assert.ok(hasAnswered(second), "the rebuilt plugin posted a successful answer");
   await second.stop();
   assert.equal(rows(second).length, 1, "and after it has run");
 });
@@ -179,13 +196,11 @@ test("through the plugin, an unconfirmed kill stays said while it yields to anot
   const checkout = join(root, "apg");
   mkdirSync(join(checkout, "bin"), { recursive: true });
   writeFileSync(join(checkout, SCRIPT), "process.exit(0);\n");
-  const proj = join(root, "proj").replace(/\\/g, "/");
-  mkdirSync(proj);
-  for (const args of [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "p"]]) execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", ...args], { cwd: proj });
+  const { watchRoots, projects } = watchedProject(t, root, "p2");
   const endpoint = "http://127.0.0.1:8";
   const fetch = async (url) => {
     const at = String(url);
-    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p2", name: "n", root: { fsNamespace: "windows", path: proj } }] });
+    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects });
     if (at.endsWith("/host/h/provider/pending")) return Response.json({ hostKey: "h", projects: [{ projectId: "p2", queued: 1 }] });
     if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: "", cursorRevision: 1 });
     return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
@@ -194,14 +209,13 @@ test("through the plugin, an unconfirmed kill stays said while it yields to anot
   const runChild = async () => results.shift() ?? { code: 0, signal: null, timedOut: false, stopped: false, error: "", unconfirmed: "" };
   let other = false;
   const plugin = createDashboardPlugin({
-    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
+    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: `${process.platform}:h`,
     servedElsewhere: async () => other,
-    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    watchRoots,
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
   }, { fetch: providerFetch(fetch), runChild: scriptedRun(runChild), runEveryMs: 25, tickMs: 25 });
   t.after(() => plugin.stop());
   const mine = () => plugin.state().problems.filter((row) => row.includes(endpoint) && row.includes("not confirmed ended"));
-  const waitFor = async (done) => { const until = Date.now() + 30_000; while (!done() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10)); };
   const doctor = () => pluginProblemsCheck({ answered: true, plugins: [{ name: "aify-dashboard", state: plugin.state() }] });
 
   await plugin.start({ credential: async () => KEY });
