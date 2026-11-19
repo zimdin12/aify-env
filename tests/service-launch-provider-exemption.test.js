@@ -9,7 +9,7 @@ import { createDashboardPlugin } from '../lib/plugins/aify-dashboard/index.mjs';
 import { SCRIPT } from '../lib/plugins/aify-dashboard/provider-runner.mjs';
 import { grantedRoots, watchRootsFrom } from '../lib/watch-roots.mjs';
 import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
-import { providerFetch, scriptedRun } from './fixtures/provider-host.mjs';
+import { providerFetch, providerWatchList, scriptedRun } from './fixtures/provider-host.mjs';
 new ProcessEffectTripwire();
 
 test('the provider serves its watch grant without consulting core launch grants or PluginProcesses', { timeout: 5000 }, async t => {
@@ -23,8 +23,7 @@ test('the provider serves its watch grant without consulting core launch grants 
   fs.writeFileSync(path.join(checkout, SCRIPT), 'fixture only');
   let rootAsks = 0, processStarts = 0, sawRun;
   const runs = [], ran = new Promise(resolve => { sawRun = resolve; });
-  const windows = process.platform === 'win32';
-  const platform = windows ? 'windows' : 'linux';
+  const projects = providerWatchList(t, 'p1', folder);
   const plugin = createDashboardPlugin({
     machineId: `${process.platform}:fixture`, endpoint: 'http://fixture.invalid', service: { name: 'fixture' },
     cwdRoots: () => { rootAsks++; throw Error('provider must use its watch grant, not service launch grants'); },
@@ -34,7 +33,7 @@ test('the provider serves its watch grant without consulting core launch grants 
     git: { gitDirs: async () => ({ toplevel: folder, gitDir, commonDir: gitDir }), head: async () => head },
     fetch: providerFetch(async url => {
       const at = String(url);
-      if (at.endsWith('/watch-list')) return Response.json({ hostKey: 'fixture', projects: [{ projectId: 'p1', name: 'Fixture project', root: { fsNamespace: platform, path: folder } }] });
+      if (at.endsWith('/watch-list')) return Response.json({ hostKey: 'fixture', projects });
       if (at.endsWith('/provider/pending')) return Response.json({ hostKey: 'fixture', projects: [{ projectId: 'p1', queued: 1 }] });
       if (at.endsWith('/reports/head')) return Response.json({ ok: true, ackedHead: head, cursorRevision: 1 });
       return Response.json({ error: 'fixture route absent' }, { status: 404 });

@@ -1,6 +1,18 @@
 // The old one-shot outcome fixtures now speak the real worker's framed transport, without spawning or killing.
 import { PassThrough } from 'node:stream';
 import { createInterface } from 'node:readline';
+import { realpathSync } from 'node:fs';
+import { HeadWatcher } from '../../lib/plugins/aify-dashboard/head-watcher.mjs';
+
+// The watcher serves only Windows locations. POSIX provider tests start at its judged-folder output;
+// the real runner rechecks the native grant. On Windows the real watcher still judges the location.
+export function providerWatchList(t, projectId, folder) {
+  const platform = process.platform;
+  if (platform === 'win32') return [{ projectId, name: 'Fixture project', root: { fsNamespace: 'windows', path: folder } }];
+  const real = realpathSync.native(folder);
+  t.mock.method(HeadWatcher.prototype, 'watched', () => [{ projectId, path: folder, real, platform, head: '' }]);
+  return [];
+}
 export const request = (projectId, n = 1) => ({ requestId: `request-${n}`, projectId, call: 'stamp', args: {} });
 export const providerApi = pending => {
   let n = 0;

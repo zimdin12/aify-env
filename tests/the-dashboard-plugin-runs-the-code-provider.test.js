@@ -7,17 +7,18 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
 import { childEnv } from "../lib/plugins/aify-dashboard/provider-child.mjs";
 import { outcomeOf, ProviderRunner, SCRIPT } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
 
-import { providerApi, providerFetch, scriptedRun } from './fixtures/provider-host.mjs';
+import { providerApi, providerFetch, providerWatchList, scriptedRun } from './fixtures/provider-host.mjs';
 const KEY = "dashboard-key-sentinel-7f3a";
-const CHECKOUT = "C:/checkout";
-const EXISTING = new Set([CHECKOUT, join(CHECKOUT, SCRIPT), "C:/empty"]);
+// Only the checkout uses native path validation. The scripted Windows grant still tests Windows paths.
+const CHECKOUT = resolve('/checkout'), EMPTY = resolve('/empty'), MISSING = resolve('/missing');
+const EXISTING = new Set([CHECKOUT, join(CHECKOUT, SCRIPT), EMPTY]);
 
 /**
  * Wait until `done()` holds or `ms` have passed, whichever is first. BY TIME, not by a count of short sleeps: a
@@ -88,14 +89,15 @@ test("a checkout that is not granted exactly starts nothing, and says why", asyn
     [{}, /no plugins\["aify-dashboard"\]\.providerCheckout is set/],
     [{ providerCheckout: "relative/checkout" }, /must be an absolute folder/],
     [{ providerCheckout: 5 }, /must be an absolute folder, not 5/],
-    [{ providerCheckout: "C:/missing" }, /names C:\/missing, which does not exist/],
-    [{ providerCheckout: "C:/empty" }, /C:\/empty has no bin\/apg\.js/],
+    [{ providerCheckout: MISSING }, `names ${MISSING}, which does not exist`],
+    [{ providerCheckout: EMPTY }, `${EMPTY} has no bin/apg.js`],
   ];
   for (const [config, why] of rows) {
     const s = setUp({ config });
     await s.runner.pass();
     assert.equal(s.runs.length, 0, JSON.stringify(config));
-    assert.match(s.problems(), why, JSON.stringify(config));
+    if (typeof why === 'string') assert.ok(s.problems().includes(why), s.problems());
+    else assert.match(s.problems(), why, JSON.stringify(config));
     assert.match(s.problems(), /1 project\(s\) have code-provider calls queued, and none is served/);
   }
 });
@@ -412,13 +414,15 @@ test("through the plugin: while another aify-env serves the host it runs no clie
   writeFileSync(join(checkout, SCRIPT), "process.exit(0);\n");
   const proj = join(root, "proj").replace(/\\/g, "/");
   mkdirSync(proj);
-  const { execFileSync } = await import("node:child_process");
-  execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "init", "-q"], { cwd: proj });
-  execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "p"], { cwd: proj });
+  const projects = providerWatchList(t, 'p1', proj);
+  if (projects.length > 0) {
+    const { execFileSync } = await import("node:child_process");
+    for (const args of [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "p"]]) execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", ...args], { cwd: proj });
+  }
   const endpoint = "http://127.0.0.1:9";
   const fetch = async (url) => {
     const at = String(url);
-    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", name: "n", root: { fsNamespace: "windows", path: proj } }] });
+    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects });
     if (at.endsWith("/host/h/provider/pending")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", queued: 1 }] });
     if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: "", cursorRevision: 1 });
     return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
@@ -427,9 +431,9 @@ test("through the plugin: while another aify-env serves the host it runs no clie
   const runChild = async (args) => { runs.push(args); return { code: 0, signal: null, timedOut: false, stopped: false, error: "" }; };
   let other = false;
   const plugin = createDashboardPlugin({
-    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
+    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: `${process.platform}:h`,
     servedElsewhere: async () => other,
-    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] })), []),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
   }, { fetch: providerFetch(fetch), runChild: scriptedRun(runChild), runEveryMs: 25, tickMs: 25 });
   t.after(() => plugin.stop());
@@ -461,13 +465,15 @@ test("through the plugin: it serves the watched folder once a minute, and stop e
   const proj = join(root, "proj").replace(/\\/g, "/");
   mkdirSync(proj);
   // A real repository: a folder is served only once a look has judged where git reads it from.
-  const { execFileSync } = await import("node:child_process");
-  execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "init", "-q"], { cwd: proj });
-  execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "p"], { cwd: proj });
+  const projects = providerWatchList(t, 'p1', proj);
+  if (projects.length > 0) {
+    const { execFileSync } = await import("node:child_process");
+    for (const args of [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "p"]]) execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", ...args], { cwd: proj });
+  }
   const endpoint = "http://127.0.0.1:9";
   const fetch = async (url) => {
     const at = String(url);
-    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", name: "n", root: { fsNamespace: "windows", path: proj } }] });
+    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects });
     if (at.endsWith("/host/h/provider/pending")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", queued: 1 }] });
     if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: "", cursorRevision: 1 });
     return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
@@ -475,8 +481,8 @@ test("through the plugin: it serves the watched folder once a minute, and stop e
   const runs = [];
   const runChild = async (args) => { runs.push(args); return { code: 0, signal: null, timedOut: false, stopped: false, error: "" }; };
   const plugin = createDashboardPlugin({
-    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
-    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: `${process.platform}:h`,
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] })), []),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
   }, { fetch: providerFetch(fetch), runChild: scriptedRun(runChild), runEveryMs: 25, tickMs: 60_000 });
   t.after(() => plugin.stop());
