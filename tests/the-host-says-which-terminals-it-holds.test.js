@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Runner } from "../lib/runner.mjs";
+import { PosixProcessGroup } from "../lib/posix-process-group.mjs";
 import { PluginHost, PluginProcesses } from "../lib/service-plugins.mjs";
 import { CommsApi, mintBridgeIdentity } from "../lib/plugins/aify-comms/api.mjs";
 import { HEARTBEAT_INTERVAL_MS, createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
@@ -35,15 +36,42 @@ const idle = (script = "setTimeout(() => {}, 30000)") => ({
 
 // ── the runner's reaper ─────────────────────────────────────────────────────────────────────────
 
-test("a process the reaper RELEASES tells its exit listeners, exactly once", async () => {
-  // The reaper releases a process whose close event was never observed. `#release` deleted the
-  // stream and fired nothing, so the plugin's exit path -- forget the terminal, send the exit marker
-  // -- never ran, and the service went on believing a dead worker was attached.
+// The reaper releases only what it has measured gone, and on POSIX the runner refuses while its owned group still
+// answers. This stands in for that measurement, so a release can happen before the child's close is observed.
+function reapable() {
+  const gone = new Set();
+  const signal = (pid, name) => {
+    if (name === 0 && gone.has(-pid)) throw Object.assign(new Error("measured gone"), { code: "ESRCH" });
+    return process.kill(pid, name);
+  };
+  const runner = new Runner({ openTerminal: null, makeProcessGroup: (parts) => new PosixProcessGroup({ ...parts, signal }) });
+  return { runner, measuredGone: (handle) => gone.add(handle.pid) };
+}
+
+test("a release is refused while the runner's owned group still answers, and tells no one", { skip: process.platform === "win32" && "Windows runners own no POSIX process group" }, async () => {
   const runner = new Runner({ openTerminal: null });
   const handle = await runner.start(idle());
   const exits = [];
   runner.subscribe(handle.id, () => {}, (code, signal) => exits.push({ code, signal }));
+  try {
+    assert.equal(runner.release(handle.id), false);
+    assert.deepEqual(exits, []);
+    assert.deepEqual(runner.list().map((p) => p.id), [handle.id], "a refused release still let the process go");
+  } finally {
+    await runner.stop(handle.id);
+  }
+});
 
+test("a process the reaper RELEASES tells its exit listeners, exactly once", async () => {
+  // The reaper releases a process whose close event was never observed. `#release` deleted the
+  // stream and fired nothing, so the plugin's exit path -- forget the terminal, send the exit marker
+  // -- never ran, and the service went on believing a dead worker was attached.
+  const { runner, measuredGone } = reapable();
+  const handle = await runner.start(idle());
+  const exits = [];
+  runner.subscribe(handle.id, () => {}, (code, signal) => exits.push({ code, signal }));
+
+  measuredGone(handle);
   runner.release(handle.id);
   assert.deepEqual(exits, [{ code: null, signal: "" }],
     "a released process never reached its exit listeners, so no exit marker could be sent");
@@ -69,7 +97,7 @@ test("a process that EXITED on its own is not reported again by a later release"
 // ── the one predicate ───────────────────────────────────────────────────────────────────────────
 
 test("a terminal is HELD only while the runner still runs its process", async () => {
-  const runner = new Runner({ openTerminal: null });
+  const { runner, measuredGone } = reapable();
   const processes = new PluginProcesses(runner);
   const live = await runner.start(idle());
   const gone = await runner.start(idle());
@@ -77,6 +105,7 @@ test("a terminal is HELD only while the runner still runs its process", async ()
   book.remember("term-live", live.id, "a1");
   book.remember("term-gone", gone.id, "a2");
   // The book still remembers term-gone; the runner does not run it. Only the runner can say.
+  measuredGone(gone);
   runner.release(gone.id);
   book.remember("term-gone", gone.id, "a2");
   try {
