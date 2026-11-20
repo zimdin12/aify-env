@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { ProcessEffectTripwire } from './fixtures/no-process-effects.mjs';
-import { fixture, prerequisite, delay, until } from './_activity-fixture.mjs';
+import { fixture, prerequisite, until } from './_activity-fixture.mjs';
 new ProcessEffectTripwire();
 
 test('activity test worker uses the selected native runtime', () => {
@@ -22,8 +22,15 @@ test('activity off preserves the legacy lifecycle without discovery or spool wri
   const f = await fixture(t);
   f.config.activity = { enabled: false, wrapperCheckout: 'not-an-execution-grant' }; f.save();
   const before = f.open().read();
-  const p = f.plugin(); await p.start(f.host); await delay(40); await p.detach();
-  assert.deepEqual(f.requests.map(r => r.path), ['/api/v1/host/fixture/watch-list']);
+  // The provider wait starts from the first watched tick and does not read the activity switch (ef0679e), so it is
+  // part of the legacy lifecycle. Wait for that request rather than a fixed delay, then detach: detach awaits the tick,
+  // including its activity pass, so nothing the switch should stop can arrive after the assertion.
+  const legacy = ['/api/v1/host/fixture/watch-list', '/api/v1/host/fixture/provider/pending?waitSeconds=25'];
+  const p = f.plugin(); await p.start(f.host);
+  await until(() => legacy.every(path => f.requests.some(r => r.path === path)), 'the legacy watch and provider wait ran');
+  await p.detach();
+  const activity = f.requests.filter(({ path }) => path === '/.well-known/aify-service' || path === '/api/v1/file-activity');
+  assert.deepEqual(activity, [], 'no capability discovery and no activity post while off');
   assert.deepEqual(f.open().read().token, before.token, 'off does not advance the spool');
 });
 
