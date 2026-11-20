@@ -25,7 +25,7 @@ REPO = "herdrdev/herdr"
 TAG = "v0.9.0"
 UPSTREAM_DIR = "distribution/agent-detection"
 RUNTIMES = ("claude", "codex", "hermes")
-OUT = pathlib.Path(__file__).resolve().parent.parent / "lib" / "plugins" / "aify-comms" / "agent-detection"
+OUT = pathlib.Path(__file__).resolve().parent.parent / "lib" / "harness-screens" / "agent-detection"
 
 
 def fetch(url: str) -> bytes:

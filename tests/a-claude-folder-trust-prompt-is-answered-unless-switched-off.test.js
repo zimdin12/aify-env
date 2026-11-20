@@ -19,8 +19,9 @@ import { Runner } from "../lib/runner.mjs";
 import { PluginHost, PluginProcesses } from "../lib/service-plugins.mjs";
 import { loadCheckpointFactory } from "../lib/screen-checkpoint.mjs";
 import { createCommsPlugin } from "../lib/plugins/aify-comms/index.mjs";
-import { observeScreen } from "../lib/plugins/aify-comms/screen-observer.mjs";
-import { screenText } from "../lib/plugins/aify-comms/screen-rules.mjs";
+import { observeScreen } from "../lib/harness-screens/screen-observer.mjs";
+import { screenText } from "../lib/harness-screens/screen-rules.mjs";
+import { folderTrustStep } from '../lib/harness-screens/folder-trust.mjs';
 import { createHandleBook, runOneControl } from "../lib/plugins/aify-comms/terminal-controls.mjs";
 import { ANSWERS, DOWN, ENTER, ScreenAnswers, autoConfirmSettings, folderTrustAnswer }
   from "../lib/plugins/aify-comms/screen-answers.mjs";
@@ -52,6 +53,7 @@ test("POSITIVE CONTROL: the captured bytes render as the dialog, cursor on No, t
 
 test("cursor on No, exit: one DOWN, never Enter -- and on Yes: one Enter", async () => {
   const screen = await capturedScreen();
+  assert.equal(folderTrustStep(screen), 'leave-no', 'the core recognizes the captured prompt without sending input');
   assert.deepEqual(folderTrustAnswer(screen), { step: "leave-no", keys: DOWN });
   assert.deepEqual(folderTrustAnswer(cursorOnYes(screen)), { step: "accept-yes", keys: ENTER });
 });
@@ -144,7 +146,7 @@ test("THE REAL PATH: a carried claude terminal at the dialog gets DOWN, then Ent
   const result = await runOneControl({
     control: { id: "ctl-1", terminalId: "term-1", action: "start", cols: CAPTURE.cols, rows: CAPTURE.rows },
     api, processes, handles: createHandleBook(), cwdRoots: ["/w"], windows: false, withinRoots: () => true,
-    buildSpec: () => ({ spec: SPEC }), resolveCandidates: () => ["/bin/worker"], baseEnv: {},
+    buildSpec: () => ({ spec: { ...SPEC, launcher: "/w/claude-aify" } }), resolveCandidates: () => ["/bin/worker"], baseEnv: {},
     sender: { send() {}, async drained() { return true; }, forget() {} }, answers,
   });
   assert.equal(result.outcome, "started");
@@ -169,7 +171,7 @@ test("an answer that throws is contained: the screen's state is still reported",
   const reported = [];
   const observer = observeScreen({
     runtime: "claude", read: async () => ({ rows: screen.split("\n"), title: "", progress: "" }),
-    report: async (activity) => { reported.push(activity.state); },
+    onChanged: (activity) => { reported.push(activity.state); },
     onScreen: () => { throw new Error("an answer failed"); }, schedule: (fn) => { setImmediate(fn); return {}; }, cancel: () => {},
   });
   observer.noteOutput("x");
@@ -180,11 +182,10 @@ test("an answer that throws is contained: the screen's state is still reported",
 
 test("THE PLUGIN WIRES IT: the comms plugin answers on a terminal it started, from its own config", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aify-env-trust-"));
-  fs.writeFileSync(path.join(dir, "worker-aify"), SPEC.fileText);
+  fs.writeFileSync(path.join(dir, "claude-aify"), SPEC.fileText);
   const writes = [];
   const reports = [];
   const listeners = [];
-  const screen = await capturedScreen();
   let handedOut = false;
   const api = {
     identity: { bridgeId: "b1" },
@@ -194,16 +195,14 @@ test("THE PLUGIN WIRES IT: the comms plugin answers on a terminal it started, fr
       handedOut = true;
       return { controls: [{ id: "ctl-1", terminalId: "term-1", action: "start" }] };
     },
-    async launch() { return { launch: { argv: [path.join(dir, "worker-aify")], cwd: dir, agentId: "a1", runtime: "claude" } }; },
+    async launch() { return { launch: { argv: [path.join(dir, "claude-aify")], cwd: dir, agentId: "a1", runtime: "claude" } }; },
     async reportControl(id, patch) { reports.push({ id, ...patch }); }, async terminalOutput() { return { ok: true }; },
   };
-  const runner = {
-    async start() { return { id: "proc-1", pid: 9 }; },
-    subscribe(_id, onOutput) { listeners.push(onOutput); return () => {}; },
-    screenText: async () => ({ rows: screen.split("\n"), title: "", progress: "" }),
-    write(id, data) { writes.push([id, data]); return { ok: true }; },
-    canStream() { return true; }, resize() {}, async stop() {}, relabel() {}, list() { return []; },
-  };
+  const terminal = { pid: 424242, cols: CAPTURE.cols, rows: CAPTURE.rows,
+    onData(fn) { listeners.push(fn); }, onExit() {}, write(data) { writes.push(data); } };
+  const runner = new Runner({ openTerminal: () => terminal,
+    managedHost: () => ({ instance: 'default', url: 'http://127.0.0.1:1',
+      host: { startManaged() {}, endManaged: () => ({ problem: '' }) } }) });
   const plugin = createCommsPlugin({
     endpoint: "http://127.0.0.1:1", advertisement: async () => ({ hostname: "h", kind: "linux" }), cwdRoots: async () => [dir],
     windows: false, platform: "linux", api, readFile: () => SPEC.fileText, config: ON,
@@ -214,13 +213,10 @@ test("THE PLUGIN WIRES IT: the comms plugin answers on a terminal it started, fr
       credential: async () => "" }));
     for (const until = Date.now() + 3000; Date.now() < until && !listeners.length;) await new Promise((r) => setTimeout(r, 5));
     assert.equal(listeners.length, 1, `the plugin never carried the terminal it started: ${JSON.stringify(reports)}`);
-    listeners[0]("output");
+    listeners[0](CAPTURE.raw);
     for (const until = Date.now() + 3000; Date.now() < until && !writes.length;) await new Promise((r) => setTimeout(r, 5));
-    assert.deepEqual(writes, [["proc-1", DOWN]]);
-    // AND THE STALL IS NAMED. The vendored rule calls this screen `live_blocked_form`; the host's state reads the
-    // plugin's offer, which names the dialog it knows, so the word reads blocked/folder-trust.
-    for (const until = Date.now() + 3000; Date.now() < until && !plugin.capabilities.screens().length;) await new Promise((r) => setTimeout(r, 5));
-    assert.deepEqual(plugin.capabilities.screens(), [{ handle: "proc-1", state: "blocked", rule: "folder-trust" }]);
+    assert.deepEqual(writes, [DOWN]);
+    assert.deepEqual(runner.screenSightings().map(({ state, rule }) => [state, rule]), [['blocked', 'folder-trust']]);
   } finally {
     await plugin.stop();
     fs.rmSync(dir, { recursive: true, force: true });

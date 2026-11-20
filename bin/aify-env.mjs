@@ -246,6 +246,7 @@ const runner = new Runner({ ownedFile: OWNED_FILE, ownedRecord: ownership.record
   reportManaged: (problem) => logLine(problem),
   // A process came or went: its agent's word is published now, not on the next sweep (the operator, 2026-10-25).
   onProcessChange: () => evaluateAgentState(),
+  onScreenChange: () => evaluateAgentState(),
 });
 
 // SERVICE PLUGINS. This host runs processes for whoever asked; a plugin is how a SERVICE teaches it
@@ -398,7 +399,7 @@ const server = createServer(createDaemonHttp({
         codeOnDisk: PACKAGE_BUILD.onDisk(),
         cwdRoots: LAUNCH_ROOTS.current(),
         launchRootsFile: LAUNCH_ROOTS.read(),
-        screens: () => servicePlugins.capabilities("screens"),
+        screens: () => runner.screenSightings(),
         unknown,
         terminals: terminalSupport(),
         // Armed, heard by whom, refused by whom and why: the advertiser's own answer (lib/host-advertiser.mjs).

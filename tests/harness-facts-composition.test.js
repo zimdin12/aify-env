@@ -10,7 +10,7 @@ import { HarnessManifests } from '../lib/harness-manifests.mjs';
 import { harnessLauncherInventory } from '../lib/harness-launchers.mjs';
 import { harnessChecks } from '../lib/harness-checks.mjs';
 import { collectHostChecks } from '../lib/host-checks.mjs';
-import { harnessManifestStatus } from '../lib/plugins/index.mjs';
+import { manifestStatusFor as harnessManifestStatus } from '../lib/harness-screens/screen-rules.mjs';
 import { passed } from '../lib/health.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const MARKED = '#!/bin/bash\nHARNESS_WRAPPER_VERSION="1.0"\n';
@@ -38,8 +38,8 @@ for (const resident of [false, true]) {
     const requests = await copy.import('agent-definition-requests.mjs');
     const chain = await copy.import('install-chain.mjs');
     const lifetimes = await copy.import('resident-lifetimes.mjs');
-    const screens = await copy.import('plugins/aify-comms/screen-rules.mjs');
-    const { observeScreen } = await copy.import('plugins/aify-comms/screen-observer.mjs');
+    const screens = await copy.import('harness-screens/screen-rules.mjs');
+    const { observeScreen } = await copy.import('harness-screens/screen-observer.mjs');
     const body = { version: 1, agent: { id: 'fixture', name: 'Fixture', role: 'worker', harness: 'fixture-extra', mode: 'managed',
       workspace: '/fixture/work', model: '', effort: '', instructions: '', env: {}, herdrSpace: false } };
     assert.deepEqual(schema.definitionProblems(body, 'fixture'), []);
@@ -63,8 +63,8 @@ for (const resident of [false, true]) {
     const copiedLaunchers = await copy.import('harness-launchers.mjs');
     const inventory = copiedLaunchers.harnessLauncherInventory([{ file: '/fixture/fixture-extra-aify', text: MARKED }], { manifestStatus: screens.manifestStatusFor });
     assert.deepEqual(copiedChecks.harnessChecks(inventory).map(row => [row.id, row.state]), [['harness-manifests', 'passed']], 'screen expectations derive from the copied row, not the definition or resident flags');
-    assert.equal(observeScreen({ runtime: 'fixture-runtime', read: async () => ({ rows: ['idle'] }), report: async () => {} }), null);
-    const known = observeScreen({ runtime: 'claude', read: async () => ({ rows: [] }), report: async () => {} });
+    assert.equal(observeScreen({ runtime: 'fixture-runtime', read: async () => ({ rows: ['idle'] }), onChanged: () => {} }), null);
+    const known = observeScreen({ runtime: 'claude', read: async () => ({ rows: [] }), onChanged: () => {} });
     assert.ok(known, 'control: the actual vendored known manifest still starts an observer'); known.dispose();
     assert.equal(HARNESS_FACTS['fixture-extra'], undefined, 'no test row entered the production export');
   });

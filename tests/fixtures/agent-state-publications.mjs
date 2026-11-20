@@ -39,7 +39,7 @@ class PublicationCapture {
         if (this.fault === 'stops') throw Error('fixture stop failure');
         return new Map([...this.stopped].map(id => [`fixture-store:1:${id}`, true]));
       } }, cwdRoots: () => this.roots,
-      screens: () => [() => { if (this.fault === 'screens') throw Error('fixture screen failure'); return this.screen ? [this.screen] : []; }],
+      screens: () => { if (this.fault === 'screens') throw Error('fixture screen failure'); return this.screen ? [this.screen] : []; },
       readRegistry: () => JSON.stringify({ services: { fixture: { endpoint: 'http://fixture.invalid', agentState: { path: '/state' } } } }),
       credential: () => ({ state: CREDENTIAL_ABSENT }), nowMs: () => this.now,
       setTimeoutImpl: () => ({ unref() {} }), clearTimeoutImpl: () => {},
@@ -86,9 +86,9 @@ export async function captureAgentStatePublications() {
     f.turn('blocked'); await f.capture('blocked');
     f.turn('unblocked'); await f.capture('unblocked');
     f.turn('turn-end'); await f.capture('closed-turn');
-    f.screen = { handle: 'fixture-handle-1', state: 'shell', rule: 'fixture-shell' }; await f.capture('shell');
-    f.screen = { handle: 'fixture-handle-1', state: 'working', rule: 'fixture-working' }; await f.capture('screen-working');
-    f.screen = { handle: 'fixture-handle-1', state: 'blocked', rule: 'folder-trust' }; await f.capture('screen-rule');
+    f.screen = { handle: 'fixture-handle-1', lifetime: token(1), state: 'shell', rule: 'fixture-shell' }; await f.capture('shell');
+    f.screen = { handle: 'fixture-handle-1', lifetime: token(1), state: 'working', rule: 'fixture-working' }; await f.capture('screen-working');
+    f.screen = { handle: 'fixture-handle-1', lifetime: token(1), state: 'blocked', rule: 'folder-trust' }; await f.capture('screen-rule');
     f.fault = 'screens'; await f.capture('screen-unavailable'); f.fault = '';
     f.screen = null; f.roots = ['C:/fixture/other']; await f.capture('outside-roots'); f.roots = [];
     for (const fault of ['stops', 'definitions', 'launchers']) { f.fault = fault; await f.capture(`unavailable-${fault}`); }

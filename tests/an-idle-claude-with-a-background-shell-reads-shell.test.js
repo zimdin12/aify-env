@@ -7,8 +7,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { BACKGROUND_SHELL_RULE, withBackgroundShell } from "../lib/plugins/aify-comms/background-shell.mjs";
-import { evaluateScreen, manifestForRuntime, screenText } from "../lib/plugins/aify-comms/screen-rules.mjs";
+import { BACKGROUND_SHELL_RULE, withBackgroundShell } from "../lib/harness-screens/background-shell.mjs";
+import { evaluateScreen, manifestForRuntime, screenText } from "../lib/harness-screens/screen-rules.mjs";
 
 const claude = manifestForRuntime("claude-code");
 const PROMPT_BOX = "─".repeat(60);

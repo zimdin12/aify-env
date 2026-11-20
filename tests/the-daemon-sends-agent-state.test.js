@@ -41,7 +41,7 @@ async function boot(t, { context = null, viewOnly = false, failBoot = false, fai
     `${setup}; return { evaluateAgentState, stopAgentStateSending };`)(fixture.session, viewOnly, () => {}, id => cancelled.push(id));
   Object.assign(fixture.options, {
     home, instanceContext: context, definitions, pid: process.pid,
-    runner: { instance: () => 'fixture-runner' }, plugins: { capabilities: () => [], capability: () => null, stopAll: async () => {} },
+    runner: { instance: () => 'fixture-runner', screenSightings: () => [] }, plugins: { capabilities: () => [], capability: () => null, stopAll: async () => {} },
     identity: () => ({ hostname: 'fixture', machineId: 'win32:fixture' }), installed: () => new Set(['claude']),
     roots: () => [], env: {}, log: () => {}, evaluate: callbacks.evaluateAgentState, viewOnly: () => viewOnly,
     recover: async () => events.push('reap'), advertising: false,

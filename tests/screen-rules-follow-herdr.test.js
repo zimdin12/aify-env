@@ -2,7 +2,7 @@
 //
 // PORTED FROM HERDR. Every screen and title below comes from Herdr's own manifest tests
 // (herdrdev/herdr, src/detect/manifest/tests.rs, tag v0.9.0, commit b99002ac), Apache-2.0 -- see
-// lib/plugins/aify-comms/agent-detection/NOTICE. They are synthetic or upstream's own captures;
+// lib/harness-screens/agent-detection/NOTICE. They are synthetic or upstream's own captures;
 // none is a screen from this project's hosts. Each test keeps its upstream name, so a divergence can
 // be looked up on both sides. The hermes tests at the end are this project's: upstream has none.
 //
@@ -19,7 +19,7 @@ import {
   manifestForRuntime,
   regionText,
   screenText,
-} from "../lib/plugins/aify-comms/screen-rules.mjs";
+} from "../lib/harness-screens/screen-rules.mjs";
 
 const claude = manifestForRuntime("claude-code");
 const codex = manifestForRuntime("codex");

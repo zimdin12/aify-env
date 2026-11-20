@@ -158,11 +158,11 @@ function screenObservation(sightings) {
     return { agents: [{ agentId: "lead", state }], complete: true, problems: [] };
   } };
   return { stateHost, definitions: { list: async () => ({ storeId: "s", definitions: [], unreadable: [] }) },
-    lifecycle: { stopFacts: async () => new Map() }, observedHarnesses: async () => new Set(["claude"]), screens: () => [() => sightings.now] };
+    lifecycle: { stopFacts: async () => new Map() }, observedHarnesses: async () => new Set(["claude"]), screens: () => sightings.now };
 }
 
 test("NO PATH BACK IN: a report never feeds the word, so a screen that clears takes the word with it", async () => {
-  const sightings = { now: [{ handle: "h1", state: "blocked", rule: "folder-trust" }] };
+  const sightings = { now: [{ handle: "h1", lifetime: "fixture-lifetime", state: "blocked", rule: "folder-trust" }] };
   const sent = [];
   const reporter = new HerdrPaneReporter({ observation: screenObservation(sightings), call: () => ({}), callAsync: async (argv) => { sent.push(argv); return {}; } });
   reporter.claim("w2:p1", { agentId: "lead", agent: "claude-aify" });
@@ -199,7 +199,7 @@ test("THROUGH THE OPENER: a started agent's pane is told its word, and nothing m
   assert.deepEqual(sent.map((argv) => [argv[2], stateOf(argv), messageOf(argv)]), [["w2:p1", "idle", "idle"]], "the agent's pane was not told its word");
   watched.get("proc-1")(0, null);
   // A NEW WORD, so a pane still held would be told it: an unchanged one is not said again anyway.
-  sightings.now = [{ handle: "h1", state: "blocked", rule: "folder-trust" }];
+  sightings.now = [{ handle: "h1", lifetime: "fixture-lifetime", state: "blocked", rule: "folder-trust" }];
   await openPane.report();
   assert.equal(sent.length, 1, "a pane whose worker had gone, queued for closing, was reported on");
 });

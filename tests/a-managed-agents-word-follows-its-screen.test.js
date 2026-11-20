@@ -41,29 +41,49 @@ const word = (host, screens) => {
 test("a plain idle screen reads idle, and no sighting reads as before", (t) => {
   const { host } = managedHost(t);
   assert.equal(word(host, {}), "idle/at-prompt", "the control: no screen at all");
-  assert.equal(word(host, { p1: { handle: "p1", state: "idle", rule: "live_prompt_box" } }), "idle/at-prompt");
+  assert.equal(word(host, { p1: { handle: "p1", lifetime: lifetime(1), state: "idle", rule: "live_prompt_box" } }), "idle/at-prompt");
 });
 
 test("a prompt with background work reads shell; a working screen, working; a dialog, blocked by its name", (t) => {
   const { host } = managedHost(t);
-  assert.equal(word(host, { p1: { handle: "p1", state: "shell", rule: "aify_background_shell" } }), "shell/at-prompt");
-  assert.equal(word(host, { p1: { handle: "p1", state: "working", rule: "osc_title_working" } }), "working/screen");
-  assert.equal(word(host, { p1: { handle: "p1", state: "blocked", rule: "folder-trust" } }), "blocked/folder-trust");
-  assert.equal(word(host, { p1: { handle: "p1", state: "blocked", rule: "bash_permission_prompt" } }), "blocked/bash_permission_prompt");
+  assert.equal(word(host, { p1: { handle: "p1", lifetime: lifetime(1), state: "shell", rule: "aify_background_shell" } }), "shell/at-prompt");
+  assert.equal(word(host, { p1: { handle: "p1", lifetime: lifetime(1), state: "working", rule: "osc_title_working" } }), "working/screen");
+  assert.equal(word(host, { p1: { handle: "p1", lifetime: lifetime(1), state: "blocked", rule: "folder-trust" } }), "blocked/folder-trust");
+  assert.equal(word(host, { p1: { handle: "p1", lifetime: lifetime(1), state: "blocked", rule: "bash_permission_prompt" } }), "blocked/bash_permission_prompt");
 });
 
 test("a screen counts only for the handle of the agent's current lifetime", (t) => {
   const { host } = managedHost(t);
-  assert.equal(word(host, { p0: { handle: "p0", state: "blocked", rule: "folder-trust" } }), "idle/at-prompt",
+  assert.equal(word(host, { p0: { handle: "p0", lifetime: lifetime(1), state: "blocked", rule: "folder-trust" } }), "idle/at-prompt",
     "another process's screen decided this agent's word");
   host.endManaged(lifetime(1));
   host.startManaged({ agentId: "worker", lifetime: lifetime(2), instance: "default", pid: 98, handle: "p2" });
-  assert.equal(word(host, { p1: { handle: "p1", state: "shell", rule: "aify_background_shell" } }), "idle/at-prompt",
+  assert.equal(word(host, { p1: { handle: "p1", lifetime: lifetime(1), state: "shell", rule: "aify_background_shell" } }), "idle/at-prompt",
     "the previous lifetime's terminal decided the new one's word");
-  assert.equal(word(host, { p2: { handle: "p2", state: "shell", rule: "aify_background_shell" } }), "shell/at-prompt");
+  assert.equal(word(host, { p2: { handle: "p2", lifetime: lifetime(1), state: "blocked", rule: "folder-trust" } }),
+    "idle/at-prompt", 'matching handle alone cannot supply a sighting from a different lifetime');
+  assert.equal(word(host, { p2: { handle: "p2", lifetime: lifetime(2), state: "shell", rule: "aify_background_shell" } }), "shell/at-prompt");
 });
 
-test("THROUGH /agents/state: every plugin's offer is read, and one that throws is said and costs only its own", async (t) => {
+test('a verified resident never inherits a Runner screen', t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'resident-screen-word-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const record = { agentId: 'worker', lifetime: lifetime(3), instance: 'residents', harness: 'codex', pid: 4103,
+    launcher: 'C:/fixture/codex-aify', writtenAtUs: NOW - 1000 };
+  const host = new AgentStateHost({ aifyHome: home, instance: 'residents', population: 'all', nowUs: () => NOW,
+    probe: pids => new Map(pids.map(pid => [pid, { alive: true, createdAtUs: NOW - 2000, commandLine: 'bash C:/fixture/codex-aify' }])) });
+  host.boot();
+  fs.mkdirSync(path.join(home, 'residents'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'residents', `worker.${record.lifetime}.json`), JSON.stringify(record));
+  const given = new Map([['worker', { definition: 'valid', mode: 'resident', stoppedByOperator: false }]]);
+  const read = screens => host.readAll(given, {}, screens).agents.find(row => row.agentId === 'worker');
+  const before = read();
+  assert.deepEqual([before.lifetime, before.process.verified], [record.lifetime, 'yes']);
+  assert.deepEqual(read(new Map([['old-managed-handle', { handle: 'old-managed-handle', lifetime: record.lifetime,
+    state: 'blocked', rule: 'folder-trust' }]])), before);
+});
+
+test("THROUGH /agents/state: core sightings are read; a failed screen read does not hide the population", async (t) => {
   const { home, host } = managedHost(t);
   const definitions = new DefinitionStore({ dir: path.join(home, "defs") });
   await definitions.set("worker", { name: "Worker", role: "coder", harness: "claude", mode: "managed", workspace: "C:/w", model: "",
@@ -76,29 +96,26 @@ test("THROUGH /agents/state: every plugin's offer is read, and one that throws i
   assert.deepEqual(plain.inputs, { operatorStop: "tracked" });
   // A FAILED SCREEN READ IS NOT AN INCOMPLETE ENUMERATION: the publisher withholds every word from one of those.
   const said = (body) => { assert.equal(body.complete, true); assert.deepEqual(body.problems, []); assert.equal(body.inputs.screens, "unavailable"); };
-  const offered = await read(() => [() => { throw new Error("a plugin's book broke"); },
-    () => [{ handle: "p1", state: "shell", rule: "aify_background_shell" }]]);
-  assert.equal(offered.agents.find((a) => a.agentId === "worker").state, "shell");
-  said(offered);
-  // A source that cannot even list its offers costs the sightings, never the read.
+  const offered = await read(() => [{ handle: 'p1', lifetime: lifetime(1), state: 'shell', rule: 'aify_background_shell' }]);
+  assert.equal(offered.agents.find(a => a.agentId === 'worker').state, 'shell');
   const broken = await read(() => { throw new Error("no capabilities here"); });
   assert.equal(broken.agents.find((a) => a.agentId === "worker").state, "idle");
   said(broken);
 });
 
-test("the daemon hands the plugins' screens to every state read: /agents/state, the sender and the Herdr panes", async () => {
+test("the daemon hands the Runner's screens to every state read: /agents/state, the sender and the Herdr panes", async () => {
   const source = fs.readFileSync(new URL('../bin/aify-env.mjs', import.meta.url), 'utf8');
   const begin = source.indexOf('protocolDeps: async () => ('), end = source.indexOf('\n}));', begin);
   assert.ok(begin > 0 && end > begin, 'the unmoved HTTP dependencies have a real bounded end');
-  assert.ok(source.slice(begin, end).includes('screens: () => servicePlugins.capabilities("screens"),'));
+  assert.ok(source.slice(begin, end).includes('screens: () => runner.screenSightings(),'));
   const f = new BootFixture(), first = () => [], second = () => []; let offered = [first];
-  f.plugins.capabilities = name => name === 'screens' ? offered : [];
+  f.options.runner.screenSightings = () => offered;
   await f.boot();
   assert.deepEqual({ sender: f.captured.sender.screens()[0] === first, pane: f.captured.pane.observation.screens()[0] === first },
     { sender: true, pane: true });
   offered = [second];
   assert.deepEqual({ sender: f.captured.sender.screens()[0] === second, pane: f.captured.pane.observation.screens()[0] === second },
-    { sender: true, pane: true }, 'both moved readers ask the live registry instead of keeping boot sightings');
+    { sender: true, pane: true }, 'both readers ask the live Runner instead of keeping boot sightings');
 });
 
 test("THROUGH THE SENDER: the published snapshot carries the word the screen decides", async (t) => {
@@ -110,7 +127,7 @@ test("THROUGH THE SENDER: the published snapshot carries the word the screen dec
   const posted = [];
   const sender = new AgentStateSender({ identity: { machineId: "win32:fixture", instance: "default", generation: 1, incarnationId: "screens" },
     stateHost: host, definitions, lifecycle: { stopFacts: () => new Map() }, observedHarnesses: async () => new Set(["claude"]),
-    screens: () => [() => [{ handle: "p1", state: "shell", rule: "aify_background_shell" }]],
+    screens: () => [{ handle: "p1", lifetime: lifetime(1), state: "shell", rule: "aify_background_shell" }],
     readRegistry: () => JSON.stringify({ version: 1, services: { x: { endpoint: "http://fixture.invalid/mcp/sse", agentState: { path: "/state" } } } }),
     credentialOptions: () => ({ root: path.join(home, "credentials"), env: {} }), nowMs: () => 0,
     fetchImpl: async (_url, options) => { posted.push(JSON.parse(options.body)); return new Response(null, { status: 204 }); },

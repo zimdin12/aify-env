@@ -16,7 +16,24 @@ import assert from "node:assert/strict";
 import { Runner } from "../lib/runner.mjs";
 import { PluginProcesses } from "../lib/service-plugins.mjs";
 import { loadCheckpointFactory } from "../lib/screen-checkpoint.mjs";
-import { screenText } from "../lib/plugins/aify-comms/screen-rules.mjs";
+import { screenText } from "../lib/harness-screens/screen-rules.mjs";
+import { screenActivitySender } from '../lib/plugins/aify-comms/screen-activity.mjs';
+
+test('a slow activity POST gets the newest waiting state, and a closed carrier drops queued work', async () => {
+  const posts = [], release = [];
+  const sender = screenActivitySender({ log() {}, send({ state }) {
+    posts.push(state); return new Promise(resolve => release.push(resolve));
+  } });
+  sender.note({ state: 'working' });
+  sender.note({ state: 'blocked' });
+  sender.note({ state: 'idle' });
+  assert.deepEqual(posts, ['working']);
+  release[0](); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(posts, ['working', 'idle']);
+  sender.note({ state: 'working' }); sender.close(); release[1]();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(posts, ['working', 'idle']);
+});
 import { createHandleBook, runOneControl, runTerminalControlPass } from "../lib/plugins/aify-comms/terminal-controls.mjs";
 
 const ESC = String.fromCharCode(27);
@@ -113,7 +130,7 @@ async function managedTerminal(runtime) {
     control: { id: "ctl-1", terminalId: "term-1", action: "start", cols: 80, rows: 16 },
     api, processes, handles, cwdRoots: ["/w"], windows: false,
     withinRoots: () => true,
-    buildSpec: () => ({ spec: SPEC }),
+    buildSpec: () => ({ spec: { ...SPEC, launcher: runtime === "claude-code" ? "/w/claude-aify" : "/w/opencode-aify" } }),
     resolveCandidates: () => ["/bin/worker"],
     baseEnv: {},
     sender: { send() {}, async drained() { return true; }, forget() {} },
@@ -206,13 +223,13 @@ test("a runtime with no manifest reports nothing, and its liveness frame carries
 });
 
 test("the observation goes with the terminal: after exit nothing is evaluated or reported", async () => {
-  const { terminal, handles, reported, processes } = await managedTerminal("claude-code");
+  const { terminal, handles, reported, runner } = await managedTerminal("claude-code");
   terminal.emit(IDLE_BOX);
   assert.ok(await waitFor(() => reported().length === 1));
   let readsAfterExit = 0;
   let exited = false;
-  const readScreen = processes.screenText.bind(processes);
-  processes.screenText = (id) => { if (exited) readsAfterExit += 1; return readScreen(id); };
+  const readScreen = runner.screenText.bind(runner);
+  runner.screenText = (id) => { if (exited) readsAfterExit += 1; return readScreen(id); };
   terminal.emit(WORKING);
   terminal.exit();
   exited = true;

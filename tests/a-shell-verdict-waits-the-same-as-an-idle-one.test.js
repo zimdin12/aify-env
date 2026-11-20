@@ -21,7 +21,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { PENDING_IDLE_RECHECK_MS, THROTTLE_MS, observeScreen } from "../lib/plugins/aify-comms/screen-observer.mjs";
+import { PENDING_IDLE_RECHECK_MS, THROTTLE_MS, observeScreen } from "../lib/harness-screens/screen-observer.mjs";
 
 const NL = String.fromCharCode(10);
 const PROMPT_BOX = "─".repeat(60);
@@ -43,7 +43,7 @@ function harness() {
   const observer = observeScreen({
     runtime: "claude-code",
     read: async () => ({ rows: showing.split(NL), title: "", progress: showing === WORKING ? null : PROGRESS }),
-    report: async (activity) => { reported.push(activity.state); },
+    onChanged: (activity) => { reported.push(activity.state); },
     now: () => clock,
     schedule: (fn, delay) => { const t = { fn, at: clock + delay }; timers.push(t); return t; },
     cancel: (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); },
