@@ -519,8 +519,13 @@ npm test
 npm test -- tests/one.test.js    # one file, under the same throwaway TEMP and HOME
 ```
 
-Run a single file through `npm test --`, not `node --test`. The runner points TEMP and HOME at a directory it deletes,
-and a file started directly leaves its fixtures in the real Temp.
+Run a single file through `npm test --`, not `node --test`. The runner creates and cleans up a private test home.
+
+If you need extra test scratch, create a fresh directory under the OS temp directory (`%TEMP%` on Windows,
+`os.tmpdir()` with the host's normal environment), outside both the checkout and the home directory's top level.
+Register an exit trap or `finally` in the same command that creates it, so failures clean up too. Check that the root
+is gone before reporting the result. If a review needs a retained candidate worktree, put it under OS temp, name its
+path and cleanup owner in the handoff, and remove it when the review closes. Preserve the receipts, not the tree.
 
 Every review runs the [whole-tree gates](docs/WHOLE-TREE-TESTS.md) alongside its changed-behavior tests.
 Changes to `bin/aify-env.mjs` also run the complete [bootstrap source-reader gate](docs/BOOT-SOURCE-TESTS.md),
