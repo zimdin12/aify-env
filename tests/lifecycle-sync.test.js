@@ -30,10 +30,11 @@ test('CommsApi lifecycle methods fence exact canonical routes', async () => {
   const calls = [];
   const api = new CommsApi({ endpoint: 'http://example.invalid', credential: async () => '',
     identity: { bridgeId: 'bridge' }, fetchImpl: async (url, options) => { calls.push([url, JSON.parse(options.body)]); return { ok: true, json: async () => ({ requests: [] }) }; } });
-  await api.claimLifecycleRequests('e/x', 'm', ['stop', 'release']);
+  const sync = new LifecycleSync({ api, machineId: 'm', lifecycle: { execute: () => assert.fail('no row') } });
+  assert.equal((await sync.pass('e/x')).outcome, 'synced');
   await api.reportLifecycleRequest('e/x', 'r', 'm', { status: 'done', outcome: 'stop', resultLifetime: null, finishedAt: 'now' });
   assert.ok(calls[0][0].endsWith('/environments/e%2Fx/lifecycle-requests/claim'));
-  assert.deepEqual(calls[0][1], { bridgeId: 'bridge', machineId: 'm', actions: ['stop', 'release'] });
+  assert.deepEqual(calls[0][1], { bridgeId: 'bridge', machineId: 'm', actions: [...LIFECYCLE_ACTIONS], capabilities: ['automatic-start-v1'] });
   assert.ok(calls[1][0].endsWith('/environments/e%2Fx/lifecycle-requests/r/result'));
   assert.equal(calls[1][1].bridgeId, 'bridge');
 });
@@ -85,6 +86,19 @@ test('A REQUEST THIS HOST CAN RUN, whose execute throws a TypeError after acting
   assert.equal((await sync.pass('e')).outcome, 'unavailable');
   assert.equal(effects, 1, 'CONTROL: execute ran and acted');
   assert.deepEqual(reports, [], 'a request execute failed after acting was reported refused');
+});
+
+test('only a valid cold start can carry automatic intent into lifecycle execution', async () => {
+  const automatic = wire({ action: 'start', expectedLifetime: null, startIntent: 'automatic' });
+  const invalid = [{ startIntent: null }, { startIntent: 'unknown' }, { action: 'stop' }, { expectedLifetime: 'warm' }]
+    .map((patch, i) => ({ ...automatic, ...patch, id: `bad-${i}` }));
+  const seen = [], reports = [];
+  const sync = new LifecycleSync({ machineId: 'm', lifecycle: { execute: async row => { seen.push(row); return { status: 'done' }; } },
+    api: { claimLifecycleRequests: async () => ({ requests: [...invalid, automatic] }),
+      reportLifecycleRequest: async (_, id, __, answer) => reports.push([id, answer.status]) } });
+  assert.equal((await sync.pass('e')).outcome, 'synced');
+  assert.deepEqual(seen, [automatic]);
+  assert.deepEqual(reports, [...invalid.map(({ id }) => [id, 'refused']), [automatic.id, 'done']]);
 });
 
 test('state read uses journal-backed fact and reports stop-source failure unavailable', async () => {

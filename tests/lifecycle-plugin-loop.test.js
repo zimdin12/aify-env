@@ -34,7 +34,7 @@ function fixture({ claim, execute, report, agents = true, advertisement } = {}) 
 test('plugin.start claims lifecycle requests, executes exact row and reports exact result', async () => {
   const f = fixture();
   await f.plugin.start(f.host); await flush();
-  assert.deepEqual(f.calls.claims, [['test:host:default', 'machine-1', [...LIFECYCLE_ACTIONS]]]);
+  assert.deepEqual(f.calls.claims, [['test:host:default', 'machine-1', [...LIFECYCLE_ACTIONS], ['automatic-start-v1']]]);
   assert.deepEqual(f.calls.executions, [row]);
   assert.deepEqual(f.calls.reports, [['test:host:default', 'request-1', 'machine-1', result]]);
   assert.deepEqual(f.plugin.state().lifecycle, { requestsHandled: 1, lastError: '', accepted: true });

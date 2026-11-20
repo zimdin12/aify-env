@@ -299,6 +299,19 @@ conservatively invalidates capture.
 Hermes and Codex resident startup clearing is not supported in this stage. Their resident launches
 remain non-clearing. There is no runtime preload, marker-file acknowledgment or turn-end fallback.
 
+## Automatic managed lifecycle starts
+
+A cold dispatch request carries `action: "start"`, `startIntent: "automatic"`, `expectedLifetime: null`
+and the existing exact definition binding. Explicit requests omit `startIntent`. A lifecycle claim
+advertises `capabilities: ["automatic-start-v1"]`; the service must never hand an automatic row,
+including a reclaim, to a host that did not advertise it. Never drop the intent to make an old host run it.
+
+The host checks the durable stop fact while reserving, before any launch preparation. A hold refuses
+with `stopped-by-operator`; an already moved lifetime refuses without a second worker. Automatic
+completion and replay never change the stop fact. Explicit Start retains its existing behavior.
+The journal binds `startIntent` on the row so replays cannot change permission, without changing the
+legacy intent tuple. `freshContext` changes only resume policy; the service chooses the native session.
+
 ## Pending lifecycle reservations after daemon death
 
 The lifecycle journal, `~/.aify/agent-lifecycle.json`, is shared across daemon scopes. A new production

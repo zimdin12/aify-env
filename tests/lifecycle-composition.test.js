@@ -8,6 +8,7 @@ import { AgentStateHost } from '../lib/agent-state-host.mjs';
 import { Runner } from '../lib/runner.mjs';
 import { DefinitionStore } from '../lib/agent-definitions.mjs';
 import { createAgentLifecyclePorts } from '../lib/daemon-agent-lifecycle.mjs';
+import { LifecycleJournal } from '../lib/agent-lifecycle.mjs';
 import { readAgentStates } from '../lib/agent-state-read.mjs';
 function fixture(t, mode = 'managed') {
  const home = fs.mkdtempSync(path.join(process.env.TMPDIR, 'd9-composed-'));
@@ -95,4 +96,67 @@ test('a lifecycle start tells the spawned child exactly the revision it was admi
  assert.equal((await f.ports.lifecycle.execute(r)).status, 'done');
  assert.equal(f.spawned.length, 1, 'the start spawned nothing');
  assert.deepEqual([f.spawned[0].AIFY_DEFINITION_INCARNATION, f.spawned[0].AIFY_DEFINITION_REVISION], [String(r.expectedIncarnation), '2']);
+});
+
+const automatic = async f => ({ ...await request(f, 'start', 'automatic'), startIntent: 'automatic' });
+
+test('a cold automatic start launches once, writes no stop fact, and replays the same result', async t => {
+ const f = fixture(t); await seed(f);
+ const row = await automatic(f);
+ const answer = await f.ports.lifecycle.execute(row);
+ assert.equal(answer.status, 'done'); assert.equal(f.spawned.length, 1);
+ assert.deepEqual([...f.ports.stopFacts()], []);
+ assert.deepEqual(await f.ports.lifecycle.execute(row), answer);
+ const { startIntent, ...explicit } = row;
+ assert.equal((await f.ports.lifecycle.execute(explicit)).outcome, 'idempotency-conflict');
+ assert.equal(f.spawned.length, 1);
+});
+
+test('automatic dispatch refuses a hold applied after enqueue, but explicit Start releases it', async t => {
+ const f = fixture(t); await seed(f);
+ const queued = await automatic(f);
+ const stop = await f.ports.lifecycle.execute(await request(f, 'stop', 'hold'));
+ assert.equal(stop.status, 'done', 'control: the hold was applied after enqueue');
+ let prepared = 0;
+ const refused = await f.ports.lifecycle.execute(queued, { buildSpec() { prepared++; }, start() { assert.fail('no start'); } });
+ assert.deepEqual([refused.status, refused.outcome, prepared, f.spawned.length, ...f.ports.stopFacts().values()],
+   ['refused', 'stopped-by-operator', 0, 0, true]);
+ assert.equal((await f.ports.lifecycle.execute(await request(f, 'start', 'explicit'))).status, 'done');
+ assert.equal(f.spawned.length, 1); assert.deepEqual([...f.ports.stopFacts().values()], [false]);
+ assert.deepEqual(await f.ports.lifecycle.execute(queued), refused, 'a replay cannot turn the original refusal into success');
+});
+
+test('a worker that appears after automatic enqueue is never duplicated', async t => {
+ const f = fixture(t); await seed(f);
+ const queued = await automatic(f);
+ assert.equal((await f.ports.lifecycle.execute(await request(f, 'start', 'other'))).status, 'done');
+ const before = f.host.rawIdentity('a').current;
+ const answer = await f.ports.lifecycle.execute(queued);
+ assert.deepEqual([answer.status, answer.outcome, f.spawned.length], ['refused', 'lifetime-moved', 1]);
+ assert.deepEqual(f.host.rawIdentity('a').current, before);
+});
+
+test('automatic intent is durable without changing legacy journal tuples', async t => {
+ const f = fixture(t); await seed(f);
+ const file = path.join(f.home, 'agent-lifecycle.json');
+ const legacy = await request(f, 'stop', 'legacy');
+ const receipt = { status: 'done', outcome: 'stop', resultLifetime: null, finishedAt: '2026-11-01T00:00:00Z' };
+ const intent = JSON.stringify([legacy.id, legacy.agentId, legacy.machineId, legacy.storeId, legacy.expectedIncarnation,
+   legacy.expectedRevision, null, 'stop', legacy.requestedBy, false]);
+ const records = { legacy: { intent, agentId: 'a', phase: 'terminal', result: receipt,
+   unknown: { ...receipt, status: 'failed', outcome: 'execution-unknown' } } };
+ fs.writeFileSync(file, JSON.stringify({version:1, records, stops:{}}));
+ assert.deepEqual(await f.ports.lifecycle.execute(legacy), receipt);
+ const row = await automatic(f), first = await f.ports.lifecycle.execute(row);
+ assert.equal(first.status, 'done');
+ const image = JSON.parse(fs.readFileSync(file, 'utf8'));
+ assert.deepEqual(image.records.legacy, records.legacy);
+ assert.equal(JSON.parse(image.records[row.id].intent).length, 10);
+ assert.equal(image.records[row.id].startIntent, 'automatic');
+ const reopened = new LifecycleJournal({file});
+ assert.deepEqual(reopened.reserveAutomaticStart(row).result, first);
+ assert.throws(() => reopened.finish({...row, startIntent: undefined}, receipt), /receipt-intent-moved/);
+ image.records[row.id].startIntent = 'unrecognized';
+ fs.writeFileSync(file, JSON.stringify(image));
+ assert.throws(() => reopened.stopFacts(), /lifecycle-journal-malformed/);
 });
