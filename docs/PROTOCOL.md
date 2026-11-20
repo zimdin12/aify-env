@@ -61,6 +61,12 @@ for the legacy switch and operator recovery path.
 no visibility into what a service does elsewhere, and a number meaning anything wider would be
 invented.
 
+`serviceContacts` carries `{name, endpoint, channel, at, ok, error}` from work this daemon already did.
+`at` is the attempt time in milliseconds since epoch. An older attempt is history, not a fresh health
+probe. Match name and endpoint to the current registration. Use `aify-env doctor` for a direct probe.
+`rosterRevision` is an opaque local invalidation token, not a roster or a verdict. The picker compares
+it for equality only while open; it still obtains its authoritative list through `/agents/startable`.
+
 `unknown` is what the last sweep could not judge. The reaper keeps rather than reaps those, because
 dropping a live process out of the only place that knows about it is worse than the leak — but the
 decision has to surface here, or it quietly becomes a leak nobody sees.

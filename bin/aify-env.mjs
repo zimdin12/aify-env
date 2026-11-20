@@ -408,6 +408,11 @@ const server = createServer(createDaemonHttp({
         // 2026-09-02 the first was healthy while the second was refused every time for hours with
         // nothing anywhere able to say so. `/health` reported the half that was fine.
         plugins: servicePlugins.report(),
+        serviceContacts: [...servicePlugins.capabilities('serviceContact').map(read => read()).filter(Boolean),
+          ...advertiser.contacts()],
+        rosterRevision: JSON.stringify([definitionStore.readOnlyRevision(),
+          ...servicePlugins.capabilities('agents').map(offer => offer.revision?.() ?? null),
+          runner.list().map(({ id, label }) => [id, label])]),
         // STARTING A KNOWN AGENT, offered by whichever plugin can. Resolved per request rather than
         // captured once: plugins start after the server binds, so a reference taken here at module
         // scope would be null for the life of the process. Asking each time also means a plugin that
@@ -642,6 +647,7 @@ const advertiser = new HostAdvertiser({
   },
   harnesses: () => installedHarnesses(aifyLauncherFilesOnPath()),
   pathFor: advertisementPathFor,
+  pluginTargets: () => servicePlugins.capabilities('heartbeatTarget').map(read => read()).filter(Boolean),
   post: postAdvertisement,
   credentialReading,
   say: (line) => process.stderr.write(`[aify-env] ${line}${chr10}`),

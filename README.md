@@ -173,11 +173,17 @@ or `keyEnv`) while the endpoint stays the same keeps the running plugin on the k
 with, until aify-env restarts. Rotating the key's value inside the same file or variable is picked up
 without a restart.
 
-**Which services it describes this host to.** Every 30 seconds (`AIFY_ADVERTISE_MS`) aify-env posts a
-description of this host to each registered service it has a route for: the service's plugin supplies
-one (aify-comms' does), or the entry declares it with `"advertisement": {"path": "/..."}`. An entry with
-neither is sent nothing, and `"advertise": false` still opts a service out even when a route exists. A
-declaration that is not a path sends nothing and is named in `/health` under `advertiseIgnored`.
+**Which services it describes this host to.** A service's plugin can supply an advertisement route, or
+the registry can declare one with `"advertisement": {"path": "/..."}`. When the running plugin's heartbeat
+matches that route and credential reference, its existing 30-second heartbeat carries the host description
+as well. Independent routes keep their standalone beat (`AIFY_ADVERTISE_MS`, default 30 seconds).
+`AIFY_ADVERTISE=0` and `"advertise": false` suppress descriptions, not the plugin's claimer heartbeat.
+An invalid declaration sends no description and is named in `/health` under `advertiseIgnored`.
+
+**What a TUI refresh reads.** It reads the local daemon, not the registered services. The service rows show
+what the last existing heartbeat or provider wait reported. Run `aify-env doctor` for an explicit probe.
+The start picker reads the roster on open and refreshes an open list when the daemon reports a local
+change. `aify-env agents import` reads the roster when invoked.
 
 ### What it leaves behind, and what it does not
 
