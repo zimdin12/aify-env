@@ -1,0 +1,24 @@
+{
+  "id": "000000000000",
+  "host": "aify-rehearsal-example",
+  "platform": "windows",
+  "distro": "aify-rehearsal-example",
+  "pins": {
+    "env": "f4d996a6e036240afd80a10777c22fd81a7f8009",
+    "wrapper": null,
+    "comms": null,
+    "dashboard": "eb36e05f303684a8c371fa8fa06292c8ebe15098"
+  },
+  "origins": {
+    "comms": "http://127.0.0.1:51881",
+    "dashboard": "http://127.0.0.1:51971",
+    "keylessComms": "http://127.0.0.1:51882"
+  },
+  "dashboardGitRepo": null,
+  "tools": {
+    "git": null,
+    "bash": null,
+    "path": []
+  },
+  "approve": []
+}
