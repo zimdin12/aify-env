@@ -64,6 +64,16 @@ function hookSettingsRegion(source) {
   return source.slice(begin + 1, end);
 }
 
+const OWN_SERVICE = 'AIFY_OWN_SERVICE="@@SERVICE_NAME@@"';
+function withOwnService(source, region) {
+  // New templates gate both Comms hook creation and exit reporting on this local value.
+  // Older templates have neither reference; do not invent a prelude for them.
+  if (!/\$(?:\{)?AIFY_OWN_SERVICE\b/.test(region)) return region;
+  const definitions = source.match(/^AIFY_OWN_SERVICE=.*$/gm) ?? [];
+  assert.deepEqual(definitions, [OWN_SERVICE], 'the extracted region requires the template own-service assignment');
+  return `${OWN_SERVICE.replace('@@SERVICE_NAME@@', 'aify-comms')}\n${region}`;
+}
+
 class StartupComposition {
   constructor(root, harness, alteration) {
     this.root = root; this.harness = harness; this.alteration = alteration;
@@ -147,7 +157,8 @@ class StartupComposition {
   async prepare(restore = false) {
     this.source = fs.readFileSync(path.join(WRAPPER, 'wrappers/claude-aify.sh.in'), 'utf8');
     // Include the template's own prelude, so newly added hook defaults cannot become missing fixture inputs.
-    const hookSettings = hookSettingsRegion(this.source).replaceAll('@@WRAPPER_DIR@@', forward(WRAPPER));
+    const hookSettings = withOwnService(this.source, hookSettingsRegion(this.source))
+      .replaceAll('@@WRAPPER_DIR@@', forward(WRAPPER));
     const claim = this.source.match(/^\s+aify_lease_claim .*claude-code.*$/m)?.[0];
     const lifetime = this.source.match(/^aify_lifetime_start .*SessionStart.*$/m)?.[0];
     assert.ok(claim && lifetime, 'maintained caller sites required');
@@ -215,6 +226,15 @@ async function fixture(t, harness = 'claude', alteration = '') {
 }
 const options = { skip: SKIP, timeout: 240_000 };
 
+test('a region that reads the own-service selector requires its unique template assignment', () => {
+  const region = 'printf "%s" "$AIFY_OWN_SERVICE"';
+  assert.equal(withOwnService(OWN_SERVICE, 'printf %s old-template'), 'printf %s old-template');
+  assert.equal(withOwnService(OWN_SERVICE, region), `AIFY_OWN_SERVICE="aify-comms"\n${region}`);
+  for (const source of ['', `${OWN_SERVICE}\n${OWN_SERVICE}`]) {
+    assert.throws(() => withOwnService(source, region), /requires the template own-service assignment/);
+  }
+});
+
 // Existing composition cases prove execution; these controls pin refusal when a maintained extraction boundary moves.
 for (const marker of [HOOK_DEFAULTS, '\nAIFY_HOOK_SETTINGS="$(mktemp', HOOK_END]) {
   test(`hook-settings extraction refuses a missing ${marker.trim().split(' ')[0]} boundary`, { skip: SKIP }, () => {
@@ -260,7 +280,7 @@ test('a failed fixture invocation runs the maintained exit notifier but cannot a
   const before = fs.readFileSync(f.file, 'utf8');
   const begin = f.source.indexOf('_aify_runtime_exited() {'), end = f.source.indexOf('\ntrap ', begin);
   assert.ok(begin > 0 && end > begin);
-  const notify = f.source.slice(begin, end).replaceAll('@@WRAPPER_DIR@@', forward(WRAPPER))
+  const notify = withOwnService(f.source, f.source.slice(begin, end)).replaceAll('@@WRAPPER_DIR@@', forward(WRAPPER))
     .replaceAll('@@BRIDGE_DIR@@', forward(path.join(COMMS, 'mcp/stdio')));
   const result = await f.run('failed-invocation', `set -eu\n${notify}\ntrap _aify_runtime_exited EXIT\nAIFY_RUNTIME_RUNNING=1\ncommand ${q(forward(process.execPath))} ${q(forward(FX))} failed-invocation\n`, [], '', f.snapshot.env);
   assert.equal(result.status, 127, result.stderr); assert.equal(result.signal, null);
