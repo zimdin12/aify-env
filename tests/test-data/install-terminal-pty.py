@@ -14,8 +14,8 @@ import time
 entry, answer, node = sys.argv[1:]
 with tempfile.TemporaryDirectory(prefix="install-terminal-", dir="/tmp") as temp:
     root = Path(temp)
-    home, tools, wrapper = root / "home", root / "tools", root / "npm/aify-wrapper"
-    for directory in [home, tools, wrapper / "lib", wrapper / "bin", root / "tmp"]:
+    home, prefix, wrapper = root / "home", root / "npm", root / "wrapper-source"
+    for directory in [home, wrapper / "lib", wrapper / "bin", root / "tmp"]:
         directory.mkdir(parents=True, exist_ok=True)
 
     def write(file, text, executable=False):
@@ -23,8 +23,7 @@ with tempfile.TemporaryDirectory(prefix="install-terminal-", dir="/tmp") as temp
         if executable:
             file.chmod(0o700)
 
-    # Same installed-wrapper seam as the entry tests. No package manager, network,
-    # policy action, client runtime or real registry is reached by this witness.
+    # Only the private npm prefix is real. No network, policy action, client runtime or real registry is reached.
     modules = {
         "connect-http.mjs": "export async function fetchSpec(){return {artifacts:[{id:'fixture-artifact',source:{git:{repo:'fixture/package',revision:'fixture-revision'}}}]}};",
         "service-spec.mjs": "export function validateSpec(){return {ok:true}};export function tupleDigest(){return 'fixture-tuple'};",
@@ -35,10 +34,10 @@ with tempfile.TemporaryDirectory(prefix="install-terminal-", dir="/tmp") as temp
         "connect-report.mjs": "export function connectRecord(){return {pending:[]}};",
         "artifact-catalogue.json": '{"approved":[]}',
     }
-    write(wrapper / "package.json", '{"type":"module"}')
+    write(wrapper / "package.json", json.dumps({"name": "aify-wrapper", "version": "0.0.0", "type": "module",
+                                                "bin": {"aify-wrapper-connect": "bin/aify-wrapper-connect.mjs"}}))
     for name, text in modules.items():
         write(wrapper / "lib" / name, text)
-    write(tools / "npm", "#!/bin/sh\n[ \"$1 $2\" = 'root -g' ] || exit 97\nprintf '%s\\n' " + str(root / "npm") + "\n", True)
     write(root / "installer.sh", "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$HOME/effects\"\n", True)
     write(wrapper / "bin/aify-wrapper-connect.mjs", """import fs from 'node:fs';
 const a=process.argv.slice(2), file=flag=>a[a.indexOf(flag)+1];
@@ -47,8 +46,9 @@ fs.writeFileSync(file('--registry'), JSON.stringify({version:1,services:{'fixtur
 fs.writeFileSync(file('--report-file'),JSON.stringify({installed:[],pending:[]}));
 fs.appendFileSync(process.env.HOME+'/effects','connect\\n');
 """)
-    env = {"PATH": str(tools) + ":/usr/bin:/bin", "HOME": str(home), "USERPROFILE": str(home),
-           "TMPDIR": str(root / "tmp"), "AIFY_SERVICE_REGISTRY": str(home / "registry.json"), "TERM": "xterm"}
+    env = {"PATH": str(prefix / "bin") + ":/usr/bin:/bin", "HOME": str(home), "USERPROFILE": str(home),
+           "TMPDIR": str(root / "tmp"), "AIFY_SERVICE_REGISTRY": str(home / "registry.json"), "TERM": "xterm",
+           "npm_config_prefix": str(prefix), "npm_config_offline": "true", "AIFY_INSTALL_WRAPPER_SOURCE": str(wrapper)}
     version = subprocess.run([node, "--version"], env=env, capture_output=True, text=True, check=True).stdout.strip()
     argv = [node, entry, "--connect", "fixture-service=http://fixture.invalid", "--client", "codex",
             "--installer", "fixture-service=" + str(root / "installer.sh")]

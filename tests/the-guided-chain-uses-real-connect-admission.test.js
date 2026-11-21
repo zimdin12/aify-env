@@ -77,7 +77,7 @@ export function channelPolicyReadiness({clients,env}) { fs.writeFileSync(${JSON.
   const result = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(ROOT, 'bin/aify-env-install.mjs'), '--connect', `aify-comms=${f.endpoint}`,
       '--client', 'claude', '--secret-stdin', 'aify-comms.credentialRef', '--no-prompt'],
-    { env: f.environment(), cwd: f.home, stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000 });
+    { env: f.prepareGuidedWrapper(), cwd: f.home, stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000 });
     let out = '', err = '';
     child.stdout.on('data', b => out += b); child.stderr.on('data', b => err += b);
     child.once('error', reject); child.once('close', status => resolve({ status, out, err })); child.stdin.end(KEY);
@@ -143,7 +143,7 @@ if (process.argv[1].endsWith('aify-env-install.mjs')) {
   const result = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, path.join(ROOT, 'bin/aify-env-install.mjs'),
       '--connect', `fixture-service=${f.endpoint}`, '--client', 'claude'],
-    { env: f.environment(), cwd: f.home, stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
+    { env: f.prepareGuidedWrapper(), cwd: f.home, stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
     let out = '', err = '';
     child.stdout.on('data', b => out += b); child.stderr.on('data', b => err += b);
     child.once('error', reject); child.once('close', status => resolve({ status, out, err }));

@@ -20,8 +20,9 @@ import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
 import { SkillPlacer } from "../lib/install-skills.mjs";
 import { resolveSkillRoot, spawnRun } from "../lib/skill-roots.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
-import { wrapperInstallSource } from "../lib/wrapper-pin.mjs";
-import { approvedInstaller, connectRecorded, envWithout, gitCheckout, globalNpmRoot, installerSkillHandoff, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
+import { pinnedWrapperPayload, wrapperInstallSource } from "../lib/wrapper-pin.mjs";
+import { ensureWrapper } from "../lib/wrapper-bootstrap.mjs";
+import { approvedInstaller, connectRecorded, envWithout, gitCheckout, installerSkillHandoff, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
 
 const args = process.argv.slice(2);
 if (args.length === 1 && args[0] === "--supports-skills-handoff-v1") {
@@ -43,13 +44,9 @@ async function runChain(plan) {
   const say = (line) => process.stdout.write(`[aify-env] ${line}\n`);
   const stdinKey = plan.secretStdin ? fs.readFileSync(0, "utf8") : undefined;
 
-  const root = globalNpmRoot({ env });
-  const wrapperRoot = path.join(root, "aify-wrapper");
-  // Where aify-wrapper comes from when it is missing: the commit this aify-env was tested against (lib/wrapper-pin.mjs),
-  // or a package spec a test names.
   const wrapperSource = wrapperInstallSource(env);
   const skillPlacer = new SkillPlacer({ home });
-  let wrapper = null;
+  let wrapperRoot, wrapper;
 
   const io = {
     env,
@@ -66,11 +63,10 @@ async function runChain(plan) {
     preparePolicy: ({ file, args, elevate }) => spawnSync(elevate ? "sudo" : file,
       elevate ? [file, ...args] : args, { env, stdio: "inherit" }).status,
     ensurePackages: async () => {
-      if (!fs.existsSync(path.join(wrapperRoot, "package.json"))) {
-        say(`installing aify-wrapper (${wrapperSource})`);
-        const npm = spawnSync("npm", ["install", "-g", "--no-audit", "--no-fund", wrapperSource], { stdio: "inherit", shell: windows });
-        if (npm.status !== 0) return false;
-      }
+      const installed = await ensureWrapper({ source: wrapperSource,
+        pinnedDigest: env.AIFY_INSTALL_WRAPPER_SOURCE ? null : pinnedWrapperPayload(), env, say });
+      if (installed.problem) return installed;
+      wrapperRoot = installed.root;
       wrapper = await wrapperModules(wrapperRoot);
       return wrapper.problem ? wrapper : true;
     },

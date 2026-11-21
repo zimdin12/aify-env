@@ -22,7 +22,7 @@ const a=process.argv.slice(2),r=a[a.indexOf('--registry')+1],o=a[a.indexOf('--re
 fs.mkdirSync(path.dirname(r),{recursive:true});fs.writeFileSync(r,JSON.stringify({version:1,services:{'fixture-service':{endpoint:a[1]}}}));
 fs.writeFileSync(o,JSON.stringify({installed:[],pending:[]}));`);
 const pty = createRequire(import.meta.url)('node-pty');
-const env = f.environment();
+const env = f.prepareGuidedWrapper();
 for (const key of ['NODE_OPTIONS','BASH_ENV','ENV','AIFY_AGENT_ID','AIFY_AGENT_LEASE','AIFY_ENV_INSTANCE','AIFY_LIFETIME']) delete env[key];
 // DLL cleanup closes this owned terminal, never enumerates another process's console.
 const entry = process.argv[3] || path.join(ROOT, 'bin/aify-env-install.mjs');

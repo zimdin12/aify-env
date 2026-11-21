@@ -3,12 +3,15 @@
 // aify-wrapper's main was that day, and nothing said which.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { pinnedWrapperSource, wrapperInstallSource } from "../lib/wrapper-pin.mjs";
+import { packWrapper } from "../lib/wrapper-bootstrap.mjs";
+import { pinnedWrapperPayload, pinnedWrapperSource, wrapperInstallSource } from "../lib/wrapper-pin.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
@@ -18,6 +21,21 @@ test("the pin is package.json's aifyWrapper, at a full commit, and the installer
   assert.match(manifest.aifyWrapper, /^github:zimdin12\/aify-wrapper#[0-9a-f]{40}$/);
   assert.equal(wrapperInstallSource({}), manifest.aifyWrapper);
   assert.equal(wrapperInstallSource({ AIFY_INSTALL_WRAPPER_SOURCE: "C:/w/aify-wrapper.tgz" }), "C:/w/aify-wrapper.tgz");
+});
+
+test("the recorded wrapper digest matches npm's payload at the pinned commit", (t) => {
+  const source = process.env.AIFY_WRAPPER_REPO;
+  if (!source) return t.skip("AIFY_WRAPPER_REPO does not name a wrapper checkout");
+  const pin = pinnedWrapperSource().split('#')[1];
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8', timeout: 5000 });
+  if (head.status !== 0) return t.skip("AIFY_WRAPPER_REPO is not a readable Git checkout");
+  if (head.stdout.trim() !== pin) return t.skip(`AIFY_WRAPPER_REPO is at ${head.stdout.trim()}, not the pinned ${pin}`);
+
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapper-pin-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const env = { ...process.env, npm_config_cache: path.join(scratch, 'npm-cache'), npm_config_offline: 'true' };
+  const { digest } = packWrapper({ source: path.resolve(source), scratch, env });
+  assert.equal(digest, pinnedWrapperPayload(), `update aifyWrapperPayload for wrapper pin ${pin}`);
 });
 
 test("NEGATIVE CONTROL: a branch, a short id or no pin at all is refused, not installed", () => {

@@ -30,8 +30,11 @@ npm install
 ./install.sh --connect aify-comms=http://<host>:8800 --client claude --secret aify-comms.credentialRef=<key file>
 ```
 
-It installs aify-env and, where none is installed, aify-wrapper at the commit this aify-env was tested against
-(`aifyWrapper` in package.json, printed as it installs), then for each `--connect`: acquires the service's approved artifact,
+It installs aify-env and checks npm's global aify-wrapper against the tested commit and package bytes in `package.json`.
+It reuses a match and upgrades a stale npm-owned wrapper through npm. A linked checkout is reused only when its
+packed payload and npm launchers match; update a stale checkout at the named path, install its dependencies there,
+then rerun. A foreign launcher or another wrapper earlier on PATH is refused without being replaced.
+Once the wrapper is verified, the chain acquires each `--connect` service's approved artifact,
 connects it (`aify-wrapper-connect`), renders each `--client`'s launcher once, applies the service's assets for
 clients whose CLI is present, and reports what is pending. Keys come from a file or `--secret-stdin`, never argv.
 A tuple the catalogue does not approve is refused with the `--approve <digest>` that approves it. `aify-env install`

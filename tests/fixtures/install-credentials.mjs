@@ -73,6 +73,28 @@ export class CredentialInstallFixture {
     const result = await writeCredentialFile({ root: this.root, ref, value }); assert.equal(result.ok, true, result.detail); return ref;
   }
   defaultRef() { return defaultCredentialRef('aify-comms'); }
+  // CLI tests pass through bootstrap. Pack the already configured fixture and let real npm own its global bins.
+  prepareGuidedWrapper() {
+    const source = path.join(this.home, 'wrapper-source');
+    for (const dir of ['lib', 'bin']) fs.cpSync(path.join(this.wrapperRoot, dir), path.join(source, dir), { recursive: true });
+    fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({ name: 'aify-wrapper', version: '0.0.0', type: 'module',
+      bin: { 'aify-wrapper-check': 'bin/aify-wrapper-check.mjs' } }));
+    const prefix = path.join(this.home, 'guided-npm');
+    const bin = process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
+    const env = { ...this.environment(), PATH: bin + path.delimiter + process.env.PATH, npm_config_prefix: prefix, npm_config_offline: 'true',
+      npm_config_cache: path.join(this.home, 'npm-cache'), AIFY_INSTALL_WRAPPER_SOURCE: source };
+    const npm = (...args) => {
+      const result = spawnSync(process.execPath, [process.env.npm_execpath, ...args], { env, cwd: this.home, encoding: 'utf8', timeout: 15000 });
+      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+      return result.stdout.trim();
+    };
+    const [pack] = JSON.parse(npm('pack', '--json', '--ignore-scripts', source));
+    npm('install', '-g', '--no-audit', '--no-fund', '--ignore-scripts', path.join(this.home, pack.filename));
+    const installed = path.join(npm('root', '-g'), 'aify-wrapper');
+    const dependencies = path.join(this.wrapperRoot, 'node_modules');
+    if (fs.existsSync(dependencies)) fs.cpSync(dependencies, path.join(installed, 'node_modules'), { recursive: true });
+    return env;
+  }
   environment(extra = {}) {
     const env = { ...process.env, HOME: this.home, USERPROFILE: this.home, APPDATA: this.home, LOCALAPPDATA: this.home,
       AIFY_SERVICE_REGISTRY: this.registry, FIXTURE_NPM_ROOT: this.npmRoot, PATH: this.bin + path.delimiter + process.env.PATH };
