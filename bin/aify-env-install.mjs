@@ -84,7 +84,7 @@ async function runChain(plan) {
     placeSkills: async (assets, client, { without }) => {
       const probeEnv = envWithout(env, without);
       const roots = await resolveSkillRoot(client, { home, env: probeEnv, windows, cwd: process.cwd(),
-        find: name => wrapper.resolveOnPath(name, { env: probeEnv }).found ?? "",
+        find: windows ? undefined : name => wrapper.resolveOnPath(name, { env: probeEnv }).found ?? "",
         run: spawnRun,
       });
       if (roots.problem) throw new Error(roots.problem);

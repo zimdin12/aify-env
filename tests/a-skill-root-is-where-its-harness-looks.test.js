@@ -1,11 +1,14 @@
 // lib/skill-roots.mjs: every root is the one the harness names, or a named refusal. The harness IO is faked here
-// (no claude, codex or hermes runs); the Hermes probe's own Python is run for real against a fake Hermes checkout in
-// tests/a-hermes-skill-probe-asks-hermes-and-writes-nothing.test.js.
+// (no real claude, codex or hermes runs). The native Codex arm uses a private npm-style shim. The Hermes probe's
+// own Python is run against a fixture checkout in tests/a-hermes-skill-probe-asks-hermes-and-writes-nothing.test.js.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 
 import {
-  CODEX_CONTROL_NAME, HERMES_CATEGORY, HERMES_PROBE, SKILL_CLIENTS, parseCodexRoots, resolveSkillRoot,
+  CODEX_CONTROL_NAME, HERMES_CATEGORY, HERMES_PROBE, SKILL_CLIENTS, parseCodexRoots, resolveSkillRoot, spawnRun,
 } from '../lib/skill-roots.mjs';
 
 const POSIX_HOME = '/home/someone';
@@ -101,6 +104,36 @@ test('Codex on Windows: backslashes and case fold when the root is compared', ()
   assert.equal(result.problem, null);
   assert.equal(result.root, 'C:/Users/someone/.codex/skills');
   assert.deepEqual(result.searchRoots, ['c:/users/SOMEONE/.codex/skills/.system']);
+});
+
+test('native Windows Codex probe runs the npm cmd shim, not its extensionless sibling', {
+  skip: process.platform !== 'win32' ? 'requires native Windows' : false,
+}, t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex probe '));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const extensionless = path.join(home, 'codex');
+  const shim = path.join(home, 'codex.cmd');
+  fs.writeFileSync(extensionless, '#!/bin/sh\nexit 91\n');
+  fs.writeFileSync(path.join(home, 'codex.ps1'), 'exit 92');
+  const root = path.join(home, '.codex', 'skills');
+  const responder = path.join(home, 'probe.mjs');
+  fs.writeFileSync(responder, `if (process.argv.slice(2).join(' ') !== 'debug prompt-input') process.exit(93);\nprocess.stdout.write(${JSON.stringify(codexRender([root]))});\n`);
+  fs.writeFileSync(shim, `@echo off\r\n"${process.execPath}" "${responder}" %*\r\n`);
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(path|pathext|codex_home)$/i.test(key)));
+  Object.assign(env, { Path: home, Pathext: '.PS1;.CMD', CODEX_HOME: path.join(home, '.codex') });
+  assert.equal(spawnRun(extensionless, ['debug', 'prompt-input'], { cwd: home, env }).error?.code, 'ENOENT');
+  const files = [];
+  const io = { home, env, windows: true, cwd: home, run: (file, args, options) => {
+    files.push(file);
+    return spawnRun(file, args, options);
+  } };
+  const result = resolveSkillRoot('codex', io);
+  assert.equal(result.problem, null, result.problem);
+  assert.deepEqual(files, [shim]);
+  assert.equal(result.root, root.split(path.sep).join('/'));
+
+  fs.unlinkSync(shim);
+  assert.equal(resolveSkillRoot('codex', { ...io, run: never('run') }).problem, 'Codex was not found on PATH');
 });
 
 test('Codex: not on PATH, or found by a relative path, is refused without running anything', () => {
