@@ -6,6 +6,8 @@ The assets phase checks the same-connect path, package revision and approval bef
 
 Only selected, present runtimes receive a copy. Claude honours `CLAUDE_CONFIG_DIR`. Codex must report that it searches the proposed `CODEX_HOME` skills root. Hermes uses its selected runtime's reported skills directory under `autonomous-ai-agents`, with no links or external-directory changes. An unproved or shadowed target must be resolved before placement.
 
+Every ancestor of a skill destination must be a real directory. If a dotfile manager links `~/.claude` or `~/.codex`, the chain refuses rather than following the link. Put the runtime's configuration in a real directory, or point `CLAUDE_CONFIG_DIR` or `CODEX_HOME` directly at its intended real directory and rerun. Do not remove the managed link just to make the install pass.
+
 `~/.aify/installed-skills.json` records service, skill, harness, approved source artifact/revision/path, destination, and the digest of the tree read back there. The index is separate from the service registry. Updates and removals require the recorded digest to match what is still on disk. Unmanaged or changed skills and linked paths stay in place. Each successful skill placement is recorded before moving on; a failed copy restores its preceding contents when they can be restored without overwriting another writer.
 
 The current slice exercises a toy service. Existing service installers are not replaced, and this contract grants no permission to load a plugin.
