@@ -16,7 +16,7 @@ The current slice exercises a toy service. Existing service installers are not r
 
 ## Validate a declaration
 
-Call `skillDirectory(value)` from `aify-env/client/installed-skills` with the `aifySkills` value. It returns the directory string or `null`, using the same grammar as the installer. This is a syntax check only. It reads no filesystem and does not verify package admission or placement.
+Call `skillDirectory(value)` from `aify-env/client/installed-skills` with the `aifySkills` value. It returns the directory string or `null`, using the same grammar as the installer. One leading dot is allowed in a declared directory segment, as in `.agents/skills`, and in its recorded source path. `.` and `..` are refused. Skill names and entries inside a skill tree cannot start with a dot. This check reads no filesystem and does not verify package admission or placement.
 
 ## Verify a recorded placement
 

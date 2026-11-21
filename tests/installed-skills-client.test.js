@@ -12,14 +12,16 @@ const { verifyPlacement } = installedSkills;
 test("the public declaration check uses the installer's grammar", () => {
   assert.equal(installedSkills.skillDirectory, skillDirectory, "connect must share the installer's declaration check");
   assert.equal(installedSkills.skillDirectory({ directory: "share/skills" }), "share/skills");
+  assert.equal(installedSkills.skillDirectory({ directory: ".agents/skills" }), ".agents/skills");
   for (const declaration of [undefined, "skills", {}, { directory: "../skills" }, { directory: "C:/skills" },
-    { directory: ".agents/skills" }, { directory: "skills/nul.txt" }, { directory: "skills//nested" },
+    { directory: "." }, { directory: ".." }, { directory: "./x" }, { directory: "a/../b" },
+    { directory: "..agents/skills" }, { directory: "skills/.nul.txt" }, { directory: "skills//nested" },
     { directory: "skills", command: "node" }]) {
     assert.equal(installedSkills.skillDirectory(declaration), null);
   }
 });
 
-function fixture(t, { place = true } = {}) {
+function fixture(t, { place = true, directory = "skills" } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "placement-client-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, "host-home");
@@ -28,15 +30,30 @@ function fixture(t, { place = true } = {}) {
   const skill = "a-checkable-skill";
   const service = "a-fixture-service";
   const query = { home, service, skill, harness: "claude" };
-  const src = path.join(packageDir, "skills", skill);
+  const src = path.join(packageDir, directory, skill);
   fs.mkdirSync(src, { recursive: true });
   fs.mkdirSync(home);
   fs.writeFileSync(path.join(src, "SKILL.md"), "declared fixture skill");
-  const assets = { service, packageDir, directory: "skills", source: { artifact: "fixture", revision: "a".repeat(40), approval: "b".repeat(64) } };
-  const put = target => new SkillPlacer({ home }).place(assets, query.harness, { root: target });
-  if (place) put(runtimeSkills);
-  return { root, home, query, put, destination: path.join(runtimeSkills, skill), receipt: path.join(home, ".aify", "installed-skills.json") };
+  const assets = { service, packageDir, directory, source: { artifact: "fixture", revision: "a".repeat(40), approval: "b".repeat(64) } };
+  const put = (target = runtimeSkills) => new SkillPlacer({ home }).place(assets, query.harness, { root: target });
+  if (place) put();
+  return { root, home, query, put, src, destination: path.join(runtimeSkills, skill), receipt: path.join(home, ".aify", "installed-skills.json") };
 }
+
+test("a dot-leading package directory produces a receipt the public reader accepts", t => {
+  const f = fixture(t, { place: false, directory: ".agents/skills" });
+  assert.doesNotThrow(() => f.put(), "the source path must use the declaration grammar");
+  assert.equal(JSON.parse(fs.readFileSync(f.receipt, "utf8")).placements[0].source.path, `.agents/skills/${f.query.skill}`);
+  assert.equal(verifyPlacement(f.query).state, "placed");
+});
+
+test("dotfiles inside a declared skill still fail without touching the target", t => {
+  const f = fixture(t, { place: false, directory: ".agents/skills" });
+  fs.writeFileSync(path.join(f.src, ".local"), "not a portable tree entry");
+  assert.throws(() => f.put(), /nonportable entry name/);
+  assert.equal(fs.existsSync(f.destination), false);
+  assert.equal(fs.existsSync(f.receipt), false);
+});
 
 test("the public reader verifies a writer's receipt in an explicit home without writing", t => {
   const f = fixture(t);
