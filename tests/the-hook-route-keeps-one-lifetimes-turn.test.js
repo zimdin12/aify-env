@@ -147,6 +147,23 @@ test("applied events survive a new real host and keep anchor, blocked state, tie
   assert.equal(g.current("lead", RESIDENT).state, "idle");
 });
 
+test('a delayed start after closure keeps the wire refusal and counter, without a notice', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.send(f.body({ kind: 'turn-end', firedAtUs: AT }))).status, 200);
+  const before = f.bytes();
+  const late = await f.send(f.body({ firedAtUs: AT - 1 }));
+  assert.deepEqual(late, { status: 409, body: { agentId: 'lead', applied: false, reason: 'out-of-order' } });
+  assert.equal(f.bytes(), before);
+  assert.deepEqual(f.receiver.refusals(), { 'out-of-order': 1 });
+  assert.deepEqual(f.logs, [], 'a delayed start cannot reopen an already closed turn and needs no operator notice');
+
+  const olderEnd = await f.send(f.body({ kind: 'turn-end', firedAtUs: AT - 1 }));
+  assert.equal(olderEnd.body.reason, 'out-of-order');
+  assert.deepEqual(f.receiver.refusals(), { 'out-of-order': 2 });
+  assert.deepEqual(f.logs, ['agent turn event refused: out-of-order'], 'an older end remains diagnosable');
+  assert.equal((await f.send(f.body({ firedAtUs: AT + 1 }))).status, 200, 'a fresh start still opens a new turn');
+});
+
 test("write failure is an HTTP refusal and never commits the in-memory turn", async (t) => {
   const f = await fixture(t);
   fs.mkdirSync(path.dirname(f.file), { recursive: true }); fs.mkdirSync(f.file);

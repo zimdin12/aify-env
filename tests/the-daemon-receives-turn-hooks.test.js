@@ -106,7 +106,7 @@ test("the daemon delivers hooks to its real state host and a restart retains the
   assert.equal(delayed.status, 409);
   assert.equal(delayed.body.reason, "out-of-order");
   assert.equal(fs.readFileSync(turns, "utf8"), closed);
-  assert.match(second.output, /agent turn event refused: out-of-order/);
+  assert.doesNotMatch(second.output, /agent turn event refused: out-of-order/, 'a delayed start after closure is counted but not an operator notice');
   await quiet.stop();
   const exited = await post(nextUrl, { ...event, firedAtUs: startedAtUs + 3 });
   assert.equal(exited.status, 409);
