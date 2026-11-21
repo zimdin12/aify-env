@@ -17,6 +17,8 @@ import { createInterface } from "node:readline/promises";
 import { ReadStream } from "node:tty";
 
 import { InstallChain, USAGE, parseChainArgs } from "../lib/install-chain.mjs";
+import { SkillPlacer } from "../lib/install-skills.mjs";
+import { resolveSkillRoot, spawnRun } from "../lib/skill-roots.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
 import { wrapperInstallSource } from "../lib/wrapper-pin.mjs";
 import { approvedInstaller, connectRecorded, envWithout, gitCheckout, globalNpmRoot, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
@@ -41,6 +43,7 @@ async function runChain(plan) {
   // Where aify-wrapper comes from when it is missing: the commit this aify-env was tested against (lib/wrapper-pin.mjs),
   // or a package spec a test names.
   const wrapperSource = wrapperInstallSource(env);
+  const skillPlacer = new SkillPlacer({ home });
   let wrapper = null;
 
   const io = {
@@ -76,6 +79,15 @@ async function runChain(plan) {
       ? runMarked(bash, [installer, ...args], { env: envWithout(env, without), quiet })
       : runMarked(installer.command, [...installer.args, ...args], { env: envWithout(env, without), quiet })),
     keyEnv: async (names) => registryKeyEnv(registry, names),
+    placeSkills: async (assets, client, { without }) => {
+      const probeEnv = envWithout(env, without);
+      const roots = await resolveSkillRoot(client, { home, env: probeEnv, windows, cwd: process.cwd(),
+        find: name => wrapper.resolveOnPath(name, { env: probeEnv }).found ?? "",
+        run: spawnRun,
+      });
+      if (roots.problem) throw new Error(roots.problem);
+      skillPlacer.place(assets, client, roots);
+    },
     packageAssets: (name, url, approve, accepted) => packageAssets(name, url, {
       ...wrapper, approve, accepted, packageRoot: path.join(home, ".aify", "packages"),
       npmLs: (prefix) => JSON.parse(wrapper.npmTool(wrapper.npmCliBeside(process.execPath), env, Error)(["ls", "--prefix", prefix, "--json", "--long", "--depth=0"]) || "{}"),
