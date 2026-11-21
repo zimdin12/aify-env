@@ -107,10 +107,39 @@ const a=process.argv.slice(2),r=a[a.indexOf('--registry')+1],o=a[a.indexOf('--re
   const answers = path.join(f.home, 'answers'), terminalOut = path.join(f.home, 'terminal-out');
   fs.writeFileSync(answers, 'yes\n');
   const preload = path.join(f.home, 'controlled-terminal.mjs');
-  // This regular-file fixture proves consent order, not native tty lifetime. Keep its input adapter explicit.
-  fs.writeFileSync(preload, `import fs from 'node:fs';import tty from 'node:tty';import {syncBuiltinESMExports} from 'node:module';
-if(process.argv[1].endsWith('aify-env-install.mjs'))tty.ReadStream=class extends fs.ReadStream{constructor(fd){super(null,{fd})}};
-if(process.argv[1].endsWith('aify-env-install.mjs')) {const open=fs.openSync;fs.openSync=function(file,...rest){if(String(file).endsWith('CONIN$')||file==='/dev/tty'&&rest[0]==='r')return open(${JSON.stringify(answers)},'r');if(String(file).endsWith('CONOUT$')||file==='/dev/tty'&&rest[0]==='w')return open(${JSON.stringify(terminalOut)},'a');return open(file,...rest)};Object.defineProperty(process.stdout,'isTTY',{value:true});syncBuiltinESMExports();}\n`);
+  // A prefilled file can answer before an asynchronous regular-file prompt finishes writing.
+  // Release the simulated keypress after the prompt's write callback. Native PTY tests own terminal lifetime.
+  fs.writeFileSync(preload, `import fs from 'node:fs';import tty from 'node:tty';import { PassThrough } from 'node:stream';import {syncBuiltinESMExports} from 'node:module';
+if (process.argv[1].endsWith('aify-env-install.mjs')) {
+  let input, answer, outputFd;
+  tty.ReadStream = class extends PassThrough {
+    constructor(fd) {
+      super();
+      try { answer = fs.readFileSync(fd); } finally { fs.closeSync(fd); }
+      input = this;
+    }
+  };
+  const createOutput = fs.createWriteStream;
+  fs.createWriteStream = (file, options) => {
+    const output = createOutput(file, options);
+    if (!input || options?.fd !== outputFd) return output;
+    const write = output.write.bind(output);
+    output.write = (chunk, ...args) => {
+      if (!String(chunk).includes('[y/N]')) return write(chunk, ...args);
+      return write(chunk, error => { if (!error) input.end(answer); });
+    };
+    return output;
+  };
+  const open = fs.openSync;
+  fs.openSync = (file, ...args) => {
+    if (String(file).endsWith('CONIN$') || file === '/dev/tty' && args[0] === 'r') return open(${JSON.stringify(answers)}, 'r');
+    if (String(file).endsWith('CONOUT$') || file === '/dev/tty' && args[0] === 'w') return outputFd = open(${JSON.stringify(terminalOut)}, 'a');
+    return open(file, ...args);
+  };
+  Object.defineProperty(process.stdout, 'isTTY', { value: true });
+  syncBuiltinESMExports();
+}
+`);
   const result = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, path.join(ROOT, 'bin/aify-env-install.mjs'),
       '--connect', `fixture-service=${f.endpoint}`, '--client', 'claude'],
@@ -120,6 +149,7 @@ if(process.argv[1].endsWith('aify-env-install.mjs')) {const open=fs.openSync;fs.
     child.once('error', reject); child.once('close', status => resolve({ status, out, err }));
   });
   assert.equal(result.status, 0, result.err + result.out);
+  assert.match(fs.readFileSync(terminalOut, 'utf8'), /prepare only the channel policy[^\n]*prepare-policy[^\n]*\[y\/N\]/, 'the fixture must observe the actual owner prompt');
   assert.deepEqual(JSON.parse(fs.readFileSync(marker, 'utf8')), { args: ['prepare-policy'], home: f.home });
   assert.equal(JSON.parse(fs.readFileSync(seen, 'utf8')), 2, 'preparation must be read back by its owner');
   assert.equal(fs.existsSync(f.registry), true, 'connect continues only after preparation');

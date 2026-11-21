@@ -63,9 +63,8 @@ export async function captureCurrencyHeartbeats({ advertise = true } = {}) {
     child.stdout.on("data", (chunk) => { output += chunk; });
     child.stderr.on("data", (chunk) => { output += chunk; });
     const pluginBeats = () => received.filter((body) => body.bridgeId);
-    await until(() => /listening on (http:\/\/127\.0\.0\.1:\d+)/.test(output)
-      && pluginBeats().length > 0 && (!advertise || received.some((body) => !body.bridgeId)),
-    "startup heartbeats");
+    await until(() => /listening on (http:\/\/127\.0\.0\.1:\d+)/.test(output) && pluginBeats().length > 0,
+      "startup claimer heartbeat");
     const base = output.match(/listening on (http:\/\/127\.0\.0\.1:\d+)/)[1];
     const health = async () => {
       const response = await fetch(`${base}/health`);
@@ -77,7 +76,6 @@ export async function captureCurrencyHeartbeats({ advertise = true } = {}) {
     assert.ok(before.build && before.codeOnDisk, "test daemon has no comparable source identities");
     assert.equal(before.build, before.codeOnDisk, "fresh package already differs");
     const first = pluginBeats()[0];
-    const advertisement = received.find((body) => !body.bridgeId) || null;
     const firstCount = pluginBeats().length;
     fs.appendFileSync(path.join(pkg, "lib", "advertise.mjs"), "\n// Test-owned package-source change.\n");
     let after;
@@ -91,7 +89,8 @@ export async function captureCurrencyHeartbeats({ advertise = true } = {}) {
     assert.equal(after.build, before.build, "editing disk changed the startup identity");
     await until(() => pluginBeats().length > firstCount, "second plugin heartbeat", 35_000);
     const second = pluginBeats().at(-1);
-    return { before, after, first, second, advertisement };
+    const plainHeartbeats = received.filter((body) => !body.bridgeId).length;
+    return { before, after, first, second, plainHeartbeats };
   } finally {
     if (child && child.exitCode === null) child.kill();
     if (exited) await exited;
