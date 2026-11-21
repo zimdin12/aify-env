@@ -24,9 +24,34 @@ test("a mixed-case hostname still asks for a lowercase host key", () => {
   assert.equal(hostKeyOf("no-colon"), "");
 });
 
-test("only a Windows daemon reads Windows folders; a WSL one reads none yet", () => {
+test("the reporter reads only its own filesystem namespace and never guesses a WSL identity", () => {
   assert.equal(namespaceOf("win32:host"), "windows");
+  assert.equal(namespaceOf("linux:host"), "linux");
+  assert.equal(namespaceOf("darwin:host"), null);
   assert.equal(namespaceOf("wsl:host"), null);
+  assert.equal(namespaceOf("wsl:host", { distroId: "bad:id" }), null);
+  assert.equal(namespaceOf("wsl:host", { distroId: "Distro-Own" }), "wsl:Distro-Own");
+});
+
+test("a WSL reporter accepts only its own granted native folder", () => {
+  const wsl = { distroId: "Distro-Own", driveMounts: [{ mountPoint: "/mnt/c", drive: "C" }] };
+  const own = "wsl:Distro-Own";
+  const { watch, refused } = selectLocations([
+    item("/root/Work/repo", own),
+    item("C:/Work/repo", "windows"),
+    item("/root/Work/native", "linux"),
+    item("/root/Work/foreign", "wsl:Distro-Other"),
+    item("C:/Work/mislabeled", own),
+    item("/mnt/c/Work/mislabeled", own),
+    item("/root/Workspace/sibling", own),
+    item("/root/work/wrong-case", own),
+  ], { namespace: own, roots: ["/root/Work", "/mnt/c/Work"], wsl });
+  assert.deepEqual(watch.map(row => row.path), ["/root/Work/repo"]);
+  assert.deepEqual(refused.map(row => row.path), ["C:/Work/repo", "/root/Work/native", "/root/Work/foreign",
+    "C:/Work/mislabeled", "/mnt/c/Work/mislabeled", "/root/Workspace/sibling", "/root/work/wrong-case"]);
+  assert.match(refused[2].reason, /wsl:Distro-Other namespace/);
+  assert.match(refused[4].reason, /Windows drive mount/);
+  assert.match(refused[5].reason, /outside every granted folder/);
 });
 
 test("a granted root covers its own folders by whole segments, and nothing beside or above it", () => {

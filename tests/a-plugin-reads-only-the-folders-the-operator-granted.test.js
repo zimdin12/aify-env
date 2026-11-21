@@ -87,6 +87,26 @@ test("CONTAINMENT IS BY WHOLE SEGMENTS, case-folded on win32 only", () => {
   assert.equal(withinWatchRoots("C:/docker/x", [], "win32"), false, "CONTROL: no roots, nothing is within");
 });
 
+test("A POSIX PATH IS READ BY POSIX RULES: a backslash is a name character, and an ambiguous path grants nothing", () => {
+  // The bugs: the Windows separator rule applied on Linux, so `src\x` was granted as `src/x`; `/..` clamped to `/`,
+  // which granted the whole filesystem; `//` collapsed, and control characters or edge whitespace kept or trimmed.
+  // The rules are aify-dashboard's (server/src/locations/normalize.ts normalizePosixPath).
+  assert.deepEqual(watchRootsFrom(grant(["/home/Me/a\\b"]), "linux").roots, ["/home/Me/a\\b"], "case and backslash are kept");
+  assert.deepEqual(watchRootsFrom(grant(["/home/me/./src/../src//"]), "linux").roots, ["/home/me/src"],
+    "CONTROL: . and .. inside the path are resolved, empty segments dropped");
+  for (const bad of ["/..", "/home/../..", "//srv/x", "/home/me\u0000", "/home/me\n", " /home/me", "/home/me ", "C:/x", "C:\\x", "home/me"]) {
+    const read = watchRootsFrom(grant(["/home/ok", bad]), "linux");
+    assert.deepEqual(read.roots, [], `entry ${JSON.stringify(bad)} was granted`);
+    assert.match(read.problem, /not an absolute path/);
+  }
+  const roots = ["/home/me/src"];
+  assert.equal(withinWatchRoots("/home/me/src\\x", roots, "linux"), false, "a sibling named src\\x is not inside src");
+  assert.equal(withinWatchRoots("/home/me/src/x\\y", roots, "linux"), true, "CONTROL: a backslash below the root stays inside");
+  assert.equal(withinWatchRoots("/home/me/src/../../../..", ["/"], "linux"), false, "a path above the root is no path");
+  assert.equal(withinWatchRoots("//home/me/src", roots, "linux"), false);
+  assert.equal(withinWatchRoots("C:\\docker\\x", ["c:/docker"], "win32"), true, "CONTROL: Windows keeps its separator rule");
+});
+
 test("READ FROM ~/.aify/config.json, and an unreadable file grants nothing", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "aify-watch-roots-"));
   try {

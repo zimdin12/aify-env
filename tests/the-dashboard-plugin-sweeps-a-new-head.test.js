@@ -13,6 +13,7 @@ import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
 import { CleanupWarnings } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
 import { DIRTY_WAIT_MAX_MS, SWEEP_SCRIPT, SweepRunner, sweepOutcomeOf } from "../lib/plugins/aify-dashboard/sweep-runner.mjs";
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
+import { sweepWatchListPeer, sweepWatchListSkip } from "./fixtures/sweep-watch-list-peer.mjs";
 
 const KEY = "dashboard-key-sentinel-5c1e";
 // The checkout is checked on the host; the scripted project paths below keep their declared Windows rules.
@@ -71,7 +72,7 @@ function setUp(overrides = {}) {
   return s;
 }
 
-const WATCH_LIST_SKIP = process.platform !== "win32" && "POSIX hosts have no watch-list namespace yet (aify-env#35)";
+const WATCH_LIST_SKIP = sweepWatchListSkip();
 
 test("a new head is swept once, in the folder its look judged, and the same head is not swept again", async () => {
   // The bugs: nothing sweeps at all (the sweep was only ever run by hand), or every pass sweeps the same head again.
@@ -283,40 +284,51 @@ test("through the plugin: sweeps progress during a held poll, and yield/stop can
   execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "init", "-q"], { cwd: proj });
   execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "p"], { cwd: proj });
   const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: proj, encoding: "utf8" }).trim();
-  const endpoint = "http://127.0.0.1:9";
+  const peer = await sweepWatchListPeer(proj);
+  const endpoint = peer?.endpoint ?? "http://127.0.0.1:9";
+  const hostKey = peer?.hostKey ?? "h", projectId = peer?.projectId ?? "p1";
   let polls = 0, aborts = 0, other = false;
-  const fetch = async (url, options) => {
+  const scripted = async (url, options) => {
     const at = String(url);
-    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p1", name: "n", root: { fsNamespace: "windows", path: proj } }] });
+    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId, name: "n", root: { fsNamespace: "windows", path: proj } }] });
     if (at.endsWith('/provider/pending?waitSeconds=25')) {
       polls++;
       return new Promise((_, reject) => options.signal.addEventListener('abort', () => { aborts++; reject(Error('stopped')); }, { once: true }));
     }
-    if (at.endsWith("/host/h/projects/p1/watch-set")) return Response.json({ watchRevision: "r1", items: [{ watchId: "w1" }] });
+    if (at.endsWith(`/host/${hostKey}/projects/${projectId}/watch-set`)) return Response.json({ watchRevision: "r1", items: [{ watchId: "w1" }] });
     if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: head, cursorRevision: 1 });
     return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
   };
+  const fetch = peer ? (url, options) => peer.transport(url, options, scripted) : scripted;
   const runs = [];
   const runChild = async (args) => { runs.push(args); return { code: 0, signal: null, timedOut: false, stopped: false, error: "" }; };
   const plugin = createDashboardPlugin({
     servedElsewhere: async () => other,
-    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: `${process.platform}:h`,
+    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: peer?.machineId ?? `${process.platform}:h`,
     watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] })), []),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
   }, { fetch, runChild, runEveryMs: 25, tickMs: 25 });
   t.after(() => plugin.stop());
-  await plugin.start({ credential: async () => KEY });
+  await plugin.start({ credential: async () => peer?.key ?? KEY });
   await waitFor(() => runs.length >= 1);
   assert.equal(polls, 1, 'the provider poll is still held while the sweep completes');
   other = true; await waitFor(() => aborts === 1); assert.equal(aborts, 1, 'yield cancels the held poll');
   other = false; await waitFor(() => polls === 2); assert.equal(polls, 2, 'resume opens one replacement poll');
-  await plugin.stop(); assert.equal(aborts, 2, 'stop cancels its held poll too');
   assert.equal(runs.length, 1, `swept ${runs.length} times: once for its one head`);
   assert.equal(runs[0].script, join(checkout, SWEEP_SCRIPT));
   assert.equal(runs[0].cwd, realpathSync.native(proj));
-  assert.equal(runs[0].env.APG_DASHBOARD_PROJECT, "p1");
+  assert.equal(runs[0].env.APG_DASHBOARD_PROJECT, projectId);
   assert.equal(runs[0].env.APG_DASHBOARD_REPORTER, undefined);
   assert.equal(plugin.state().provider.sweeps, 1);
+  if (peer) {
+    assert.equal(plugin.state().refused, 4, "Windows, native Linux, other distro and outside-grant rows are refused");
+    execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "second"], { cwd: proj });
+    const next = execFileSync("git", ["rev-parse", "HEAD"], { cwd: proj, encoding: "utf8" }).trim();
+    await waitFor(() => peer.acknowledged(next) && runs.length >= 2);
+    peer.receipt("held-poll-and-range", head, next);
+    assert.equal(runs.length, 2, "one sweep for each real acknowledged head");
+  }
+  await plugin.stop(); assert.equal(aborts, 2, 'stop cancels its held poll too');
   const after = runs.length;
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(runs.length, after, "no pass after stop");
@@ -377,15 +389,19 @@ test("through the plugin: a sweep kill not confirmed is still said after a yield
   execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "init", "-q"], { cwd: proj });
   execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "p"], { cwd: proj });
   const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: proj, encoding: "utf8" }).trim();
+  const peer = await sweepWatchListPeer(proj);
+  const endpoint = peer?.endpoint ?? "http://127.0.0.1:9";
+  const hostKey = peer?.hostKey ?? "h", projectId = peer?.projectId ?? "p-kill";
   const marker = `sweep-tree-not-confirmed-${Date.now()}`;
-  const fetch = async (url) => {
+  const scripted = async (url) => {
     const at = String(url);
-    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p-kill", name: "n", root: { fsNamespace: "windows", path: proj } }] });
-    if (at.endsWith("/provider/pending?waitSeconds=25")) return Response.json({ hostKey: "h", projects: [] });
-    if (at.endsWith("/host/h/projects/p-kill/watch-set")) return Response.json({ watchRevision: "r1", items: [{ watchId: "w1" }] });
+    if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey, projects: [{ projectId, name: "n", root: { fsNamespace: "windows", path: proj } }] });
+    if (at.endsWith("/provider/pending?waitSeconds=25")) return Response.json({ hostKey, projects: [] });
+    if (at.endsWith(`/host/${hostKey}/projects/${projectId}/watch-set`)) return Response.json({ watchRevision: "r1", items: [{ watchId: "w1" }] });
     if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: head, cursorRevision: 1 });
     return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
   };
+  const fetch = peer ? (url, options) => peer.transport(url, options, scripted) : scripted;
   const runs = [];
   // Killed once, then a clean run: a client that timed out every time would be retried every 25 ms for the whole test,
   // a hot loop beside the timing-sensitive tests the suite runs in parallel.
@@ -395,7 +411,7 @@ test("through the plugin: a sweep kill not confirmed is still said after a yield
   };
   let other = false;
   const make = () => createDashboardPlugin({
-    name: "aify-dashboard", endpoint: "http://127.0.0.1:9", service: { name: "aify-dashboard", endpoint: "http://127.0.0.1:9" }, machineId: `${process.platform}:h`,
+    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: peer?.machineId ?? `${process.platform}:h`,
     servedElsewhere: async () => other,
     watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] })), []),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
@@ -403,7 +419,7 @@ test("through the plugin: a sweep kill not confirmed is still said after a yield
   const rows = (plugin) => plugin.state().problems.join("\n");
   const plugin = make();
   t.after(() => plugin.stop());
-  await plugin.start({ credential: async () => KEY });
+  await plugin.start({ credential: async () => peer?.key ?? KEY });
   await waitFor(() => rows(plugin).includes(marker));
   assert.match(rows(plugin), new RegExp(`the sweep client serving .* was killed when it ran past its time, and ${marker}`));
   assert.equal(plugin.state().problems.filter((row) => row.includes(marker)).length, 1, "said once, though both runners report the one store");
@@ -417,6 +433,7 @@ test("through the plugin: a sweep kill not confirmed is still said after a yield
   t.after(() => rebuilt.stop());
   assert.ok(rows(rebuilt).includes(marker), "said by a plugin built again in the same process");
   assert.ok(runs.length >= 1);
+  peer?.receipt("kill-warning", head);
 });
 
 test("a dashboard that does not answer is waited out on any head, never a stop, and said once the wait reaches its cap", async () => {
