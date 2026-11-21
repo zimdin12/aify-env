@@ -14,8 +14,6 @@ function fixture(t, change = () => {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fresh-pc-gates-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const m = structuredClone(template);
-  m.pins.wrapper = '1'.repeat(40);
-  m.pins.comms = '2'.repeat(40);
   m.approve = ['3'.repeat(64)];
   m.dashboardGitRepo = 'fixture-owner/dashboard';
   change(m);

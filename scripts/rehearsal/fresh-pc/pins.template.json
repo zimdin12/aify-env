@@ -4,10 +4,10 @@
   "platform": "windows",
   "distro": "aify-rehearsal-example",
   "pins": {
-    "env": "f4d996a6e036240afd80a10777c22fd81a7f8009",
-    "wrapper": null,
-    "comms": null,
-    "dashboard": "eb36e05f303684a8c371fa8fa06292c8ebe15098"
+    "env": "30327aeb2ccdb1b16708f42c0c1ad11150c26ea5",
+    "wrapper": "67954ca63a31171cbe31bf42b467e04fcc1e94c7",
+    "comms": "4fc6361191eb54b48bc198681ade2075cfeec115",
+    "dashboard": "497dc6a0af0d92f09ab06420be354d24fde5af60"
   },
   "origins": {
     "comms": "http://127.0.0.1:51881",

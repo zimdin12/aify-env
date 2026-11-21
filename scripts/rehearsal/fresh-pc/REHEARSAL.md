@@ -11,7 +11,7 @@
 | Comms | #12 B and C, plus the qualified wrapper in the `mcp/stdio` manifest and lock. |
 | Dashboard | `eb36e05f303684a8c371fa8fa06292c8ebe15098` or its reviewed successor with the declared skill and bridge bin. Its existing `5e91491a` reader pin is sufficient for `--check`. |
 
-Fill `pins.template.json` with four full, published SHAs, the Dashboard repo slug and reviewed approval digests. Keep the new Comms skills tuple out of the blanket catalogue until the refusal arm has run. An unresolved pin or a fetch failure is not permission to use `main`, rewrite Git URLs, or edit a lock.
+Copy `pins.template.json` to the fixture's `pins.json`. The template holds the four exact revisions. Fill in the guest, tools, Dashboard repo slug and reviewed approval digests without changing the pins. Keep the new Comms skills tuple out of the blanket catalogue until the refusal arm has run. A fetch failure is not permission to use `main`, rewrite Git URLs, or edit a lock.
 
 ## Prepare and tear down
 
