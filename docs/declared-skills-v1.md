@@ -18,7 +18,11 @@ Only selected, present runtimes receive a copy. Claude honours `CLAUDE_CONFIG_DI
 
 Every ancestor of a skill destination must be a real directory. If a dotfile manager links `~/.claude` or `~/.codex`, the chain refuses rather than following the link. Put the runtime's configuration in a real directory, or point `CLAUDE_CONFIG_DIR` or `CODEX_HOME` directly at its intended real directory and rerun. Do not remove the managed link just to make the install pass.
 
-`~/.aify/installed-skills.json` records service, skill, harness, approved source artifact/revision/path, destination, and the digest of the tree read back there. The index is separate from the service registry. Updates and removals require the recorded digest to match what is still on disk. Unmanaged or changed skills and linked paths stay in place. Each successful skill placement is recorded before moving on; a failed copy restores its preceding contents when they can be restored without overwriting another writer.
+`~/.aify/installed-skills.json` records service, skill, harness, approved source artifact/revision/path, destination, and the digest of the tree read back there. The index is separate from the service registry. Updates and removals require the recorded digest to match what is still on disk.
+
+Before writing any skill or receipt for a service and runtime, env checks every incoming and retiring destination and names any conflicts together. Even a byte-identical unmanaged tree is not adopted. Move a conflicting skill aside intact to a backup outside every configured skill search root, then rerun. Leave linked runtime roots alone and configure a real directory as described above.
+
+Preflight does not reserve the paths. Env checks again before each change. Every successful placement is recorded before moving on, so a late conflict can leave earlier placements recorded. A failed copy restores the preceding contents when it can do so without overwriting another writer.
 
 The current slice exercises a toy service. Existing service installers are not replaced, and this contract grants no permission to load a plugin.
 

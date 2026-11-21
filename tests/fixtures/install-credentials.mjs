@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { credentialRoot, writeCredentialFile } from '../../lib/credential-fs.mjs';
@@ -25,7 +25,15 @@ export class CredentialInstallFixture {
     const peer = process.env.AIFY_WRAPPER_REPO;
     assert.ok(peer && fs.existsSync(path.join(peer, 'lib/connect.mjs')), 'explicit maintained wrapper fixture source');
     for (const dir of ['lib', 'bin']) fs.cpSync(path.join(peer, dir), path.join(f.wrapperRoot, dir), { recursive: true });
-    fs.copyFileSync(path.join(peer, 'package.json'), path.join(f.wrapperRoot, 'package.json'));
+    const manifest = path.join(peer, 'package.json');
+    fs.copyFileSync(manifest, path.join(f.wrapperRoot, 'package.json'));
+    if (JSON.parse(fs.readFileSync(manifest, 'utf8')).dependencies?.['aify-env']) {
+      // Use the source checkout's installed pin, never this fixture's primary env or a global package.
+      const pin = spawnSync(process.execPath, [path.join(peer, 'lib/checkout-env-pin.mjs')], { encoding: 'utf8', timeout: 5000 });
+      assert.equal(pin.status, 0, `Install the locked aify-env dependency in the isolated wrapper peer first. ${pin.stderr ?? ''}`);
+      const { includePinnedEnv } = await import(pathToFileURL(path.join(peer, 'tests/pinned-env-fixture.mjs')).href);
+      includePinnedEnv(f.wrapperRoot);
+    }
     f.bin = path.join(f.home, 'bin'); fs.mkdirSync(f.bin);
     const npmStub = path.join(f.bin, 'npm-stub.mjs');
     fs.writeFileSync(npmStub, `if (JSON.stringify(process.argv.slice(2)) !== '["root","-g"]') process.exit(91); process.stdout.write(process.env.FIXTURE_NPM_ROOT + '\\n');\n`);
