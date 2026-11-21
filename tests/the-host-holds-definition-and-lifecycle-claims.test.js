@@ -31,13 +31,14 @@ async function fixture(t, mode) {
         requests.push(request);
         // Tripwire for an immediate-retry mutant, so it cannot starve the simulated clock.
         if (requests.length > 24) return new Promise(resolve => unrelated.push(resolve));
-        if (stopping || (mode === 'hold' && !body.waitMs) || mode === 'ignore') return response(bodyFor([]));
+        if (stopping || !body.waitMs || mode === 'ignore') return response(bodyFor([]));
         if (mode === 'error') return response({}, 503);
+        const held = mode === 'slow-unmarked' ? {} : { held: true };
         return new Promise((resolve, reject) => {
-          const complete = () => { ready.delete(queue); resolve(response(bodyFor([]))); };
+          const complete = () => { ready.delete(queue); resolve(response({ ...bodyFor([]), ...held })); };
           claimSignals.push(init.signal);
           init.signal.addEventListener('abort', () => { ready.delete(queue); reject(init.signal.reason); }, { once: true });
-          ready.set(queue, { at: now + body.waitMs, complete });
+          ready.set(queue, { at: now + (mode === 'held-short' ? 8_000 : body.waitMs), complete });
         });
       }
       if (path.endsWith('/environments/heartbeat')) return response({});
@@ -79,8 +80,14 @@ async function fixture(t, mode) {
   };
 }
 
-for (const [mode, expected] of [['hold', [0, 25_000, 50_000]], ['ignore', [0, 10_000, 20_000, 30_000, 40_000, 50_000, 60_000]],
-  ['error', [0, 10_000, 20_000, 30_000, 40_000, 50_000, 60_000]]]) {
+const oldCadence = [0, 10_000, 20_000, 30_000, 40_000, 50_000, 60_000];
+for (const [mode, expected] of [
+  ['hold', [0, 25_000, 50_000]],
+  ['held-short', [0, 8_000, 16_000, 24_000, 32_000, 40_000, 48_000, 56_000]],
+  ['slow-unmarked', [0, 35_000]],
+  ['ignore', oldCadence],
+  ['error', oldCadence],
+]) {
   test(`${mode}: idle claims over the same 61-second window`, async t => {
     const f = await fixture(t, mode);
     await f.until(61_000);
