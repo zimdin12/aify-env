@@ -211,7 +211,7 @@ test("ROUTE B, RESTART: a refused contribution after the stop keeps the restart'
   assert.equal(h.starts.length, 0, "and no start");
 });
 
-test("ROUTE C STAYS REFUSED: the daemon's lifecycle ports supply no builder, and the default refuses before any start", async t => {
+test("ROUTE C: the core builder also refuses a defined start without the required contributor", async t => {
   const h = await host(), f = new BootFixture(); let passed;
   t.after(() => fs.rmSync(h.root, { recursive: true, force: true }));
   f.options.home = h.root; f.options.definitions = h.store; f.options.runner = h.processes;
@@ -232,6 +232,6 @@ test("ROUTE C STAYS REFUSED: the daemon's lifecycle ports supply no builder, and
     expectedRevision: 1, expectedLifetime: null, action: 'start', requestedBy: 'operator' };
   const answer = await ports.lifecycle.execute(request);
   assert.deepEqual({ status: answer.status, outcome: answer.outcome, starts: h.starts.length },
-    { status: 'refused', outcome: 'lifecycle-launch-composition-unavailable', starts: 0 });
+    { status: 'refused', outcome: 'lead names secrets, and no plugin started on this host supplies them', starts: 0 });
   assert.ok(ports.lifecycle instanceof AgentLifecycle);
 });
