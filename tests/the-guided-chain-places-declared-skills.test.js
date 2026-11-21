@@ -1,13 +1,14 @@
 // Real connect admission and receipt, real assets phase and real copies. The npm/CLI inputs
 // are owned fixtures; neither a consumer installer nor a toy package bin may run.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { InstallChain, parseChainArgs } from "../lib/install-chain.mjs";
-import { envWithout, packageAssets, registryKeyEnv } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, envWithout, packageAssets, registryKeyEnv } from "../lib/install-chain-host.mjs";
 import { SkillPlacer, skillDirectory } from "../lib/install-skills.mjs";
 import { HERMES_PROBE, resolveSkillRoot } from "../lib/skill-roots.mjs";
 import { CredentialInstallFixture, PEER_REQUIRED, ROOT } from "./fixtures/install-credentials.mjs";
@@ -61,6 +62,25 @@ const file=path.join(${JSON.stringify(ROOT)},'bin','aify-env-registry.mjs'); pro
   const rows = () => fs.existsSync(receiptFile) ? readJson(receiptFile).placements : [];
   const outer = fencedFs(f.home);
   assert.throws(() => outer.writeFileSync(path.join(os.tmpdir(), "toy-must-not-write"), "never"), /escaped the scratch home/);
+  const fileSetRoot = path.join(f.home, "file-set");
+  const sources = path.join(f.home, "approved-file-set");
+  const hookFile = path.join(f.home, "turn-start.fixture");
+  const hook = "verified fixture turn-start payload";
+  const digest = bytes => createHash("sha256").update(bytes).digest("hex");
+  const manifest = `${digest(hook)}  turn-start.fixture\n`;
+  const fileSet = { kind: "file-set", id: "hooks", source: { git: { repo: "example/hooks", revision: "1".repeat(40) } },
+    entries: ["turn-start.fixture"], manifest: { path: "/toy-file-set.manifest" }, sha256: digest(manifest) };
+  outer.mkdirSync(fileSetRoot);
+  outer.writeFileSync(path.join(fileSetRoot, "turn-start.fixture"), hook);
+  const [serve] = f.server.listeners("request");
+  f.server.removeListener("request", serve);
+  f.server.on("request", (req, res) => {
+    if (req.url === fileSet.manifest.path) {
+      res.setHeader("content-type", "text/plain");
+      return res.end(manifest);
+    }
+    return serve(req, res);
+  });
   let variant, accepted, artifact, approval;
   const npm = args => {
     assert.ok(["ls", "install"].includes(args[0]));
@@ -82,24 +102,37 @@ const file=path.join(${JSON.stringify(ROOT)},'bin','aify-env-registry.mjs'); pro
     }
     return "";
   };
-  const thenAssets = (approved = [approval], installed = accepted) => packageAssets(SERVICE, f.endpoint, {
+  const thenAssets = (approved = [approval], installed = accepted, options) => packageAssets(SERVICE, f.endpoint, {
     fetchSpec, validateSpec, tupleDigest, packageRoot, installedCommit, binFiles, approve: approved, accepted: installed, npmLs: prefix => JSON.parse(npm(["ls", "--prefix", prefix])),
+    ...options,
   });
-  const run = async (selected, generation, skills, fault) => {
+  const run = async (selected, generation, skills, fault, { fileSetExit } = {}) => {
     variant = skills;
     artifact = { id: ARTIFACT, kind: "package", source: { git: { repo: "example/toy", revision: generation.repeat(40) } }, entries: [BIN] };
-    f.spec.artifacts = [artifact];
+    const mixed = fileSetExit !== undefined;
+    f.spec.artifacts = mixed ? [fileSet, artifact] : [artifact];
     approval = tupleDigest(artifact);
+    const approvals = f.spec.artifacts.map(tupleDigest);
     const placer = new SkillPlacer({ home: f.home, io: fencedFs(f.home, fault) });
     const events = [], problems = [];
+    const installer = path.join(sources, SERVICE, fileSet.source.git.revision, "install.sh");
     let registryBytes;
     const io = {
       env, say: line => problems.push(line), ensurePackages: async () => true, unapproved: async () => [],
-      policyReadiness: () => ({ state: "ready" }), approvedInstaller: async () => null,
+      policyReadiness: () => ({ state: "ready" }),
+      approvedInstaller: (name, url, approve) => approvedInstaller(name, url, { fetchSpec, validateSpec, tupleDigest, catalogue: [], approve, sources,
+        checkout: (repo, revision, dir) => {
+          assert.deepEqual({ repo, revision }, fileSet.source.git);
+          assert.equal(path.join(dir, "install.sh"), installer);
+          outer.mkdirSync(dir, { recursive: true });
+          outer.writeFileSync(installer, "fixture only; never execute it");
+          return { ok: true, head: revision };
+        },
+      }),
       connect: async () => {
-        const report = await connect({ name: SERVICE, endpoint: f.endpoint, secrets: {}, approved: new Set([approval]),
+        const report = await connect({ name: SERVICE, endpoint: f.endpoint, secrets: {}, approved: new Set(approvals),
           registryPath: f.registry, home: f.home, dest: path.join(f.home, "launchers"), wrapperRoot: f.wrapperRoot,
-          execPath: process.execPath, env, readStored: () => "", packageRoot, stagingDir: path.join(f.home, "staging"),
+          execPath: process.execPath, env, readStored: () => "", packageRoot, fileSetRoot, stagingDir: path.join(f.home, "staging"),
           tools: aifyEnvTools(owner, env), npm });
         const record = connectRecord(report);
         assert.equal(record.result, "committed");
@@ -108,12 +141,27 @@ const file=path.join(${JSON.stringify(ROOT)},'bin','aify-env-registry.mjs'); pro
         events.push("connect");
         return { status: 0, installed: accepted };
       },
-      packageAssets: (_name, _url, approved, installed) => thenAssets(approved, installed),
+      packageAssets: (_name, _url, approved, installed, options) => thenAssets(approved, installed, options),
       render: () => assert.fail("the toy service does not render launchers"),
       cliPresent: client => selected.includes(client),
       registryHash: () => fs.readFileSync(f.registry).toString("utf8"),
       keyEnv: names => registryKeyEnv(f.registry, names),
-      runInstaller: () => assert.fail("a declarative package must not execute any installer or bin"),
+      runInstaller: (file, argv, options) => {
+        assert.ok(mixed, "a declarative package must not execute any installer or bin");
+        assert.equal(file, installer, "only the acquired file-set installer may run");
+        if (argv[0] === "--acquire-only") {
+          assert.deepEqual(argv, ["--acquire-only", f.endpoint]);
+          assert.deepEqual(options, { quiet: true });
+          events.push("file-set-acquire");
+          return 0;
+        }
+        assert.deepEqual(argv, ["--assets-only", "--client", "claude", f.endpoint]);
+        assert.deepEqual(options, { without: ["FIXTURE_SERVICE_KEY"], quiet: true });
+        assert.equal(envWithout(env, options.without).FIXTURE_SERVICE_KEY, undefined);
+        events.push("file-set-assets");
+        if (fileSetExit === 0) outer.writeFileSync(hookFile, present(fileSetRoot, "turn-start.fixture"));
+        return fileSetExit;
+      },
       placeSkills: (assets, client, { without }) => {
         assert.deepEqual(without, ["FIXTURE_SERVICE_KEY"]);
         events.push(client);
@@ -140,10 +188,10 @@ const file=path.join(${JSON.stringify(ROOT)},'bin','aify-env-registry.mjs'); pro
         placer.place(assets, client, runtime);
       },
     };
-    const plan = parseChainArgs(["--connect", `${SERVICE}=${f.endpoint}`, "--approve", approval, "--no-prompt", ...selected.flatMap(client => ["--client", client])]);
+    const plan = parseChainArgs(["--connect", `${SERVICE}=${f.endpoint}`, "--no-prompt", ...approvals.flatMap(hash => ["--approve", hash]), ...selected.flatMap(client => ["--client", client])]);
     const result = await new InstallChain(plan, io).run();
     assert.deepEqual(fs.readFileSync(f.registry), registryBytes, "assets may not alter the registry, including after failure");
-    assert.equal(events[0], "connect", "package custody must precede placement");
+    assert.equal(events[mixed ? 1 : 0], "connect", "package custody must precede placement");
     assert.equal(fs.existsSync(path.join(f.home, ".claude")), false, "must not use the default Claude home");
     assert.equal(fs.existsSync(path.join(f.home, ".codex")), false, "must not use the default Codex home");
     assert.equal(fs.existsSync(path.join(f.home, ".hermes")), false, "must not use the default Hermes home");
@@ -178,6 +226,31 @@ test("an approved toy package places, updates and removes skills through the exi
   assert.ok(b.rows().every(row => row.skill === "alpha" && row.source.revision === "b".repeat(40)));
   assert.match((await b.thenAssets([])).problem, /not approved/);
   assert.match((await b.thenAssets(undefined, {})).problem, /not the package connect installed in this run/);
+});
+
+test("the file-set step keeps its turn-start payload and an accepted package places the declared skill", { skip: PEER_REQUIRED }, async t => {
+  const b = await toy(t);
+  const { result, problems, events } = await b.run(["claude"], "1", { alpha: "mixed skill" }, undefined, { fileSetExit: 0 });
+  assert.equal(result.exit, 0, problems.join("\n"));
+  assert.equal(present(b.f.home, "turn-start.fixture"), "verified fixture turn-start payload");
+  assert.deepEqual(events, ["file-set-acquire", "connect", "file-set-assets", "claude"], "the accepted package must place its skill after file-set assets");
+  assert.equal(present(path.join(b.roots.claude, "alpha")), "mixed skill");
+  assert.equal(b.rows().length, 1);
+});
+
+test("failed file-set assets leave the previous skill and receipt unchanged", { skip: PEER_REQUIRED }, async t => {
+  const b = await toy(t);
+  const prior = await b.run(["claude"], "2", { alpha: "previous" });
+  assert.equal(prior.result.exit, 0, prior.problems.join("\n"));
+  const receipt = path.join(b.f.home, ".aify", "installed-skills.json");
+  const before = fs.readFileSync(receipt);
+  const { result, problems, events } = await b.run(["claude"], "3", { alpha: "not placed", beta: "not placed" }, undefined, { fileSetExit: 1 });
+  assert.equal(result.exit, 78);
+  assert.match(problems.join("\n"), /assets toy-skill-provider for claude failed/);
+  assert.deepEqual(events, ["file-set-acquire", "connect", "file-set-assets"], "a file-set failure stops before declared placement");
+  assert.equal(present(path.join(b.roots.claude, "alpha")), "previous");
+  assert.equal(fs.existsSync(path.join(b.roots.claude, "beta")), false);
+  assert.deepEqual(fs.readFileSync(receipt), before);
 });
 
 test("unmanaged and linked destinations are refused without changing the destination or the receipt", { skip: PEER_REQUIRED }, async t => {

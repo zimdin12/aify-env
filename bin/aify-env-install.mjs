@@ -88,8 +88,8 @@ async function runChain(plan) {
       if (roots.problem) throw new Error(roots.problem);
       skillPlacer.place(assets, client, roots);
     },
-    packageAssets: (name, url, approve, accepted) => packageAssets(name, url, {
-      ...wrapper, approve, accepted, packageRoot: path.join(home, ".aify", "packages"),
+    packageAssets: (name, url, approve, accepted, { skillsOnly } = {}) => packageAssets(name, url, {
+      ...wrapper, approve, accepted, skillsOnly, packageRoot: path.join(home, ".aify", "packages"),
       npmLs: (prefix) => JSON.parse(wrapper.npmTool(wrapper.npmCliBeside(process.execPath), env, Error)(["ls", "--prefix", prefix, "--json", "--long", "--depth=0"]) || "{}"),
     }),
     connect: ({ name, url, keys, stdin, approve, noPrompt }) => {

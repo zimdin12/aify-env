@@ -407,6 +407,12 @@ test("a package's assets entry is the <service>-assets bin of the one package np
   assert.equal(await packageAssets("aify-dashboard", "http://d", p), null, "no declared entry is no assets");
   fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-assets": "bin/assets.mjs" } }));
   assert.deepEqual(await packageAssets("aify-dashboard", "http://d", p), { command: "/node", args: [path.join(pkg, "bin", "assets.mjs")] }, "a hoisted dependency beside it is not a second candidate");
+  assert.equal(await packageAssets("aify-dashboard", "http://d", { ...p, skillsOnly: true,
+    binFiles: () => assert.fail("a file-set installer leaves no role for a package assets bin"),
+  }), null);
+  assert.equal(await packageAssets("aify-dashboard", "http://d", { ...p, skillsOnly: true, accepted: {},
+    npmLs: () => assert.fail("mixed mode must not inspect a package this connect did not accept"),
+  }), null);
   fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-assets": "../../../x.mjs" } }));
   assert.match((await packageAssets("aify-dashboard", "http://d", p)).problem, /leaves the package/);
   fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ bin: { "aify-dashboard-assets": "bin/gone.mjs" } }));
