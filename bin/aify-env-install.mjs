@@ -83,7 +83,8 @@ async function runChain(plan) {
     keyEnv: async (names) => registryKeyEnv(registry, names),
     placeSkills: async (assets, client, { without }) => {
       const probeEnv = envWithout(env, without);
-      const roots = await resolveSkillRoot(client, { home, env: probeEnv, windows, cwd: process.cwd(),
+      // Placement is user-wide. The checkout that launched the installer must not add project search roots.
+      const roots = await resolveSkillRoot(client, { home, env: probeEnv, windows, cwd: home,
         find: windows ? undefined : name => wrapper.resolveOnPath(name, { env: probeEnv }).found ?? "",
         run: spawnRun,
       });
