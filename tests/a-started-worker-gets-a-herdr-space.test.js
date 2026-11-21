@@ -96,15 +96,14 @@ test("A HERDR THAT IS NOT THIS INVOCATION'S IS NEVER DRIVEN", () => {
 test("THE DEFECT: a started worker gets a space, attached to the worker that is already running", async () => {
   const herdr = fakeHerdr();
   const openPane = opener({ herdr });
-  const opened = await openPane({ id: "proc-1", label: "agent-0000000389", terminal: true });
+  const opened = await openPane({ id: "proc-1", label: "Worker display name", terminal: true }, { agentId: "agent-0000000389" });
   assert.equal(opened.paneId, "w2:p1", "no space was opened for a started worker");
   const { calls } = herdr;
   assert.equal(calls.length, 3, "a space, the wait for its shell, and the command typed into it");
   assert.deepEqual(calls[1].argv.slice(0, 2), ["pane", "process-info"], "it typed without waiting for a shell");
 
   // THE SPACE, named for the agent an operator is looking for rather than an opaque process id.
-  assert.deepEqual(calls[0].argv.slice(0, 3), ["workspace", "create", "--label"]);
-  assert.equal(calls[0].argv[3], "aify-env agent-0000000389");
+  assert.deepEqual(calls[0].argv, ["workspace", "create", "--label", "agent-0000000389"], "the agent ID names the workspace");
   // ON THIS INSTANCE'S OWN HERDR. The wrong socket would drive the operator's ordinary Herdr.
   assert.equal(calls[0].socket, SOCKET, "the space was opened on the wrong Herdr");
 
@@ -119,6 +118,14 @@ test("THE DEFECT: a started worker gets a space, attached to the worker that is 
   assert.match(decoded, /aify-env\.mjs' attach --id 'proc-1'/, "the pane does not attach to the running worker");
   assert.match(decoded, /AIFY_ENV_ENDPOINT='http:\/\/127\.0\.0\.1:65000'/, "the pane was pointed at no daemon");
 });
+
+for (const [label, expected] of [["Worker display name", "Worker display name"], [undefined, "proc-1"]]) {
+  test(`a workspace without an agent ID uses ${expected}`, async () => {
+    const herdr = fakeHerdr();
+    await opener({ herdr })({ id: "proc-1", label, terminal: true });
+    assert.deepEqual(herdr.calls[0].argv, ["workspace", "create", "--label", expected], "the fallback label has no product prefix");
+  });
+}
 
 test("ON A POSIX HOST THE PANE GETS A POSIX COMMAND, not the Windows one it cannot run", async () => {
   // Reported from WSL: every agent's pane showed Windows PowerShell failing to find a Linux node.
