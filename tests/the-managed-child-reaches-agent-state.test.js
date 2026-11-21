@@ -211,9 +211,11 @@ test("immediate PTY exit and pipe error-close end once; durable exit failure doe
   assert.equal(await b.exited, -1, "persistence failure cannot escape ordinary finish");
   assert.deepEqual(g.runner.list(), []);
   assert.equal(g.host.current("lead", GIVEN).process.verified, "no");
-  assert.equal(g.reports.length, 1, "durable failure is reported once");
+  assert.equal(g.reports.filter(line => line.startsWith('managed lifetime end:')).length, 1, 'durable failure is reported once');
+  assert.deepEqual(g.reports.filter(line => line.startsWith('managed worker ')), ['managed worker lead exited (code 1)'],
+    'the actual close, not the preceding child error, supplies the exit notice');
   g.children[0].emit("close", 1, "");
-  assert.equal(g.reports.length, 1);
+  assert.equal(g.reports.length, 2, 'duplicate close adds neither notice');
   const c = await g.runner.start(g.spec());
   assert.equal((await g.send(g.children[1].env.AIFY_LIFETIME, AT + 2)).body.reason, "persistence-failed", "failed end refuses later durable effects");
   assert.ok(c.id);
