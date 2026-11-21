@@ -40,6 +40,14 @@
     "./process-registry": "./lib/process-registry.mjs",
     "./allowlist": "./lib/allowlist.mjs",
     "./interpreter": "./lib/interpreter.mjs",
-    "./host-wsl": "./lib/host-wsl.mjs"
+    "./host-wsl": "./lib/host-wsl.mjs",
+    "./client/machine-id": {
+      "types": "./lib/client/machine-id.d.mts",
+      "default": "./lib/client/machine-id.mjs"
+    },
+    "./client/credentials": {
+      "types": "./lib/client/credentials.d.mts",
+      "default": "./lib/client/credentials.mjs"
+    }
   }
 }

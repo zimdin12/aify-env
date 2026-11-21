@@ -13,18 +13,28 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+const entries = Object.entries(manifest.exports || {});
+const targets = entries.flatMap(([name, spec]) => typeof spec === 'string'
+  ? [{ name, target: spec }] : Object.entries(spec).map(([condition, target]) => ({ name: `${name} (${condition})`, target })));
+const daemon = join(ROOT, 'bin', 'aify-env.mjs');
+
+function assertNoDaemonExport() {
+  const entryPoint = realpathSync.native(daemon);
+  assert.ok(targets.every(({ target }) => typeof target === 'string'
+    && realpathSync.native(join(ROOT, target)) !== entryPoint),
+  'the daemon is exported as an importable module; importing it starts the environment');
+}
 
 test("every declared export resolves to a file that exists", () => {
   const missing = [];
-  for (const [name, target] of Object.entries(manifest.exports || {})) {
-    const path = join(ROOT, String(target).replace(/^\.\//, ""));
-    if (!existsSync(path)) missing.push(`${name} -> ${target}`);
+  for (const { name, target } of targets) {
+    if (typeof target !== 'string' || !existsSync(join(ROOT, target))) missing.push(`${name} -> ${target}`);
   }
   assert.deepEqual(missing, [],
     "a declared export points at a file that is not there. This fails at the CONSUMER, in another "
@@ -34,10 +44,11 @@ test("every declared export resolves to a file that exists", () => {
 test("every declared export actually imports", async () => {
   // Existing is not the same as loading: a module with a bad import of its own exists and throws on
   // first use. `node --check` has passed exactly that in this project's sibling.
-  for (const [name, target] of Object.entries(manifest.exports || {})) {
-    if (name.endsWith("package.json")) continue;
-    const url = new URL(String(target).replace(/^\.\//, ""), new URL("../", import.meta.url));
-    await assert.doesNotReject(() => import(url.href), `${name} is declared but does not load`);
+  assertNoDaemonExport();
+  for (const [name] of entries) {
+    if (name.endsWith('package.json')) continue;
+    const specifier = manifest.name + name.slice(1);
+    await assert.doesNotReject(() => import(specifier), `${name} is declared but does not load`);
   }
 });
 
@@ -53,9 +64,7 @@ test("the daemon entry point is NOT part of the importable surface", () => {
   // IMPORTING IT STARTS THE ENVIRONMENT, which supersedes the one already serving and reaps its
   // managed workers. That has cost this project a live fleet. It is reachable as a `bin`, which
   // runs it deliberately, and must never be reachable as an import.
-  const targets = Object.values(manifest.exports || {}).map(String);
-  assert.ok(!targets.some((t) => t.includes("bin/aify-env.mjs")),
-    "the daemon is exported as an importable module; importing it starts the environment");
+  assertNoDaemonExport();
   assert.equal(manifest.bin["aify-env"], "./bin/aify-env.mjs", "it must still be runnable as a command");
 });
 
@@ -70,8 +79,8 @@ test("the published files include everything the exports point into", () => {
   // published resolves here and fails only once installed from a registry -- the worst place to
   // find out.
   const published = new Set((manifest.files || []).map((f) => String(f).replace(/\/$/, "")));
-  const unpublished = Object.values(manifest.exports || {})
-    .map((t) => String(t).replace(/^\.\//, "").split("/")[0])
+  const unpublished = targets
+    .map(({ target }) => target.replace(/^\.\//, '').split('/')[0])
     .filter((top) => top !== "package.json" && !published.has(top));
   assert.deepEqual([...new Set(unpublished)], [],
     "an export points into a directory `files` does not publish");
