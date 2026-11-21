@@ -27,6 +27,7 @@ function host({ present = [], connectExit = 0, env = {}, installer = { path: "/s
     preparePolicy: async () => { throw new Error("unexpected preparation"); },
     ensurePackages: async () => { calls.push(["ensurePackages"]); return packages; },
     approvedInstaller: async (name) => { calls.push(["approvedInstaller", name]); return installer; },
+    installerSkillHandoff: () => null,
     runInstaller: async (file, args, opts = {}) => { calls.push(["installer", file, ...args]); if (args[0] === "--assets-only") calls.push(["without", ...(opts.without ?? [])]); calls.push(["quiet", args[0], opts.quiet === true]); if (assetsWrite && args[0] === "--assets-only") registry.bytes = "R2"; return args[0] === "--assets-only" ? assetsExit : 0; },
     connect: async (c) => { calls.push(["connect", c.name, c.keys.map((k) => `${k.field}=${k.file}`).join()]); return { status: connectExit, installed: installed[c.name] ?? {} }; },
     render: async (client, url) => { calls.push(["render", client, url]); return 0; },

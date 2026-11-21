@@ -4,7 +4,15 @@ An approved, top-level package installed by the current connect can put `"aifySk
 
 The assets phase checks the same-connect path, package revision and approval before accepting this declaration. It reads and copies data; it never imports the package or executes an assets bin for the declared tree. A package must choose its legacy assets bin or the declaration, not both. The existing wrapper artifact format still requires a declared package bin even when no MCP entry references it; skill placement does not execute that bin. The usual package acquisition and connect policy is unchanged.
 
-A service can retain its file-set installer for non-skill assets and offer a separate skill package. The file-set installer still acquires and runs its existing assets step first. A failure stops before skill placement. The chain uses only a skill package accepted by that same connect and never runs an additional package assets bin in this mode. A service that offers both must remove its own copies of the declared skills from its guided assets step before adoption.
+A file-set installer can keep its non-skill assets while a separate package supplies skills. By default, its assets step still runs first and a failure stops before placement. The chain never runs an additional package assets bin in this mode.
+
+## Hand off guided skills to env
+
+To require placement before the non-skill step, put exactly one literal header in the selected `install.sh`, such as `# aify-env-skills-handoff-v1: comms-skills`. Replace `comms-skills` with the artifact ID: lowercase letters, digits and hyphens, starting with a letter or digit. The chain reads this declaration without running the script. It requires that exact package to be accepted by the same connect and to declare a valid skills directory. Missing, pending and mismatched packages stop the chain.
+
+For each selected, present runtime, env verifies the placement and then calls the same installer with `--assets-only --client <runtime> --skills-placed-v1 <url>`. The flag applies only to that invocation. That path must require the flag and never copy skills itself. A failed placement does not run that assets step; if non-skill assets fail afterward, successfully recorded skills stay placed for a rerun. Neither step receives the service key variables. `--acquire-only` and standalone keep their separate contracts and never receive the flag.
+
+Before a service installer hands off to env, it can run `node <path-to-bin/aify-env-install.mjs> --supports-skills-handoff-v1` on the same module it will use. Exit 0 confirms the protocol without connecting, starting a daemon or processing credentials. Check before reading a key, and refuse rather than falling back when unsupported. The flag coordinates trusted installers; it is not proof for an unrelated process or an authorization boundary.
 
 Only selected, present runtimes receive a copy. Claude honours `CLAUDE_CONFIG_DIR`. Codex must report that it searches the proposed `CODEX_HOME` skills root. Hermes uses its selected runtime's reported skills directory under `autonomous-ai-agents`, with no links or external-directory changes. An unproved or shadowed target must be resolved before placement.
 

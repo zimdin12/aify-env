@@ -21,11 +21,16 @@ import { SkillPlacer } from "../lib/install-skills.mjs";
 import { resolveSkillRoot, spawnRun } from "../lib/skill-roots.mjs";
 import { resolveExecutable } from "../lib/interpreter.mjs";
 import { wrapperInstallSource } from "../lib/wrapper-pin.mjs";
-import { approvedInstaller, connectRecorded, envWithout, gitCheckout, globalNpmRoot, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
+import { approvedInstaller, connectRecorded, envWithout, gitCheckout, globalNpmRoot, installerSkillHandoff, packageAssets, registryKeyEnv, registryPath, runMarked, unapprovedArtifacts, wrapperModules } from "../lib/install-chain-host.mjs";
 
-const plan = parseChainArgs(process.argv.slice(2));
-if (plan.problem) process.stderr.write(`aify-env install: ${plan.problem}\n${USAGE}\n`);
-process.exitCode = plan.problem ? 78 : await runChain(plan);
+const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === "--supports-skills-handoff-v1") {
+  process.exitCode = 0;
+} else {
+  const plan = parseChainArgs(args);
+  if (plan.problem) process.stderr.write(`aify-env install: ${plan.problem}\n${USAGE}\n`);
+  process.exitCode = plan.problem ? 78 : await runChain(plan);
+}
 
 /** The chain on this host; resolves to its exit status. */
 async function runChain(plan) {
@@ -74,6 +79,7 @@ async function runChain(plan) {
       checkout: (repo, revision, dir) => gitCheckout(repo, revision, dir, { base: env.AIFY_INSTALL_GIT_BASE || undefined }),
       sources: path.join(path.dirname(registry), "sources"),
     }),
+    installerSkillHandoff,
     // An install.sh runs under bash; a package's assets entry is `{command, args}`.
     runInstaller: (installer, args, { without = [], quiet = false } = {}) => (typeof installer === "string"
       ? runMarked(bash, [installer, ...args], { env: envWithout(env, without), quiet })
@@ -88,8 +94,8 @@ async function runChain(plan) {
       if (roots.problem) throw new Error(roots.problem);
       skillPlacer.place(assets, client, roots);
     },
-    packageAssets: (name, url, approve, accepted, { skillsOnly } = {}) => packageAssets(name, url, {
-      ...wrapper, approve, accepted, skillsOnly, packageRoot: path.join(home, ".aify", "packages"),
+    packageAssets: (name, url, approve, accepted, options) => packageAssets(name, url, {
+      ...wrapper, ...options, approve, accepted, packageRoot: path.join(home, ".aify", "packages"),
       npmLs: (prefix) => JSON.parse(wrapper.npmTool(wrapper.npmCliBeside(process.execPath), env, Error)(["ls", "--prefix", prefix, "--json", "--long", "--depth=0"]) || "{}"),
     }),
     connect: ({ name, url, keys, stdin, approve, noPrompt }) => {

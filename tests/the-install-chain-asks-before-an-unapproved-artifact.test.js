@@ -25,6 +25,7 @@ function host({ unapproved = [BRIDGE], answer = "y" } = {}) {
     windows: false,
     ensurePackages: async () => true,
     approvedInstaller: async (name, url, approve) => { calls.push(["approvedInstaller", [...approve]]); return { path: "/src/install.sh" }; },
+    installerSkillHandoff: () => null,
     runInstaller: async () => 0,
     connect: async (c) => { calls.push(["connect", [...c.approve]]); return { status: 0, installed: {} }; },
     render: async () => 0,

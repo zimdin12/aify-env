@@ -1,6 +1,7 @@
 // Real connect admission and receipt, real assets phase and real copies. The npm/CLI inputs
 // are owned fixtures; neither a consumer installer nor a toy package bin may run.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,6 +10,8 @@ import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { InstallChain, parseChainArgs } from "../lib/install-chain.mjs";
 import { approvedInstaller, envWithout, packageAssets, registryKeyEnv } from "../lib/install-chain-host.mjs";
+import * as chainHost from "../lib/install-chain-host.mjs";
+import { verifyPlacement } from "aify-env/client/installed-skills";
 import { SkillPlacer, skillDirectory } from "../lib/install-skills.mjs";
 import { HERMES_PROBE, resolveSkillRoot } from "../lib/skill-roots.mjs";
 import { CredentialInstallFixture, PEER_REQUIRED, ROOT } from "./fixtures/install-credentials.mjs";
@@ -106,15 +109,16 @@ const file=path.join(${JSON.stringify(ROOT)},'bin','aify-env-registry.mjs'); pro
     fetchSpec, validateSpec, tupleDigest, packageRoot, installedCommit, binFiles, approve: approved, accepted: installed, npmLs: prefix => JSON.parse(npm(["ls", "--prefix", prefix])),
     ...options,
   });
-  const run = async (selected, generation, skills, fault, { fileSetExit } = {}) => {
+  const run = async (selected, generation, skills, fault, { fileSetExit, handoff, admission } = {}) => {
     variant = skills;
     artifact = { id: ARTIFACT, kind: "package", source: { git: { repo: "example/toy", revision: generation.repeat(40) } }, entries: [BIN] };
+    if (admission === "pending") artifact.source = { pending: "fixture package unavailable" };
     const mixed = fileSetExit !== undefined;
-    f.spec.artifacts = mixed ? [fileSet, artifact] : [artifact];
+    f.spec.artifacts = [...(mixed ? [fileSet] : []), ...(admission === "absent" ? [] : [artifact])];
     approval = tupleDigest(artifact);
     const approvals = f.spec.artifacts.map(tupleDigest);
     const placer = new SkillPlacer({ home: f.home, io: fencedFs(f.home, fault) });
-    const events = [], problems = [];
+    const events = [], problems = [], assetsCalls = [];
     const installer = path.join(sources, SERVICE, fileSet.source.git.revision, "install.sh");
     let registryBytes;
     const io = {
@@ -125,10 +129,11 @@ const file=path.join(${JSON.stringify(ROOT)},'bin','aify-env-registry.mjs'); pro
           assert.deepEqual({ repo, revision }, fileSet.source.git);
           assert.equal(path.join(dir, "install.sh"), installer);
           outer.mkdirSync(dir, { recursive: true });
-          outer.writeFileSync(installer, "fixture only; never execute it");
+          outer.writeFileSync(installer, `#!/usr/bin/env bash\n${handoff ? `# aify-env-skills-handoff-v1: ${handoff}\n` : ""}fixture only; never execute it\n`);
           return { ok: true, head: revision };
         },
       }),
+      installerSkillHandoff: file => chainHost.installerSkillHandoff?.(file) ?? null,
       connect: async () => {
         const report = await connect({ name: SERVICE, endpoint: f.endpoint, secrets: {}, approved: new Set(approvals),
           registryPath: f.registry, home: f.home, dest: path.join(f.home, "launchers"), wrapperRoot: f.wrapperRoot,
@@ -139,7 +144,7 @@ const file=path.join(${JSON.stringify(ROOT)},'bin','aify-env-registry.mjs'); pro
         accepted = Object.fromEntries(record.installed.map(({ id, at }) => [id, at]));
         registryBytes = fs.readFileSync(f.registry);
         events.push("connect");
-        return { status: 0, installed: accepted };
+        return { status: 0, installed: admission === "wrong-path" ? { ...accepted, [ARTIFACT]: "/wrong-package" } : accepted };
       },
       packageAssets: (_name, _url, approved, installed, options) => thenAssets(approved, installed, options),
       render: () => assert.fail("the toy service does not render launchers"),
@@ -155,9 +160,11 @@ const file=path.join(${JSON.stringify(ROOT)},'bin','aify-env-registry.mjs'); pro
           events.push("file-set-acquire");
           return 0;
         }
-        assert.deepEqual(argv, ["--assets-only", "--client", "claude", f.endpoint]);
+        if (!handoff) assert.deepEqual(argv, ["--assets-only", "--client", "claude", f.endpoint]);
         assert.deepEqual(options, { without: ["FIXTURE_SERVICE_KEY"], quiet: true });
         assert.equal(envWithout(env, options.without).FIXTURE_SERVICE_KEY, undefined);
+        const harness = argv[2];
+        assetsCalls.push({ argv, placement: verifyPlacement({ home: f.home, service: SERVICE, skill: "alpha", harness }).state });
         events.push("file-set-assets");
         if (fileSetExit === 0) outer.writeFileSync(hookFile, present(fileSetRoot, "turn-start.fixture"));
         return fileSetExit;
@@ -190,13 +197,18 @@ const file=path.join(${JSON.stringify(ROOT)},'bin','aify-env-registry.mjs'); pro
     };
     const plan = parseChainArgs(["--connect", `${SERVICE}=${f.endpoint}`, "--no-prompt", ...approvals.flatMap(hash => ["--approve", hash]), ...selected.flatMap(client => ["--client", client])]);
     const result = await new InstallChain(plan, io).run();
-    assert.deepEqual(fs.readFileSync(f.registry), registryBytes, "assets may not alter the registry, including after failure");
-    assert.equal(events[mixed ? 1 : 0], "connect", "package custody must precede placement");
+    if (registryBytes) {
+      assert.deepEqual(fs.readFileSync(f.registry), registryBytes, "assets may not alter the registry, including after failure");
+      assert.equal(events[mixed ? 1 : 0], "connect", "package custody must precede placement");
+    } else {
+      assert.deepEqual(events, [], "refusal before connect may not run the installer or place skills");
+      assert.equal(fs.existsSync(f.registry), false);
+    }
     assert.equal(fs.existsSync(path.join(f.home, ".claude")), false, "must not use the default Claude home");
     assert.equal(fs.existsSync(path.join(f.home, ".codex")), false, "must not use the default Codex home");
     assert.equal(fs.existsSync(path.join(f.home, ".hermes")), false, "must not use the default Hermes home");
     if (fs.existsSync(receiptFile)) assert.doesNotMatch(fs.readFileSync(receiptFile, "utf8"), /must-not-be-recorded/);
-    return { result, events, problems };
+    return { result, events, problems, assetsCalls };
   };
   return { f, run, roots, rows, thenAssets };
 }
@@ -236,6 +248,63 @@ test("the file-set step keeps its turn-start payload and an accepted package pla
   assert.deepEqual(events, ["file-set-acquire", "connect", "file-set-assets", "claude"], "the accepted package must place its skill after file-set assets");
   assert.equal(present(path.join(b.roots.claude, "alpha")), "mixed skill");
   assert.equal(b.rows().length, 1);
+});
+
+test("the install entry answers the handoff capability without running the chain", t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "skills-capability-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const run = (...args) => spawnSync(process.execPath, [path.join(ROOT, "bin", "aify-env-install.mjs"), ...args], {
+    env: { ...process.env, HOME: home, USERPROFILE: home, AIFY_INSTALL_CHAIN: "1" }, cwd: home,
+    encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"],
+  });
+  const flag = "--supports-skills-handoff-v1";
+  const supported = run(flag);
+  assert.equal(supported.status, 0, "the exact install entry must expose the capability");
+  assert.equal(supported.stdout + supported.stderr, "", "the capability must not enter the chain");
+  assert.equal(run("--supports-skills-handoff-v0").status, 78, "a different capability is not supported");
+  const extra = run(flag, "extra");
+  assert.equal(extra.status, 78, "only the bare probe may succeed");
+  assert.match(extra.stderr, /unknown option/);
+  assert.deepEqual(fs.readdirSync(home), []);
+});
+
+test("an opted-in installer receives the handoff only after the selected placement is verified", { skip: PEER_REQUIRED }, async t => {
+  const b = await toy(t);
+  const { result, events, assetsCalls, problems } = await b.run(clients, "1", { alpha: "handoff skill" }, undefined, { fileSetExit: 0, handoff: ARTIFACT });
+  assert.equal(result.exit, 0, problems.join("\n"));
+  assert.deepEqual(events, ["file-set-acquire", "connect", ...clients.flatMap(client => [client, "file-set-assets"])], "opt-in must place before every assets call");
+  assert.deepEqual(assetsCalls, clients.map(client => ({ argv: ["--assets-only", "--client", client, "--skills-placed-v1", b.f.endpoint], placement: "placed" })), "only the selected invocation may receive the verified handoff");
+});
+
+for (const [admission, declared, reason] of [
+  ["absent", ARTIFACT, /required skill package .* was not accepted/],
+  ["pending", ARTIFACT, /required skill package .* was not accepted/],
+  ["wrong-id", "different-package", /required skill package .* was not accepted/],
+  ["wrong-path", ARTIFACT, /not the package connect installed in this run/],
+  ["bad-declaration", "../skills", /invalid skills handoff declaration/],
+]) {
+  test(`a ${admission} skill handoff cannot invoke the opting installer's assets`, { skip: PEER_REQUIRED }, async t => {
+    const b = await toy(t);
+    const { result, problems, assetsCalls } = await b.run(["claude"], "1", { alpha: "not placed" }, undefined, { fileSetExit: 0, handoff: declared, admission });
+    assert.deepEqual(assetsCalls, [], "failed custody must not run the assets child, even without the flag");
+    assert.equal(result.exit, 78);
+    assert.match(problems.join("\n"), reason);
+    assert.deepEqual(b.rows(), []);
+  });
+}
+
+test("a failed placement never hands off to the opting installer", { skip: PEER_REQUIRED }, async t => {
+  const b = await toy(t);
+  const dest = path.join(b.roots.claude, "alpha");
+  fs.mkdirSync(dest, { recursive: true });
+  fs.writeFileSync(path.join(dest, "SKILL.md"), "unmanaged bytes");
+  const { result, problems, events, assetsCalls } = await b.run(["claude"], "1", { alpha: "offered bytes" }, undefined, { fileSetExit: 0, handoff: ARTIFACT });
+  assert.equal(result.exit, 78);
+  assert.match(problems.join("\n"), /unmanaged or changed/);
+  assert.deepEqual(assetsCalls, [], "a failed placement cannot invoke the assets child");
+  assert.deepEqual(events, ["file-set-acquire", "connect", "claude"]);
+  assert.equal(present(dest), "unmanaged bytes");
+  assert.deepEqual(b.rows(), []);
 });
 
 test("failed file-set assets leave the previous skill and receipt unchanged", { skip: PEER_REQUIRED }, async t => {
