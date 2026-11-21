@@ -1,4 +1,4 @@
-// The agent-state POST fits the dashboard's envelope (docs/AGENT-STATE-DASHBOARD-v1.md, agreed 2026-10-28).
+// The agent-state POST fits the dashboard's envelope (docs/agent-state-v1.md, agreed 2026-10-28).
 //
 // THE DASHBOARD REFUSES A WHOLE PUSH for one top-level field it does not list. On 2026-10-20 aify-env added `build` and
 // no agent state was applied there for 17 hours. So the lists are read from the doc, not repeated here, and bodies
@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
-const DOC = fs.readFileSync(path.join(HERE, "..", "docs", "AGENT-STATE-DASHBOARD-v1.md"), "utf8");
+const DOC = fs.readFileSync(path.join(HERE, "..", "docs", "agent-state-v1.md"), "utf8");
 
 /** The doc's ```envelope block as {kind: {required: Set, optional: Set}}, `every` folded into each kind. */
 function envelopeFromDoc(text) {

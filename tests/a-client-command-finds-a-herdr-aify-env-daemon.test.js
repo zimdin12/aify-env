@@ -60,6 +60,15 @@ test("CONTROLS: a named endpoint wins, and an environment at the default port is
   assert.equal((await findEnvEndpoint({ env: {}, home: homeWithReceipt(), fetchImpl, state: everyoneAlive })).endpoint, DEFAULT);
 });
 
+test('readEnvEndpoint honors canonical then alias before the client discovers a default', async () => {
+  const canonical = 'http://127.0.0.1:5555', alias = 'http://127.0.0.1:5556';
+  const options = { home: homeWithReceipt(), fetchImpl: () => assert.fail('an explicitly named endpoint must not discover another') };
+  const selected = env => findEnvEndpoint({ ...options, env });
+  assert.equal((await selected({ AIFY_ENV_ENDPOINT: canonical, AIFY_ENV_URL: alias })).endpoint, canonical);
+  assert.equal((await selected({ AIFY_ENV_URL: alias })).endpoint, alias);
+  assert.equal((await selected({ AIFY_ENV_ENDPOINT: '', AIFY_ENV_URL: alias })).endpoint, alias);
+});
+
 test("chooseEnvEndpoint: a named endpoint is taken without asking anything", async () => {
   const fetchHealth = async () => assert.fail("a named endpoint needs no knock");
   assert.deepEqual(await chooseEnvEndpoint({ named: "http://127.0.0.1:5555", defaultEndpoint: DEFAULT, fetchHealth }),

@@ -24,6 +24,7 @@
 import { fileURLToPath } from "node:url";
 
 import { findEnvEndpoint } from "../lib/serving-endpoint.mjs";
+import { ENV_ENDPOINT_NAMES } from "../lib/env-endpoint-names.mjs";
 
 const LF = String.fromCharCode(10);
 const say = (text) => process.stderr.write(`${text}${LF}`);
@@ -62,7 +63,7 @@ export function parseRunArgs(argv = []) {
  * knows no service and no runtime, and a list of what to KEEP would have to name them.
  */
 export const HOST_ONLY_ENV = Object.freeze([
-  "AIFY_ENV_ENDPOINT",
+  ...ENV_ENDPOINT_NAMES,
   "AIFY_ENV_PROCESS_RECORD",
   "AIFY_SERVICE_REGISTRY",
   "AIFY_ADVERTISE",

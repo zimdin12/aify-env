@@ -127,11 +127,13 @@ test("it does NOT forward what addresses the daemon itself", () => {
   const env = forwardableEnv({
     AIFY_AGENT_ID: "fx-as00",
     AIFY_ENV_ENDPOINT: "http://evil:9999",
+    AIFY_ENV_URL: "http://evil:9998",
     AIFY_SERVICE_REGISTRY: "/tmp/other.json",
     AIFY_ENV_PROCESS_RECORD: "/tmp/other-record.json",
   });
   assert.equal(env.AIFY_AGENT_ID, "fx-as00", "the identity must still travel");
-  for (const name of ["AIFY_ENV_ENDPOINT", "AIFY_SERVICE_REGISTRY", "AIFY_ENV_PROCESS_RECORD"]) {
+  // Both ENV_ENDPOINT_NAMES describe the host, not the worker.
+  for (const name of ["AIFY_ENV_ENDPOINT", "AIFY_ENV_URL", "AIFY_SERVICE_REGISTRY", "AIFY_ENV_PROCESS_RECORD"]) {
     assert.equal(env[name], undefined, `${name} addresses the daemon and must not be forwarded`);
   }
 });

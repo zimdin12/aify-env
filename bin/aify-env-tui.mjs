@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { startDashboard } from "../lib/dashboard.mjs";
+import { readEnvEndpoint } from "../lib/env-endpoint-names.mjs";
 import { createClientInput } from "../lib/client-input.mjs";
 import { createNotices } from "../lib/notices.mjs";
 import { LEAVING_SIGNALS, quitView } from "../lib/view-exit.mjs";
@@ -31,7 +32,7 @@ const args = process.argv.slice(2);
 const once = args.includes("--once");
 
 const registryPath = process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json");
-const endpoint = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
+const endpoint = readEnvEndpoint() || "http://127.0.0.1:8802";
 
 // THE CONSOLE NEEDS A KEYBOARD, so it is offered only when there is one. `--once` renders a frame for
 // a script or a test and exits; a pipe has no selection to move and no terminal to put into raw mode,

@@ -27,6 +27,7 @@ import { collectEnvironmentChecks } from "../lib/environment-report.mjs";
 import { discoverServingEndpoint, liveInvocationRegistries, readyReceipts } from "../lib/serving-endpoint.mjs";
 import { credentialRoot, listCredentialStore } from "../lib/credential-fs.mjs";
 import { terminalSupport } from "../lib/runner.mjs";
+import { readEnvEndpoint } from "../lib/env-endpoint-names.mjs";
 // THE HOST CHECKS that moved here from `aify-comms doctor` (plan D11). Every reader below only reads:
 // the process listing, the credential resolution and the service GETs start, write and kill nothing.
 import { collectHostChecks } from "../lib/host-checks.mjs";
@@ -41,7 +42,8 @@ const asJson = args.includes("--json");
 const strict = args.includes("--strict");
 
 const REGISTRY_PATH = process.env.AIFY_SERVICE_REGISTRY || join(homedir(), ".aify", "services.json");
-const ENV_ENDPOINT = process.env.AIFY_ENV_ENDPOINT || "http://127.0.0.1:8802";
+const NAMED_ENDPOINT = readEnvEndpoint();
+const ENV_ENDPOINT = NAMED_ENDPOINT || "http://127.0.0.1:8802";
 /** Where `herdr-aify env` daemons leave their ready.json receipts (lib/serving-endpoint.mjs). */
 const HERDR_PROFILE = join(homedir(), ".aify", "herdr");
 /** Short: a probe that hangs is a probe that turned a verifier into a wait. */
@@ -74,9 +76,9 @@ async function knock(url) {
 
 const checks = await collectEnvironmentChecks({
   endpoint: ENV_ENDPOINT,
-  // ONLY WHEN NO ENDPOINT WAS NAMED. An explicit AIFY_ENV_ENDPOINT is the one to judge: judging a
+  // ONLY WHEN NO ENDPOINT WAS NAMED. An explicitly named endpoint is the one to judge: judging a
   // daemon found elsewhere instead reported a stopped environment as running.
-  discoverEndpoint: process.env.AIFY_ENV_ENDPOINT ? null : () => discoverServingEndpoint({
+  discoverEndpoint: NAMED_ENDPOINT ? null : () => discoverServingEndpoint({
     ...readyReceipts(HERDR_PROFILE),
     fetchHealth: async (endpoint) => {
       const answer = await knock(`${endpoint}/health`);

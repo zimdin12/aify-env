@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
+import { readEnvEndpoint } from '../lib/env-endpoint-names.mjs';
 import { detectHerdr, herdrCandidates, endpoint, HerdrClient, listWorkers, selectWorker, openWorker, unsupportedPlatform } from '../lib/herdr.mjs';
 
 try {
@@ -10,7 +11,7 @@ try {
   if (unsupported) throw new Error(unsupported);
   const binary = detectHerdr();
   if (!binary) throw new Error(`Herdr not found. Looked in: ${herdrCandidates().join(', ') || '(nowhere to look)'}. Install separately: https://herdr.dev/docs/quick-start/ . Nothing installed or started`);
-  const base = endpoint(process.env.AIFY_ENV_ENDPOINT);
+  const base = endpoint(readEnvEndpoint());
   const client = new HerdrClient(process.env.HERDR_SOCKET_PATH);
   const workers = await listWorkers(base);
   let wanted = args[0];

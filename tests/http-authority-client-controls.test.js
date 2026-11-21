@@ -10,11 +10,11 @@ import { authorityServer } from './fixtures/http-authority.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const dnsFixture = fileURLToPath(new URL('./fixtures/http-authority-dns.cjs', import.meta.url));
-function client(command, args, endpoint, home) {
+function client(command, args, endpoint, home, alias = '') {
   return new Promise((resolve, reject) => {
     const script = command === 'output' ? path.join(root, 'tests', 'fixtures', 'http-authority-output-client.mjs') : path.join(root, 'bin', `aify-env-${command}.mjs`);
     const child = spawn(process.execPath, ['--require', dnsFixture, script, ...(command === 'output' ? [endpoint] : args)], {
-      env: { ...process.env, HOME: home, USERPROFILE: home, AIFY_ENV_ENDPOINT: endpoint,
+      env: { ...process.env, HOME: home, USERPROFILE: home, AIFY_ENV_ENDPOINT: endpoint, AIFY_ENV_URL: alias,
         AIFY_SERVICE_REGISTRY: path.join(home, 'no-services.json'), AIFY_AGENT_DEFINITIONS_DIR: path.join(home, 'definitions'), AIFY_ENV_LOCAL_SOCKET: '0',
         AIFY_PROBE_TIMEOUT_MS: '1000', NO_COLOR: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -27,6 +27,21 @@ function client(command, args, endpoint, home) {
     child.on('exit', code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
   });
 }
+
+test('doctor accepts the read alias but a refused canonical address does not fall back to it', async t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'authority-alias-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const alternate = await authorityServer(t, {});
+  const named = await authorityServer(t, {});
+  const alias = `http://127.0.0.1:${alternate.port}`;
+  await client('doctor', ['--json'], '', home, alias);
+  const alreadySeen = alternate.seen.requests.length;
+  assert.ok(alreadySeen > 0, 'doctor did not use the alias when canonical was empty');
+  await client('doctor', ['--json'], `http://forwarded.example:${named.port}`, home, alias);
+  assert.ok(named.seen.requests.length > 0, 'doctor did not ask the canonical endpoint');
+  assert.ok(named.seen.requests.every(request => request.status === 403), 'the named endpoint did not refuse the request');
+  assert.equal(alternate.seen.requests.length, alreadySeen, 'doctor retried the refused canonical endpoint through the alias');
+});
 
 for (const command of ['tui', 'doctor', 'attach', 'run', 'agents', 'roots']) {
   for (const mode of ['default', 'untrusted-forwarder', 'trusted-forwarder']) {

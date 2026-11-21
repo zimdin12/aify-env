@@ -5,7 +5,7 @@ import { test } from 'node:test';
 const read = name => JSON.parse(fs.readFileSync(new URL(`../docs/agent-state/${name}`, import.meta.url)));
 const data = read('scenarios.json'), bodies = read(data.publications), schema = read('schema.json');
 const rules = () => {
-  const doc = fs.readFileSync(new URL('../docs/AGENT-STATE-DASHBOARD-v1.md', import.meta.url), 'utf8');
+  const doc = fs.readFileSync(new URL('../docs/agent-state-v1.md', import.meta.url), 'utf8');
   const block = /```receiver-policy\n([\s\S]*?)```/.exec(doc);
   assert.ok(block, 'the contract must state its receiver-policy value once'); return JSON.parse(block[1]);
 };

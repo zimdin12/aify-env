@@ -146,8 +146,11 @@ attach, because every worker already has a space. **Leaving that Herdr session e
 and every worker in it**; that lifetime is the launcher's, and it is described with the rest of the
 mode in [aify-wrapper's HERDR.md](https://github.com/zimdin12/aify-wrapper/blob/main/HERDR.md).
 That daemon serves a port the OS picked, and `aify-env agents import`, `aify-env attach` and
-`aify-env run` find it from its ready receipt when nothing answers on 8802 (`AIFY_ENV_ENDPOINT`
-still wins when set). Non-loopback forwarded authorities need an explicit
+`aify-env run` find it from its ready receipt when nothing answers on 8802 and no URL was named.
+Env clients read a nonempty `AIFY_ENV_ENDPOINT` first, then the legacy read alias `AIFY_ENV_URL`,
+then their existing default or discovery behavior. A named endpoint that refuses a request does not
+fall back to the alias or discovery. Managed workers receive both names with their actual owner's URL
+for compatibility with installed wrappers. Non-loopback forwarded authorities need an explicit
 [`http.trustedAuthorities` grant](docs/HTTP-AUTHORITY.md), including custom comms `--env-endpoint` URLs.
 
 **`aify-env herdr [agent]`, one worker into a Herdr you already run.** It opens an existing worker
@@ -259,7 +262,7 @@ definition's model through the existing store. They never switch a running agent
 
 Status is live host state, not definition data: alive is not working. aify-env derives the word from
 process, turn and screen observations and publishes changes independently of work claims. See the
-[agent-state contract](docs/AGENT-STATE-DASHBOARD-v1.md#publication-and-contact) for publication and freshness.
+[agent-state contract](docs/agent-state-v1.md#publication-and-contact) for publication and freshness.
 
 ### Dialogs it answers for a managed agent
 

@@ -67,7 +67,7 @@ for (const pipes of [false, true]) test(`actual ${pipes ? "HTTP pipes" : "plugin
   const f = fixture(t, { pipes });
   if (pipes) {
     const r = await handleRequest({ method: "POST", path: "/processes", body: { service: "fixture", launcher: "/fixture/claude-aify",
-      env: { AIFY_AGENT_ID: "lead", AIFY_SESSION_MODE: "resident", AIFY_ENV_URL: "http://wrong", AIFY_LIFETIME: "stale" } } },
+      env: { AIFY_AGENT_ID: "lead", AIFY_SESSION_MODE: "resident", AIFY_ENV_URL: "http://wrong", aify_env_endpoint: "http://wrong-too", AIFY_LIFETIME: "stale" } } },
     { runner: f.runner, readFile: () => TEXT, platform: "linux" });
     assert.equal(r.status, 201);
   } else {
@@ -82,7 +82,9 @@ for (const pipes of [false, true]) test(`actual ${pipes ? "HTTP pipes" : "plugin
     assert.equal(result.outcome, "started");
   }
   const env = f.children[0].env, token = env.AIFY_LIFETIME;
-  assert.equal(env.AIFY_ENV_URL, URL, "host URL reaches consumed child env");
+  assert.equal(env.AIFY_ENV_ENDPOINT, URL, 'envEndpointBindings sends the canonical owner URL to the child');
+  assert.equal(env.AIFY_ENV_URL, URL, 'legacy wrapper still receives the real owner URL');
+  assert.equal(Object.hasOwn(env, 'aify_env_endpoint'), false, 'ambient canonical spelling cannot survive');
   assert.equal(env.AIFY_ENV_INSTANCE, "default", "state instance is not Runner UUID");
   assert.match(token, uuid, "fresh full lifetime UUID reaches child");
   assert.notEqual(token, f.runner.instance());
