@@ -66,7 +66,8 @@ test("THE FIRST PASS PUBLISHES the complete snapshot, fenced by machine; the nex
   assert.deepEqual([body.machineId, body.storeId, body.entries.map((e) => [e.id, e.state, e.revision])],
     [MACHINE, storeId, [["lead", "valid", 1]]]);
   assert.match(body.snapshotDigest, /^[0-9a-f]{64}$/);
-  assert.equal(api.calls[0][1], ENV, "the claim names this environment");
+  assert.deepEqual(api.calls.map(([kind, env]) => [kind, env]), [["push", ENV], ["claim", ENV]],
+    "the first snapshot is published before the first claim can wait");
   clock.now += PUSH_INTERVAL_MS - 1;
   await sync.pass(ENV);
   assert.equal(pushes(api).length, 1, "nothing changed and the interval has not passed");
@@ -199,7 +200,7 @@ test("A SERVICE OLDER THAN DEFINITIONS: its 404s are logged once each, and `acce
   assert.equal(sync.state.accepted, null, "nothing asked yet, nothing known");
   for (let pass = 0; pass < 3; pass += 1) await sync.pass(ENV);
   assert.equal(pushes(api).length, 3, "it still tries every pass");
-  assert.deepEqual(logged, ["aify-comms definition requests failed (404: not found)", "aify-comms definitions not published (404: not found)"]);
+  assert.deepEqual(logged, ["aify-comms definitions not published (404: not found)", "aify-comms definition requests failed (404: not found)"]);
   assert.equal(sync.state.accepted, false);
 });
 

@@ -17,7 +17,10 @@ function fixture({ claim, execute, report, agents = true, advertisement } = {}) 
     async heartbeat(body) { calls.beats.push(body); return {}; },
     async claim() { return {}; },
     async claimControls() { return { controls: [] }; },
-    async claimLifecycleRequests(...args) { calls.claims.push(args); return claim ? claim() : { requests: [row] }; },
+    async claimLifecycleRequests(...args) {
+      calls.claims.push(args);
+      return claim ? claim() : { requests: calls.claims.length === 1 ? [row] : [] };
+    },
     async reportLifecycleRequest(...args) { calls.reports.push(args); return report?.(...args); },
   };
   const plugin = createCommsPlugin({ api, machineId: 'machine-1',
@@ -34,13 +37,15 @@ function fixture({ claim, execute, report, agents = true, advertisement } = {}) 
 test('plugin.start claims lifecycle requests, executes exact row and reports exact result', async () => {
   const f = fixture();
   await f.plugin.start(f.host); await flush();
-  assert.deepEqual(f.calls.claims, [['test:host:default', 'machine-1', [...LIFECYCLE_ACTIONS], ['automatic-start-v1']]]);
+  const wire = ['test:host:default', 'machine-1', [...LIFECYCLE_ACTIONS], ['automatic-start-v1']];
+  assert.deepEqual(f.calls.claims.map(args => args.slice(0, 4)), [wire, wire], 'a work reply re-arms without waiting');
+  assert.ok(f.calls.claims.every(args => args[4].signal instanceof AbortSignal));
   assert.deepEqual(f.calls.executions, [row]);
   assert.deepEqual(f.calls.reports, [['test:host:default', 'request-1', 'machine-1', result]]);
   assert.deepEqual(f.plugin.state().lifecycle, { requestsHandled: 1, lastError: '', accepted: true });
   assert.ok(f.timers.some(timer => timer.ms === REQUEST_POLL_MS));
   await f.tick();
-  assert.equal(f.calls.claims.length, 2, 'poll repeats through the injected timer');
+  assert.equal(f.calls.claims.length, 3, 'a fast empty reply waits for the compatibility timer');
   await f.plugin.stop();
 });
 

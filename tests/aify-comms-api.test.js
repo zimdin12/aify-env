@@ -215,7 +215,7 @@ test("the definition calls send what the service's routes take", async () => {
   const base = "/environments/win32%3Ahost-a%3Adefault";
   assert.deepEqual(sent, [
     ["PUT", `${base}/agent-definitions`, { bridgeId: IDENTITY.bridgeId, ...snapshot }],
-    ["POST", `${base}/definition-requests/claim`, { bridgeId: IDENTITY.bridgeId, machineId: "win32:host-a" }],
+    ["POST", `${base}/definition-requests/claim`, { bridgeId: IDENTITY.bridgeId, machineId: "win32:host-a", waitMs: 25_000 }],
     ["POST", `${base}/definition-requests/req-1/result`,
       { status: "done", outcome: "", resultIncarnation: 1, resultRevision: 2, bridgeId: IDENTITY.bridgeId, machineId: "win32:host-a" }],
     // THE WHOLE BODY, so a brief cannot arrive beside it: a control's body once became the new worker's

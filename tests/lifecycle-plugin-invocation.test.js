@@ -62,8 +62,9 @@ async function fixture(t, mode = 'healthy') {
       assert.equal(fs.existsSync(lock), false, 'subscription follows lock release');
       assert.equal(handle, 'h'); events.push('subscription'); output = onOutput; return () => {};
     } };
+  const offered = [request];
   const api = { heartbeat: async () => ({}), claim: async () => ({}), claimControls: async () => ({ controls: [] }),
-    claimLifecycleRequests: async () => ({ requests: [request] }),
+    claimLifecycleRequests: async () => ({ requests: offered.splice(0) }),
     async prepareLifecycleLaunch() { assert.equal(fs.existsSync(lock), false); events.push('prepare'); return { ok: true, launch }; },
     async reportLifecycleAttachment(e, id, machine, body) {
       assert.equal(fs.existsSync(lock), false, 'attachment follows lock release');
@@ -85,7 +86,7 @@ async function fixture(t, mode = 'healthy') {
   for (let i = 0; i < 100 && !report; i++) await new Promise(resolve => setImmediate(resolve));
   assert.ok(report, 'the real factory lifecycle pass reports');
   return { events, report, attachment, journal, stopKey, plugin, get birthAttempts() { return birthAttempts; },
-    reports: () => reports, endWorker: () => { liveHandles = []; },
+    reports: () => reports, offerReplay: () => offered.push(request), endWorker: () => { liveHandles = []; },
     tick: async () => { for (const timer of timers.splice(0)) timer.callback(); await new Promise(resolve => setImmediate(resolve)); },
     output: async () => { output('fixture-output'); await new Promise(resolve => setImmediate(resolve)); } };
 }
@@ -122,7 +123,9 @@ test('held factory stops lifecycle claims until resume, then replays without ano
   await f.tick();
   for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.reports(), 1, 'held phase does not claim lifecycle work');
+  f.offerReplay();
   assert.equal(f.plugin.resume(), true);
+  await f.tick();
   for (let i = 0; i < 100 && f.reports() < 2; i++) await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.reports(), 2); assert.equal(f.birthAttempts, 1);
   f.endWorker(); assert.deepEqual(await f.plugin.detach(), { detached: true, held: 0 });

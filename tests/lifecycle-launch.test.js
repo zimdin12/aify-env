@@ -117,9 +117,9 @@ test('LifecycleSync passes invocation-bound preparation/start callbacks to the g
 });
 
 test('tracked plugin lifecycle loop supplies its launch adapter callbacks', async () => {
-  let callbacks;
+  let callbacks, offered = [request];
   const plugin = createCommsPlugin({ api: { heartbeat: async () => ({}), claim: async () => ({}),
-    claimControls: async () => ({ controls: [] }), claimLifecycleRequests: async () => ({ requests: [request] }),
+    claimControls: async () => ({ controls: [] }), claimLifecycleRequests: async () => ({ requests: offered.splice(0) }),
     reportLifecycleRequest: async () => {} }, machineId: 'm',
     agents: { lifecycle: { execute: async (row, ports) => { callbacks = ports; return { status: 'done' }; } }, rawIdentity: () => ({}) },
     advertisement: () => ({ kind: 'test', hostname: 'host' }), cwdRoots: () => [],

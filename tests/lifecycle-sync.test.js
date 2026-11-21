@@ -34,7 +34,7 @@ test('CommsApi lifecycle methods fence exact canonical routes', async () => {
   assert.equal((await sync.pass('e/x')).outcome, 'synced');
   await api.reportLifecycleRequest('e/x', 'r', 'm', { status: 'done', outcome: 'stop', resultLifetime: null, finishedAt: 'now' });
   assert.ok(calls[0][0].endsWith('/environments/e%2Fx/lifecycle-requests/claim'));
-  assert.deepEqual(calls[0][1], { bridgeId: 'bridge', machineId: 'm', actions: [...LIFECYCLE_ACTIONS], capabilities: ['automatic-start-v1'] });
+  assert.deepEqual(calls[0][1], { bridgeId: 'bridge', machineId: 'm', actions: [...LIFECYCLE_ACTIONS], capabilities: ['automatic-start-v1'], waitMs: 25_000 });
   assert.ok(calls[1][0].endsWith('/environments/e%2Fx/lifecycle-requests/r/result'));
   assert.equal(calls[1][1].bridgeId, 'bridge');
 });
