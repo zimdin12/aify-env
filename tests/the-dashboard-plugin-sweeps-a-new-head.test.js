@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { createDashboardPlugin } from "../lib/plugins/aify-dashboard/index.mjs";
 import { CleanupWarnings } from "../lib/plugins/aify-dashboard/provider-runner.mjs";
@@ -15,7 +15,8 @@ import { DIRTY_WAIT_MAX_MS, SWEEP_SCRIPT, SweepRunner, sweepOutcomeOf } from "..
 import { grantedRoots, watchRootsFrom } from "../lib/watch-roots.mjs";
 
 const KEY = "dashboard-key-sentinel-5c1e";
-const CHECKOUT = "C:/checkout";
+// The checkout is checked on the host; the scripted project paths below keep their declared Windows rules.
+const CHECKOUT = resolve("/checkout");
 const EXISTING = new Set([CHECKOUT, join(CHECKOUT, SWEEP_SCRIPT)]);
 const H1 = "1".repeat(40);
 const H2 = "2".repeat(40);
@@ -69,6 +70,8 @@ function setUp(overrides = {}) {
   s.problems = () => s.runner.state().problems.join("\n");
   return s;
 }
+
+const WATCH_LIST_SKIP = process.platform !== "win32" && "POSIX hosts have no watch-list namespace yet (aify-env#35)";
 
 test("a new head is swept once, in the folder its look judged, and the same head is not swept again", async () => {
   // The bugs: nothing sweeps at all (the sweep was only ever run by hand), or every pass sweeps the same head again.
@@ -267,7 +270,7 @@ test("a stop during a run records nothing", async () => {
   assert.deepEqual(s.runner.state(), { runs: 0, stopped: [], problems: [] });
 });
 
-test("through the plugin: sweeps progress during a held poll, and yield/stop cancel the poll", async (t) => {
+test("through the plugin: sweeps progress during a held poll, and yield/stop cancel the poll", { skip: WATCH_LIST_SKIP }, async (t) => {
   // The bugs: the sweeper never wired into the plugin, handed a folder whose head the watcher never reported, or run
   // under aify-env's reporter name.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-sweep-")));
@@ -297,8 +300,8 @@ test("through the plugin: sweeps progress during a held poll, and yield/stop can
   const runChild = async (args) => { runs.push(args); return { code: 0, signal: null, timedOut: false, stopped: false, error: "" }; };
   const plugin = createDashboardPlugin({
     servedElsewhere: async () => other,
-    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: "win32:h",
-    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    name: "aify-dashboard", endpoint, service: { name: "aify-dashboard", endpoint }, machineId: `${process.platform}:h`,
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] })), []),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
   }, { fetch, runChild, runEveryMs: 25, tickMs: 25 });
   t.after(() => plugin.stop());
@@ -361,7 +364,7 @@ test("a refusal that echoes the key back is said without it, from the watch-set 
   assert.match(plain.problems(), /401: this route needs agent authentication/);
 });
 
-test("through the plugin: a sweep kill not confirmed is still said after a yield, a stop and a rebuilt plugin", async (t) => {
+test("through the plugin: a sweep kill not confirmed is still said after a yield, a stop and a rebuilt plugin", { skip: WATCH_LIST_SKIP }, async (t) => {
   // The bug (agent-0000000389, R1 on 4ae0d24): the plugin's one store of kills not confirmed was handed only to the
   // queue client, and a yielding plugin reports only that store, so a sweep's row vanished on the first yield.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "aify-dash-sweep-kill-")));
@@ -378,7 +381,7 @@ test("through the plugin: a sweep kill not confirmed is still said after a yield
   const fetch = async (url) => {
     const at = String(url);
     if (at.endsWith("/host/h/watch-list")) return Response.json({ hostKey: "h", projects: [{ projectId: "p-kill", name: "n", root: { fsNamespace: "windows", path: proj } }] });
-    if (at.endsWith("/host/h/provider/pending")) return Response.json({ hostKey: "h", projects: [] });
+    if (at.endsWith("/provider/pending?waitSeconds=25")) return Response.json({ hostKey: "h", projects: [] });
     if (at.endsWith("/host/h/projects/p-kill/watch-set")) return Response.json({ watchRevision: "r1", items: [{ watchId: "w1" }] });
     if (at.endsWith("/reports/head")) return Response.json({ ok: true, ackedHead: head, cursorRevision: 1 });
     return Response.json({ error: "not here", code: "no_route" }, { status: 404 });
@@ -392,9 +395,9 @@ test("through the plugin: a sweep kill not confirmed is still said after a yield
   };
   let other = false;
   const make = () => createDashboardPlugin({
-    name: "aify-dashboard", endpoint: "http://127.0.0.1:9", service: { name: "aify-dashboard", endpoint: "http://127.0.0.1:9" }, machineId: "win32:h",
+    name: "aify-dashboard", endpoint: "http://127.0.0.1:9", service: { name: "aify-dashboard", endpoint: "http://127.0.0.1:9" }, machineId: `${process.platform}:h`,
     servedElsewhere: async () => other,
-    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] }), "win32"), [], "win32"),
+    watchRoots: async () => grantedRoots(watchRootsFrom(JSON.stringify({ watchRoots: [root] })), []),
     config: () => ({ config: { providerCheckout: checkout }, problem: "" }),
   }, { fetch, runChild, runEveryMs: 25, tickMs: 25 });
   const rows = (plugin) => plugin.state().problems.join("\n");
