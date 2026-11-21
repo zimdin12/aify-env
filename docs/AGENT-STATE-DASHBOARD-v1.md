@@ -85,6 +85,19 @@ agent/lifetime uniqueness or publication ordering/claim rules. Receivers retain 
 alone must not be reported as complete ingest admission. The compatibility envelope above remains useful for the
 older dashboard reader, whose record handling is looser than the current producer schema.
 
+## Publication and contact
+
+Changes to observed agent state can publish without waiting for a heartbeat or a work claim. The
+sender has a 60-second evaluation and full-snapshot backstop, including for quiet hosts, and announces
+`reportEveryMs: 60000` on snapshots, changes and unavailable reports. The interval is a backstop, not
+a guarantee that a receiver accepts a report each time.
+
+Comms derives publisher contact from the last report it accepted and the sender's announced period.
+Three elapsed periods without another accepted report mean stale contact; an absent or invalid
+announcement is `not-reporting`, not a guessed period. An accepted `unavailable` report proves contact,
+not fresh agent data. This is separate from the 30-second claimer heartbeat, which reports host presence
+and can renew held terminals. Neither signal alone proves an agent is offline.
+
 ## Receiver projection policy
 
 This is the shared projection rule, before any service-specific delivery, usage or UI-label overlay. Its one staleness multiple is:

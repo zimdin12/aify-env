@@ -173,12 +173,16 @@ or `keyEnv`) while the endpoint stays the same keeps the running plugin on the k
 with, until aify-env restarts. Rotating the key's value inside the same file or variable is picked up
 without a restart.
 
-**Which services it describes this host to.** A service's plugin can supply an advertisement route, or
-the registry can declare one with `"advertisement": {"path": "/..."}`. When the running plugin's heartbeat
-matches that route and credential reference, its existing 30-second heartbeat carries the host description
-as well. Independent routes keep their standalone beat (`AIFY_ADVERTISE_MS`, default 30 seconds).
-`AIFY_ADVERTISE=0` and `"advertise": false` suppress descriptions, not the plugin's claimer heartbeat.
-An invalid declaration sends no description and is named in `/health` under `advertiseIgnored`.
+**How aify-comms knows this host is present.** The plugin sends a heartbeat every 30 seconds. Current
+comms servers can also use it to renew the terminals this host still holds. Without terminal evidence
+in the reply, the host keeps sending idle terminal output frames. Neither is the agent's state report.
+
+A service's plugin can supply an advertisement route, or the registry can declare one with
+`"advertisement": {"path": "/..."}`. When the route and credential reference match the plugin's heartbeat,
+that beat carries the host description too. Independent routes keep their standalone beat
+(`AIFY_ADVERTISE_MS`, default 30 seconds). `AIFY_ADVERTISE=0` and `"advertise": false` suppress descriptions,
+not the plugin's claimer heartbeat. An invalid declaration sends no description and is named in `/health`
+under `advertiseIgnored`.
 
 **What a TUI refresh reads.** It reads the local daemon, not the registered services. The service rows show
 what the last existing heartbeat or provider wait reported. Run `aify-env doctor` for an explicit probe.
@@ -246,16 +250,16 @@ definition's model through the existing store. They never switch a running agent
   as defaults; a flag or the environment still wins. A missing file is the old behaviour; an invalid
   one, or one defining another harness, refuses the launch (exit 78). A managed start reads no file:
   aify-env hands the launch what it already checked.
-- **Services get a copy, not ownership.** Each service plugin pushes this host's definitions to its
-  service (every minute, and at once after a change it applied), so aify-comms shows them. An edit made
-  in a service to a defined agent becomes a change request; this host claims those every 10 seconds
-  and applies them through the store. A service older than definitions answers 404, which is logged
-  once and reported by the doctor as "does not accept definitions".
+- **Services get a copy, not ownership.** aify-env publishes definitions at startup and after applying
+  a change. Edits and lifecycle requests from aify-comms reach the host through separate claims held
+  open until work arrives. Older services can still answer immediately. A service older than definitions
+  answers 404, which the doctor reports as "does not accept definitions".
 - **Nothing moves until you say so.** An agent with no definition works as before. `agents import`
   without `--write` only prints its plan.
 
 Status is live host state, not definition data: alive is not working. aify-env derives the word from
-process, turn and screen observations; services consume it.
+process, turn and screen observations and publishes changes independently of work claims. See the
+[agent-state contract](docs/AGENT-STATE-DASHBOARD-v1.md#publication-and-contact) for publication and freshness.
 
 ### Dialogs it answers for a managed agent
 
