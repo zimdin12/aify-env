@@ -13,3 +13,9 @@ Every ancestor of a skill destination must be a real directory. If a dotfile man
 `~/.aify/installed-skills.json` records service, skill, harness, approved source artifact/revision/path, destination, and the digest of the tree read back there. The index is separate from the service registry. Updates and removals require the recorded digest to match what is still on disk. Unmanaged or changed skills and linked paths stay in place. Each successful skill placement is recorded before moving on; a failed copy restores its preceding contents when they can be restored without overwriting another writer.
 
 The current slice exercises a toy service. Existing service installers are not replaced, and this contract grants no permission to load a plugin.
+
+## Verify a recorded placement
+
+Call `verifyPlacement({ home, service, skill, harness })` from `aify-env/client/installed-skills`. Pass the absolute host home that owns `.aify`, the registered service name, the declared skill directory name, and the selected client (`claude`, `codex`, or `hermes`). Do not substitute a runtime-specific config home for `home`.
+
+The synchronous result is `{ state, reason }`. `placed` means the recorded tree matches the receipt digest. `changed` means the recorded tree differs or could not safely be read. `absent` means the receipt is missing, invalid or non-unique for this selector, or the recorded destination is missing. The check writes nothing and returns no path or file contents. It verifies the recorded destination, not whether the runtime's current profile discovers the skill.
