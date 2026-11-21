@@ -4,8 +4,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { verifyPlacement } from "aify-env/client/installed-skills";
-import { SkillPlacer } from "../lib/install-skills.mjs";
+import * as installedSkills from "aify-env/client/installed-skills";
+import { SkillPlacer, skillDirectory } from "../lib/install-skills.mjs";
+
+const { verifyPlacement } = installedSkills;
+
+test("the public declaration check uses the installer's grammar", () => {
+  assert.equal(installedSkills.skillDirectory, skillDirectory, "connect must share the installer's declaration check");
+  assert.equal(installedSkills.skillDirectory({ directory: "share/skills" }), "share/skills");
+  for (const declaration of [undefined, "skills", {}, { directory: "../skills" }, { directory: "C:/skills" },
+    { directory: ".agents/skills" }, { directory: "skills/nul.txt" }, { directory: "skills//nested" },
+    { directory: "skills", command: "node" }]) {
+    assert.equal(installedSkills.skillDirectory(declaration), null);
+  }
+});
 
 function fixture(t, { place = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "placement-client-"));

@@ -14,6 +14,10 @@ Every ancestor of a skill destination must be a real directory. If a dotfile man
 
 The current slice exercises a toy service. Existing service installers are not replaced, and this contract grants no permission to load a plugin.
 
+## Validate a declaration
+
+Call `skillDirectory(value)` from `aify-env/client/installed-skills` with the `aifySkills` value. It returns the directory string or `null`, using the same grammar as the installer. This is a syntax check only. It reads no filesystem and does not verify package admission or placement.
+
 ## Verify a recorded placement
 
 Call `verifyPlacement({ home, service, skill, harness })` from `aify-env/client/installed-skills`. Pass the absolute host home that owns `.aify`, the registered service name, the declared skill directory name, and the selected client (`claude`, `codex`, or `hermes`). Do not substitute a runtime-specific config home for `home`.

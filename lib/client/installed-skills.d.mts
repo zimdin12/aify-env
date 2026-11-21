@@ -1,3 +1,5 @@
+export function skillDirectory(value: unknown): string | null;
+
 export function verifyPlacement(query: {
   readonly home: string;
   readonly service: string;
